@@ -30,6 +30,17 @@
           <span class="version">0.1</span>
         </div>
         <nav aria-label="Workspace controls">
+          <details id="file-menu" class="file-menu">
+            <summary>File</summary>
+            <div class="file-actions">
+              <button id="scene-new">New scene</button>
+              <button id="scene-open">Open scene… <kbd>Ctrl+O</kbd></button>
+              <button id="scene-save">Save <kbd>Ctrl+S</kbd></button>
+              <button id="scene-save-as">
+                Save as… <kbd>Ctrl+Shift+S</kbd>
+              </button>
+            </div>
+          </details>
           <button id="demo" title="Add a built-in splat study">Add demo</button>
           <button id="open" class="primary">
             Import splat <span aria-hidden="true">↗</span>
@@ -54,6 +65,7 @@
             <span class="eyebrow">SCENE / 01</span>
             <h2 id="asset-name">Splat study</h2>
             <p id="asset-detail">Preparing scene…</p>
+            <p id="scene-state"></p>
           </div>
           <div class="view-controls">
             <button id="reset" title="Fit the scene to the viewport">
@@ -69,6 +81,7 @@
           </div>
         </main>
         <aside class="inspector" aria-label="Scene and object properties">
+          <p id="file-status" role="status" aria-live="polite"></p>
           <div class="history-tools" role="toolbar" aria-label="Edit history">
             <button id="undo" disabled>↶ Undo</button
             ><button id="redo" disabled>↷ Redo</button>
@@ -113,6 +126,7 @@
       accept=".ply,.spz,.splat,.ksplat,.sog"
       hidden
     />
+    <input id="scene-file" type="file" accept=".msb" hidden />
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

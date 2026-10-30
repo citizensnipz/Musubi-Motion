@@ -26,7 +26,7 @@ Open the local URL printed by Vite. `npm run build` type-checks and builds the a
 - Multiple named objects, a scene outliner, and editable local position, rotation, and scale in the right properties panel.
 - Undo/redo for imports, renaming, numeric edits, and completed gizmo drags. History keeps up to 100 edits without copying splat buffers.
 
-The interface and demo use grayscale; gizmos and the X/Z grid origin lines retain their axis colors. Imported assets retain their source colors. Import splat and Add demo add independent objects to the scene. Scenes are currently session-only; saving and reloading projects is future work.
+The interface and demo use grayscale; gizmos and the X/Z grid origin lines retain their axis colors. Imported assets retain their source colors. Import splat and Add demo add independent objects to the scene. Scenes can be saved and reopened as portable `.msb` files containing their splat assets. Autosave is not implemented.
 
 ## Project direction (future work)
 
@@ -53,7 +53,7 @@ Build on the current Three.js/Spark prototype:
 3. Add one visible per-splat deformation, such as a masked bend or wave. Validate changing orientation and scale as well as position where the deformation requires it.
 4. Inspect overlap sorting, culling bounds, and visual stability while both assets and the camera move. A visually plausible static viewer is insufficient evidence for animated splats.
 5. Measure load-to-visible time, frame-time distribution, and memory where measurable. Record asset size, splat count, resolution, device, browser, and active graphics backend.
-6. Save and reload the scene and timeline.
+6. Add recovery snapshots and efficient project-folder saves for large scenes.
 
 The first milestone is a small, repeatable animated scene with correct overlap and reliable scrubbing. A full editor, custom file format, renderer fork, and training pipeline can wait until that foundation works.
 
@@ -77,7 +77,7 @@ Reviewed October 30, 2026. These document upstream capabilities, not benchmarks 
 
 W: translate. E: rotate. R: scale individual axes, planes, or uniformly with the center handle. Q: hide gizmo.
 Alt + left drag: orbit. Alt + middle drag: pan. Alt + right drag: dolly. Scroll: zoom.
-The grid lies on world Y=0, with red X and blue Z origin lines. Transform edits remain separate from turntable playback. Transforms are currently session-only.
+The grid lies on world Y=0, with red X and blue Z origin lines. Transform edits remain separate from turntable playback. Transforms are included in saved `.msb` scenes.
 
 Selection: click a splat surface or an outliner row to select an object. Drag a rectangle to select objects with splat centers inside; hold Shift to toggle selection. Click empty space or press Escape to clear. Alt-drag navigates without selecting. Properties and gizmos edit one selected object at a time.
 
@@ -86,3 +86,9 @@ Ctrl+Z: undo. Ctrl+Y or Ctrl+Shift+Z: redo. Maya-style Z / Shift+Z also work out
 The scene document follows Maya's transform/shape organization with stable IDs and separate asset references. See [SCENE-ARCHITECTURE.md](SCENE-ARCHITECTURE.md) for the implemented subset and the save/load plan.
 
 Non-uniform scaling uses Spark covariance rendering with extended-precision splats. Procedural buffers are finalized through Spark's public initialization API. Scales stay positive (minimum 0.001). See SCALING-EXPERIMENT.md for validation and limits.
+
+## Scene files
+
+Use **File > New scene / Open scene / Save / Save as**. Ctrl+S saves; Ctrl+Shift+S saves as; Ctrl+O opens (Cmd on macOS). The scene name shows an asterisk for unsaved edits. Save includes object names, IDs, hierarchy, transforms, shape offsets, original splat files, and the viewport camera and timeline position.
+
+Native file pickers allow saving back to the selected file. Other browsers download an `.msb` copy. Opening prepares the complete scene before replacing your work; New/Open prompt before discarding unsaved edits. Undo history starts fresh after opening. Current packages are capped at 512 MiB and are built in memory. See [MSB-FORMAT.md](MSB-FORMAT.md).

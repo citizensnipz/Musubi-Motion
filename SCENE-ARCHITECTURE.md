@@ -60,20 +60,20 @@ Tests use the same alias and inline Zundo so the dependency follows it.
 
 ## Saving and next steps
 
-The document is versioned and JSON-serializable, with a round-trip test. This is
-the metadata foundation, **not a complete saved project**: original imported
-files are retained only in memory, and refresh loses the scene. Save/open and
-autosave are not implemented yet. Maya `.ma` / `.mb` files are unsupported.
+Scenes now save as portable `.msb` ZIP packages containing a versioned scene
+document and original imported asset bytes. New, Open, Save, Save As, an unsaved
+indicator, and discard protection are implemented. Camera and timeline position
+are saved separately from authored scene data. Opening validates the archive and
+prepares all splat meshes before replacing the active scene; it starts fresh undo
+history. See [MSB-FORMAT.md](MSB-FORMAT.md) for the format and limits.
+Autosave and Maya `.ma` / `.mb` compatibility are not implemented.
 
 Recommended next steps:
 
 1. Add validated group/reparent commands, rejecting cycles and updating sibling
    ordering, names, and local/world transform conversions atomically.
-2. Save a project containing the versioned document plus asset bytes keyed by
-   stable asset ID (for example, a ZIP with `scene.json` and `assets/`). Load must
-   validate IDs, references, topology, finite values, supported generators and
-   schema versions before swapping the active scene. Filenames alone cannot
-   identify assets or restore browser file access.
+2. Add local recovery snapshots, then a project-folder workflow for large scenes
+   where saving metadata should not rewrite unchanged assets.
 3. Add animation curves keyed by node ID and channel; evaluate from absolute time
    for reliable seeking. Keep authored channels, animation evaluation, and
    rendering separate. Camera data can then use the same scene identity model.

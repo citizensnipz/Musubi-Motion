@@ -3,8 +3,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
-import { addSplat, transformNodes } from "./scene-document.ts";
+import { addSplat, emptyScene, transformNodes } from "./scene-document.ts";
 import type {
+  SceneDocument,
   AssetRecord,
   SplatShapeNode,
   TransformChannels,
@@ -17,6 +18,14 @@ import {
 } from "./scene-store.ts";
 import { createPropertiesPanel } from "./properties-panel.ts";
 import { makeDemo, prepareSplat } from "./splat-assets.ts";
+import {
+  encodeProject,
+  decodeProject,
+  MAX_PROJECT_BYTES,
+} from "./project-archive.ts";
+import type { EditorSnapshot } from "./project-archive.ts";
+import { pickScene, saveDestination, writeScene } from "./scene-files.ts";
+import type { SceneFileHandle } from "./scene-files.ts";
 
 const element = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -104,6 +113,25 @@ async function start() {
   const runtime = new Map<string, RuntimeObject>();
   const assetFiles = new Map<string, File>();
   let selected = new Set<string>();
+  let sceneName = "Untitled.msb";
+  let sceneHandle: SceneFileHandle | undefined;
+  let savedDocument = JSON.stringify(store.getState().document);
+  const isDirty = () =>
+    JSON.stringify(store.getState().document) !== savedDocument;
+  function updateFileState() {
+    const dirty = isDirty();
+    element("asset-name").textContent = `${sceneName}${dirty ? " *" : ""}`;
+    element("scene-state").textContent = dirty
+      ? "Unsaved changes"
+      : "No unsaved changes";
+    document.title = `${dirty ? "* " : ""}${sceneName} — Musubi Motion`;
+  }
+  window.addEventListener("beforeunload", (event) => {
+    if (isDirty()) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
   let loading = false,
     playing = false,
     time = 0,
@@ -118,7 +146,6 @@ async function start() {
   } as const;
   type Mode = (typeof modes)[keyof typeof modes];
   let currentMode: Mode = "select";
-
   // Capture runs before OrbitControls and TransformControls pointer listeners.
   webgl.domElement.addEventListener(
     "pointerdown",
@@ -297,7 +324,7 @@ async function start() {
       }
     }
     const nodes = transformNodes(doc);
-    element("asset-name").textContent = "Scene";
+    updateFileState();
     const count = nodes.reduce(
       (sum, node) => sum + (runtime.get(node.id)?.count ?? 0),
       0,
@@ -311,6 +338,9 @@ async function start() {
     refreshSelection();
   }
   function updateHistoryButtons() {
+    for (const id of ["scene-new", "scene-open", "scene-save", "scene-save-as"])
+      element<HTMLButtonElement>(id).disabled = loading || !!dragId;
+    panelHost.inert = loading;
     const history = store.temporal.getState();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
@@ -337,9 +367,13 @@ async function start() {
         object.box.geometry.dispose();
         (object.box.material as THREE.Material).dispose();
         object.mesh.dispose();
-        assetFiles.delete(object.assetId);
         runtime.delete(id);
       }
+    const retainedAssets = new Set(
+      docs.flatMap((doc) => (doc ? Object.keys(doc.assets) : [])),
+    );
+    for (const id of assetFiles.keys())
+      if (!retainedAssets.has(id)) assetFiles.delete(id);
   }
   store.subscribe(() => {
     syncScene();
@@ -395,7 +429,6 @@ async function start() {
     transform.pointerUp(null);
     syncScene();
   }
-
   grid = new THREE.GridHelper(20, 40, 0x888888, 0x888888);
   const materials = Array.isArray(grid.material)
     ? grid.material
@@ -459,7 +492,6 @@ async function start() {
     camera.updateProjectionMatrix();
   }).observe(viewport);
   camera.aspect = viewport.clientWidth / Math.max(1, viewport.clientHeight);
-
   const marquee = document.createElement("div");
   marquee.className = "selection-marquee";
   marquee.hidden = true;
@@ -579,6 +611,19 @@ async function start() {
     if (event.key === "Alt" && !dragId) refreshGizmo();
   });
   window.addEventListener("keydown", (event) => {
+    if (
+      !event.altKey &&
+      (event.ctrlKey || event.metaKey) &&
+      ["s", "o"].includes(event.key.toLowerCase())
+    ) {
+      event.preventDefault();
+      if (event.repeat) return;
+      if (document.activeElement instanceof HTMLInputElement)
+        document.activeElement.blur();
+      if (event.key.toLowerCase() === "s") void saveProject(event.shiftKey);
+      else void openProject();
+      return;
+    }
     const editing =
       event.target instanceof HTMLElement &&
       (event.target.matches("input,textarea,select") ||
@@ -627,6 +672,227 @@ async function start() {
     element<HTMLOutputElement>("time").value =
       `${time.toFixed(2).padStart(5, "0")} / 12.00`;
   }
+  const sceneInput = element<HTMLInputElement>("scene-file");
+  function closeFileMenu() {
+    element<HTMLDetailsElement>("file-menu").open = false;
+  }
+  function discardChanges() {
+    return (
+      !isDirty() ||
+      window.confirm(
+        "Discard unsaved changes? Cancel to return and save your scene first.",
+      )
+    );
+  }
+  function busy(value: boolean, message = "") {
+    loading = value;
+    if (value) {
+      setPlaying(false);
+      cancelSelection();
+    }
+    for (const id of ["open", "demo"])
+      element<HTMLButtonElement>(id).disabled = value;
+    notice.textContent = message;
+    syncScene();
+    updateHistoryButtons();
+  }
+  function disposeObject(object: RuntimeObject) {
+    object.root.removeFromParent();
+    object.box.removeFromParent();
+    object.box.geometry.dispose();
+    (object.box.material as THREE.Material).dispose();
+    object.mesh.dispose();
+  }
+  function replaceScene(
+    doc: SceneDocument,
+    objects: Map<string, RuntimeObject>,
+    files: Map<string, File>,
+    name: string,
+    handle?: SceneFileHandle,
+  ) {
+    transform.detach();
+    selected.clear();
+    const previousObjects = [...runtime.values()];
+    runtime.clear();
+    assetFiles.clear();
+    for (const [id, object] of objects) {
+      runtime.set(id, object);
+      world.add(object.box);
+    }
+    for (const [id, file] of files) assetFiles.set(id, file);
+    sceneName = name;
+    sceneHandle = handle;
+    savedDocument = JSON.stringify(doc);
+    store.temporal.getState().pause();
+    store.setState({ document: doc, editLabel: "Open scene" });
+    store.temporal.getState().resume();
+    store.temporal.getState().clear();
+    previousObjects.forEach(disposeObject);
+    time = 0;
+    updateTime();
+  }
+  function editorSnapshot(): EditorSnapshot {
+    return {
+      camera: {
+        position: camera.position.toArray() as Vec3,
+        target: controls.target.toArray() as Vec3,
+        fov: camera.fov,
+        near: camera.near,
+        far: camera.far,
+      },
+      time,
+    };
+  }
+  function restoreEditor(editor: EditorSnapshot) {
+    // Flush residual orbit damping before applying the saved view.
+    controls.enableDamping = false;
+    controls.update();
+    camera.position.fromArray(editor.camera.position);
+    controls.target.fromArray(editor.camera.target);
+    camera.fov = editor.camera.fov;
+    camera.near = editor.camera.near;
+    camera.far = editor.camera.far;
+    controls.minDistance = 0.00001;
+    controls.maxDistance = Infinity;
+    camera.updateProjectionMatrix();
+    controls.update();
+    controls.enableDamping = true;
+    time = editor.time;
+    updateTime();
+  }
+  async function saveProject(saveAs = false) {
+    if (loading || dragId) return;
+    closeFileMenu();
+    busy(true);
+    try {
+      // Request the destination before asynchronous packing so browser user activation is retained.
+      const destination = await saveDestination(
+        sceneName,
+        saveAs ? undefined : sceneHandle,
+      );
+      if (!destination) return;
+      notice.textContent = "Saving scene…";
+      const doc = store.getState().document;
+      const bytes = await encodeProject(doc, assetFiles, editorSnapshot());
+      await writeScene(bytes, destination);
+      sceneName = destination.name;
+      sceneHandle = destination.handle;
+      savedDocument = JSON.stringify(doc);
+      element("file-status").textContent = destination.handle
+        ? "Scene saved"
+        : "Scene download started";
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        element("file-status").textContent =
+          `Save failed: ${error instanceof Error ? error.message : "Could not write file."}`;
+      }
+    } finally {
+      busy(false);
+    }
+  }
+  async function loadProject(file: File, handle?: SceneFileHandle) {
+    if (loading || dragId || !discardChanges()) return;
+    busy(true, "Opening scene…");
+    const staged = new Map<string, RuntimeObject>();
+    let committed = false;
+    try {
+      if (file.size > MAX_PROJECT_BYTES)
+        throw new Error("This version supports projects up to 512 MiB.");
+      const project = await decodeProject(
+        new Uint8Array(await file.arrayBuffer()),
+      );
+      for (const node of transformNodes(project.scene)) {
+        const shape = Object.values(project.scene.nodes).find(
+          (n): n is SplatShapeNode =>
+            n.type === "splatShape" && n.parentId === node.id,
+        )!;
+        const asset = project.scene.assets[shape.assetId];
+        const mesh =
+          asset.kind === "procedural"
+            ? makeDemo()
+            : new SplatMesh({
+                extSplats: true,
+                covSplats: true,
+                fileBytes: await project.files.get(asset.id)!.arrayBuffer(),
+                fileName: asset.fileName,
+              });
+        try {
+          const data = await prepareSplat(mesh);
+          const root = new THREE.Group(),
+            preview = new THREE.Group(),
+            box = new THREE.Box3Helper(new THREE.Box3(), 0x999999);
+          preview.add(mesh);
+          root.add(preview);
+          box.visible = false;
+          staged.set(node.id, {
+            ...data,
+            root,
+            preview,
+            mesh,
+            box,
+            assetId: asset.id,
+          });
+        } catch (error) {
+          mesh.dispose();
+          throw error;
+        }
+      }
+      replaceScene(project.scene, staged, project.files, file.name, handle);
+      committed = true;
+      restoreEditor(project.editor);
+      element("file-status").textContent = "Scene opened";
+    } catch (error) {
+      element("file-status").textContent =
+        `Open failed: ${error instanceof Error ? error.message : "Invalid scene."}`;
+    } finally {
+      if (!committed) staged.forEach(disposeObject);
+      busy(false);
+    }
+  }
+  async function openProject() {
+    if (loading || dragId) return;
+    closeFileMenu();
+    try {
+      const picked = await pickScene();
+      if (picked) await loadProject(picked.file, picked.handle);
+      else sceneInput.click();
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError"))
+        element("file-status").textContent =
+          `Open failed: ${error instanceof Error ? error.message : "Could not read file."}`;
+    }
+  }
+  element("scene-new").addEventListener("click", () => {
+    if (loading || dragId || !discardChanges()) return;
+    closeFileMenu();
+    setPlaying(false);
+    cancelSelection();
+    replaceScene(emptyScene(), new Map(), new Map(), "Untitled.msb");
+    restoreEditor({
+      camera: {
+        position: [3, 2, 8],
+        target: [0, 0, 0],
+        fov: 42,
+        near: 0.01,
+        far: 1000,
+      },
+      time: 0,
+    });
+    syncScene();
+    updateHistoryButtons();
+    element("file-status").textContent = "New scene";
+  });
+  element("scene-open").addEventListener("click", () => void openProject());
+  element("scene-save").addEventListener("click", () => void saveProject());
+  element("scene-save-as").addEventListener(
+    "click",
+    () => void saveProject(true),
+  );
+  sceneInput.addEventListener("change", () => {
+    const file = sceneInput.files?.[0];
+    sceneInput.value = "";
+    if (file) void loadProject(file);
+  });
   async function importObject(
     create: () => SplatMesh | Promise<SplatMesh>,
     name: string,
