@@ -4,9 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#171717" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="512x512"
+      href="/musubi-logo-512.png"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta
       name="description"
-      content="Musubi Motion — a minimal Gaussian splat animation workspace powered by Three.js and Spark."
+      content="Musubi Motion — a monochrome Gaussian splat animation workspace."
     />
     <title>Musubi Motion</title>
     <script>
@@ -27,99 +34,250 @@
             <path d="M4 16V8l8 8V8l8 8V8" />
           </svg>
           <h1>Musubi <span>Motion</span></h1>
-          <span class="version">0.1</span>
         </div>
         <nav aria-label="Workspace controls">
-          <details id="file-menu" class="file-menu">
-            <summary>File</summary>
-            <div class="file-actions">
-              <button id="scene-new">New scene</button>
-              <button id="scene-open">Open scene… <kbd>Ctrl+O</kbd></button>
-              <button id="scene-save">Save <kbd>Ctrl+S</kbd></button>
-              <button id="scene-save-as">
-                Save as… <kbd>Ctrl+Shift+S</kbd>
-              </button>
-            </div>
-          </details>
-          <button id="demo" title="Add a built-in splat study">Add demo</button>
-          <button id="open" class="primary">
-            Import splat <span aria-hidden="true">↗</span>
-          </button>
-          <span class="divider"></span>
-          <button
-            id="theme"
-            class="theme-button"
-            aria-label="Switch to light theme"
-            title="Switch theme"
+          <wa-dropdown id="file-menu" size="s" placement="bottom-start">
+            <wa-button
+              slot="trigger"
+              size="s"
+              appearance="plain"
+              variant="neutral"
+              >File<span slot="end" data-icon="chevron"></span
+            ></wa-button>
+            <wa-dropdown-item id="scene-new"
+              ><span slot="icon" data-icon="new"></span>New
+              scene</wa-dropdown-item
+            >
+            <wa-dropdown-item id="scene-open"
+              ><span slot="icon" data-icon="open"></span>Open scene…<kbd
+                slot="details"
+                >Ctrl+O</kbd
+              ></wa-dropdown-item
+            >
+            <wa-dropdown-item id="scene-save"
+              ><span slot="icon" data-icon="save"></span>Save<kbd slot="details"
+                >Ctrl+S</kbd
+              ></wa-dropdown-item
+            >
+            <wa-dropdown-item id="scene-save-as"
+              ><span slot="icon" data-icon="saveAs"></span>Save as…<kbd
+                slot="details"
+                >Ctrl+Shift+S</kbd
+              ></wa-dropdown-item
+            >
+          </wa-dropdown>
+          <wa-dropdown id="edit-menu" size="s" placement="bottom-start">
+            <wa-button
+              slot="trigger"
+              size="s"
+              appearance="plain"
+              variant="neutral"
+              >Edit<span slot="end" data-icon="chevron"></span
+            ></wa-button>
+            <wa-dropdown-item id="undo" disabled
+              ><span slot="icon" data-icon="undo"></span>Undo<kbd slot="details"
+                >Ctrl+Z</kbd
+              ></wa-dropdown-item
+            >
+            <wa-dropdown-item id="redo" disabled
+              ><span slot="icon" data-icon="redo"></span>Redo<kbd slot="details"
+                >Ctrl+Y / Ctrl+Shift+Z</kbd
+              ></wa-dropdown-item
+            >
+          </wa-dropdown>
+          <span class="nav-spacer"></span>
+          <wa-button
+            id="demo"
+            aria-label="Add demo"
+            size="s"
+            appearance="plain"
+            variant="neutral"
+            ><span slot="start" data-icon="add"></span
+            ><span class="action-label">Add demo</span></wa-button
           >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <circle cx="10" cy="10" r="6" />
-              <path d="M10 4a6 6 0 0 1 0 12Z" fill="currentColor" />
-            </svg>
-          </button>
+          <wa-button
+            id="open"
+            aria-label="Import splat"
+            size="s"
+            appearance="outlined"
+            variant="neutral"
+            ><span slot="start" data-icon="import"></span
+            ><span class="action-label">Import splat</span></wa-button
+          >
+          <wa-button
+            id="theme"
+            size="s"
+            appearance="plain"
+            variant="neutral"
+            aria-label="Switch to light theme"
+          ></wa-button>
+          <wa-tooltip for="demo">Add the built-in splat study</wa-tooltip
+          ><wa-tooltip for="open">Import a splat file</wa-tooltip
+          ><wa-tooltip for="theme">Toggle light / dark theme</wa-tooltip>
         </nav>
       </header>
-      <div class="workspace">
-        <main id="viewport" aria-label="3D splat viewport">
-          <div class="scene-label">
-            <span class="eyebrow">SCENE / 01</span>
-            <h2 id="asset-name">Splat study</h2>
-            <p id="asset-detail">Preparing scene…</p>
-            <p id="scene-state"></p>
-          </div>
-          <div class="view-controls">
-            <button id="reset" title="Fit the scene to the viewport">
-              Reset view
-            </button>
-          </div>
-          <div id="notice" role="status" aria-live="polite"></div>
-          <div class="viewport-footer">
-            <span
-              >Alt + left: orbit / middle: pan / right: dolly
-              <span class="dot">·</span> Scroll to zoom</span
-            ><span>THREE.JS / SPARK <span class="dot">·</span> WEBGL2</span>
-          </div>
-        </main>
-        <aside class="inspector" aria-label="Scene and object properties">
-          <p id="file-status" role="status" aria-live="polite"></p>
-          <div class="history-tools" role="toolbar" aria-label="Edit history">
-            <button id="undo" disabled>↶ Undo</button
-            ><button id="redo" disabled>↷ Redo</button>
-          </div>
-          <div id="properties"></div>
-        </aside>
+      <div id="workspace" aria-label="Editor panels"></div>
+      <div class="statusbar">
+        <span id="file-status" role="status" aria-live="polite"></span
+        ><span>THREE.JS / SPARK · WEBGL2</span>
       </div>
-      <footer>
-        <div class="transport">
-          <button id="play" class="play" aria-label="Play animation" disabled>
-            ▶</button
-          ><button
-            id="rewind"
-            aria-label="Rewind animation"
-            title="Rewind"
-            disabled
+    </div>
+    <div id="panel-staging" hidden>
+      <main id="viewport" aria-label="3D splat viewport">
+        <div id="tool-palette" aria-label="Floating transform controls">
+          <button
+            id="palette-drag"
+            type="button"
+            aria-label="Move tool panel"
+            aria-disabled="true"
+            title="Unlock to move tool panel"
           >
-            ↶</button
+            <span data-icon="grip"></span>
+          </button>
+          <div
+            id="transform-tools"
+            class="transform-tools"
+            role="toolbar"
+            aria-label="Transform tools"
+            aria-orientation="vertical"
+          ></div>
+          <wa-button
+            id="palette-lock"
+            size="s"
+            appearance="plain"
+            variant="neutral"
+            aria-label="Unlock tool panel"
+            aria-pressed="true"
+            ><span data-icon="lock"></span
+          ></wa-button>
+          <wa-tooltip for="palette-lock"
+            >Lock / unlock panel position</wa-tooltip
+          >
+        </div>
+        <div class="scene-label">
+          <h2 id="asset-name">Untitled.msb</h2>
+          <p id="asset-detail">Preparing scene…</p>
+          <p id="scene-state"></p>
+        </div>
+        <div class="view-controls">
+          <wa-button
+            id="reset"
+            size="s"
+            appearance="outlined"
+            variant="neutral"
+            aria-label="Fit view"
+            ><span data-icon="fit"></span></wa-button
+          ><wa-tooltip for="reset">Fit the scene or selection</wa-tooltip>
+        </div>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <div class="viewport-footer">
+          <span
+            >Alt + left: orbit / middle: pan / right: dolly · Scroll: zoom</span
+          >
+        </div>
+      </main>
+      <section
+        id="outliner-panel"
+        class="panel-content"
+        aria-label="Scene objects"
+      ></section>
+      <section
+        id="properties"
+        class="panel-content"
+        aria-label="Object properties"
+      ></section>
+      <section id="timeline-panel" aria-label="Animation timeline">
+        <div class="transport">
+          <wa-button
+            id="rewind"
+            size="s"
+            appearance="plain"
+            variant="neutral"
+            aria-label="Rewind animation"
+            disabled
+            ><span data-icon="rewind"></span></wa-button
+          ><wa-button
+            id="play"
+            size="s"
+            appearance="filled"
+            variant="neutral"
+            aria-label="Play animation"
+            disabled
+            ><span data-icon="play"></span></wa-button
           ><span class="animation-label">Turntable</span>
         </div>
-        <label class="timeline"
-          ><span class="sr-only">Animation time in seconds</span
-          ><input
+        <wa-tooltip for="rewind">Rewind animation</wa-tooltip
+        ><wa-tooltip for="play">Play / pause animation</wa-tooltip>
+        <div class="timeline">
+          <wa-slider
             id="timeline"
-            type="range"
             min="0"
             max="12"
             step="0.01"
             value="0"
+            label="Animation time in seconds"
             disabled
-          /><span class="ticks" aria-hidden="true"
-            ><span>0s</span><span>3s</span><span>6s</span><span>9s</span
-            ><span>12s</span></span
-          ></label
-        >
+          ></wa-slider>
+          <div class="ticks" aria-hidden="true">
+            <span>0s</span><span>3s</span><span>6s</span><span>9s</span
+            ><span>12s</span>
+          </div>
+        </div>
         <output id="time" for="timeline">00.00 / 12.00</output>
-      </footer>
+      </section>
     </div>
+    <wa-dialog id="discard-dialog" label="Unsaved changes">
+      <p>
+        Discard unsaved changes to this scene? Cancel to return and save your
+        work first.
+      </p>
+      <wa-button
+        slot="footer"
+        id="discard-cancel"
+        size="s"
+        variant="neutral"
+        appearance="outlined"
+        autofocus
+        >Cancel</wa-button
+      >
+      <wa-button
+        slot="footer"
+        id="discard-confirm"
+        size="s"
+        variant="neutral"
+        appearance="filled"
+        >Discard changes</wa-button
+      >
+    </wa-dialog>
+    <wa-dialog id="filename-dialog" label="Save scene as">
+      <wa-input
+        id="scene-filename"
+        label="Filename"
+        size="s"
+        value="Untitled.msb"
+        autocomplete="off"
+        spellcheck="false"
+      ></wa-input>
+      <p class="property-note">
+        The .msb file includes the scene and its splat assets.
+      </p>
+      <wa-button
+        slot="footer"
+        id="filename-cancel"
+        size="s"
+        variant="neutral"
+        appearance="outlined"
+        >Cancel</wa-button
+      >
+      <wa-button
+        slot="footer"
+        id="filename-save"
+        size="s"
+        variant="neutral"
+        appearance="filled"
+        >Save</wa-button
+      >
+    </wa-dialog>
     <input
       id="file"
       type="file"

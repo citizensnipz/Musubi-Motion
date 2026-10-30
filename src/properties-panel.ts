@@ -1,7 +1,10 @@
 import type { TransformChannels, TransformNode } from "./scene-document.ts";
+import type WaInput from "@awesome.me/webawesome/dist/components/input/input.js";
+import { icon } from "./ui.ts";
 
 export function createPropertiesPanel(
   host: HTMLElement,
+  outlinerHost: HTMLElement,
   handlers: {
     select: (id: string, additive: boolean) => void;
     rename: (id: string, name: string) => void;
@@ -13,60 +16,71 @@ export function createPropertiesPanel(
     ) => void;
   },
 ) {
-  host.innerHTML = `
-    <section class="outliner-section"><div class="panel-heading"><h2>Scene</h2><span id="object-count">0 objects</span></div><div id="outliner" role="group" aria-label="Scene objects"></div></section>
-    <section class="properties-section"><div class="panel-heading"><h2>Properties</h2><span>Local</span></div>
-    <p id="properties-empty">Select an object to inspect its properties.</p>
-    <div id="properties-fields" hidden><label class="name-field">Name<input id="object-name" type="text" maxlength="80" autocomplete="off" spellcheck="false" /></label>
-    <div class="channel-fields"></div><p class="property-note">Rotation in degrees · XYZ order</p><details class="node-details"><summary>Object details</summary><dl><dt>Type</dt><dd>Transform / Gaussian splat shape</dd><dt>ID</dt><dd id="object-id"></dd><dt>Shape</dt><dd id="object-shape"></dd></dl></details></div></section>`;
-  const outliner = host.querySelector<HTMLDivElement>("#outliner")!;
-  const empty = host.querySelector<HTMLParagraphElement>("#properties-empty")!;
-  const fields = host.querySelector<HTMLDivElement>("#properties-fields")!;
-  const name = host.querySelector<HTMLInputElement>("#object-name")!;
+  outlinerHost.innerHTML =
+    '<div class="panel-heading"><span>Scene objects</span><span id="object-count">0 objects</span></div><div id="outliner" role="group" aria-label="Scene objects"></div>';
+  host.innerHTML = `<div class="panel-heading"><span>Transform</span><span>Local</span></div><p id="properties-empty">Select an object to inspect its properties.</p>
+  <div id="properties-fields" hidden><wa-input id="object-name" label="Name" size="s" maxlength="80" autocomplete="off" spellcheck="false"></wa-input><div class="channel-fields"></div>
+  <p class="property-note">Rotation in degrees · XYZ order</p><wa-details class="node-details" summary="Object details"><dl><dt>Type</dt><dd>Transform / Gaussian splat shape</dd><dt>ID</dt><dd id="object-id"></dd><dt>Shape</dt><dd id="object-shape"></dd></dl></wa-details></div>`;
+  const outliner = outlinerHost.querySelector<HTMLDivElement>("#outliner")!,
+    empty = host.querySelector<HTMLElement>("#properties-empty")!,
+    fields = host.querySelector<HTMLElement>("#properties-fields")!,
+    name = host.querySelector<WaInput>("#object-name")!;
+  let activeId: string | undefined;
   const inputs: Array<{
-    input: HTMLInputElement;
+    input: WaInput;
     channel: keyof TransformChannels;
     axis: number;
   }> = [];
-  let activeId: string | undefined;
-  const channelHost = host.querySelector<HTMLDivElement>(".channel-fields")!;
   for (const channel of ["position", "rotation", "scale"] as const) {
-    const group = document.createElement("fieldset");
-    const legend = document.createElement("legend");
+    const group = document.createElement("fieldset"),
+      legend = document.createElement("legend");
     legend.textContent = channel[0].toUpperCase() + channel.slice(1);
     group.append(legend);
     for (const [axis, letter] of ["X", "Y", "Z"].entries()) {
-      const label = document.createElement("label");
-      label.textContent = letter;
-      const input = document.createElement("input");
+      const input = document.createElement("wa-input");
       input.type = "number";
-      input.step = channel === "rotation" ? "1" : "0.1";
-      if (channel === "scale") input.min = "0.001";
-      input.setAttribute("aria-label", `${legend.textContent} ${letter}`);
+      input.size = "s";
+      input.withoutSpinButtons = true;
+      input.step = channel === "rotation" ? 1 : 0.1;
+      if (channel === "scale") input.min = 0.001;
+      input.label = `${legend.textContent} ${letter}`;
+      // A short visible axis label and a full accessible label share the same label slot.
+      const label = document.createElement("span");
+      label.slot = "label";
+      label.innerHTML = `<span aria-hidden="true">${letter}</span><span class="sr-only">${legend.textContent} ${letter}</span>`;
+      input.append(label);
       input.dataset.channel = channel;
       input.dataset.axis = String(axis);
       input.addEventListener("change", () => {
-        if (!activeId) return;
-        if (input.value !== "" && Number.isFinite(input.valueAsNumber)) {
-          handlers.channel(activeId, channel, axis, input.valueAsNumber);
-        }
+        if (
+          activeId &&
+          input.value !== null &&
+          input.value.trim() !== "" &&
+          Number.isFinite(Number(input.value))
+        )
+          handlers.channel(activeId, channel, axis, Number(input.value));
         input.blur();
       });
       input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") input.blur();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        }
       });
-      label.append(input);
-      group.append(label);
       inputs.push({ input, channel, axis });
+      group.append(input);
     }
-    channelHost.append(group);
+    host.querySelector(".channel-fields")!.append(group);
   }
   name.addEventListener("change", () => {
-    if (activeId) handlers.rename(activeId, name.value);
+    if (activeId) handlers.rename(activeId, name.value ?? "");
     name.blur();
   });
   name.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") name.blur();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      name.blur();
+    }
   });
   let lastList = "";
   return {
@@ -77,23 +91,29 @@ export function createPropertiesPanel(
       preview?: TransformChannels,
     ) {
       const single =
-        selected.size === 1
-          ? nodes.find((node) => selected.has(node.id))
-          : undefined;
+        selected.size === 1 ? nodes.find((n) => selected.has(n.id)) : undefined;
       activeId = single?.id;
       const listKey = JSON.stringify(
-        nodes.map((node) => [node.id, node.name, selected.has(node.id)]),
+        nodes.map((n) => [n.id, n.name, selected.has(n.id)]),
       );
-      if (listKey !== lastList) {
+      if (lastList !== listKey) {
         lastList = listKey;
         outliner.replaceChildren();
         for (const node of nodes) {
-          const button = document.createElement("button");
+          const button = document.createElement("wa-button");
+          button.size = "s";
+          button.appearance = "plain";
+          button.variant = "neutral";
           button.className = "object-row";
-          button.textContent = node.name;
           button.dataset.objectId = node.id;
           button.setAttribute("aria-pressed", String(selected.has(node.id)));
-          button.title = `${node.name} — splat transform`;
+          const symbol = document.createElement("span");
+          symbol.slot = "start";
+          symbol.append(icon("object"));
+          const label = document.createElement("span");
+          label.className = "object-name";
+          label.textContent = node.name;
+          button.append(symbol, label);
           button.addEventListener("click", (event) =>
             handlers.select(
               node.id,
@@ -103,7 +123,7 @@ export function createPropertiesPanel(
           outliner.append(button);
         }
       }
-      host.querySelector("#object-count")!.textContent =
+      outlinerHost.querySelector("#object-count")!.textContent =
         `${nodes.length} object${nodes.length === 1 ? "" : "s"}`;
       fields.hidden = !single;
       empty.hidden = !!single;
@@ -114,10 +134,9 @@ export function createPropertiesPanel(
       if (!single) return;
       if (document.activeElement !== name) name.value = single.name;
       const channels = preview ?? single;
-      for (const { input, channel, axis } of inputs) {
+      for (const { input, channel, axis } of inputs)
         if (document.activeElement !== input)
           input.value = String(Number(channels[channel][axis].toFixed(5)));
-      }
       host.querySelector("#object-id")!.textContent = single.id;
       host.querySelector("#object-shape")!.textContent = shapeName ?? "—";
     },

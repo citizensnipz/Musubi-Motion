@@ -1,4 +1,4 @@
-import "./style.css";
+import type { WaSelectEvent } from "@awesome.me/webawesome/dist/events/select.js";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
@@ -27,17 +27,36 @@ import type { EditorSnapshot } from "./project-archive.ts";
 import { pickScene, saveDestination, writeScene } from "./scene-files.ts";
 import type { SceneFileHandle } from "./scene-files.ts";
 
+import { mountToolPalette } from "./tool-palette.ts";
+import type WaDropdownItem from "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
+import { mountWorkspace } from "./workspace.ts";
+import {
+  hydrateIcons,
+  buttonContent,
+  askDiscard,
+  askFilename,
+  isEditing,
+  blurEditor,
+  dialogOpen,
+} from "./ui.ts";
+import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
+import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.js";
+import type WaDropdown from "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
+import "./style.css";
+mountWorkspace();
+hydrateIcons();
+mountToolPalette();
 const element = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const viewport = element<HTMLDivElement>("viewport");
 const notice = element<HTMLDivElement>("notice");
-const play = element<HTMLButtonElement>("play");
-const rewind = element<HTMLButtonElement>("rewind");
-const timeline = element<HTMLInputElement>("timeline");
-const theme = element<HTMLButtonElement>("theme");
+const play = element<WaButton>("play");
+const rewind = element<WaButton>("rewind");
+const timeline = element<WaSlider>("timeline");
+const theme = element<WaButton>("theme");
 const fileInput = element<HTMLInputElement>("file");
-const undoButton = element<HTMLButtonElement>("undo");
-const redoButton = element<HTMLButtonElement>("redo");
+const undoButton = element<WaDropdownItem>("undo");
+const redoButton = element<WaDropdownItem>("redo");
 const duration = 12;
 let scene: THREE.Scene | undefined;
 let renderer: THREE.WebGLRenderer | undefined;
@@ -45,6 +64,9 @@ let grid: THREE.GridHelper | undefined;
 
 function applyTheme() {
   const dark = document.documentElement.dataset.theme !== "light";
+  document.documentElement.classList.toggle("wa-dark", dark);
+  document.documentElement.classList.toggle("wa-light", !dark);
+  buttonContent(theme, dark ? "sun" : "moon");
   theme.setAttribute(
     "aria-label",
     `Switch to ${dark ? "light" : "dark"} theme`,
@@ -95,7 +117,7 @@ async function start() {
       "WebGL2 is unavailable. Try a browser with hardware acceleration enabled.";
     element("asset-detail").textContent = "Renderer unavailable";
     for (const id of ["open", "demo", "reset"])
-      element<HTMLButtonElement>(id).disabled = true;
+      element<WaButton>(id).disabled = true;
     return;
   }
   const webgl = renderer;
@@ -178,11 +200,11 @@ async function start() {
     child.renderOrder = 1000000;
   });
   world.add(transform.getHelper());
-  const toolbar = document.createElement("div");
+  const toolbar = element<HTMLDivElement>("transform-tools");
   toolbar.className = "transform-tools";
   toolbar.setAttribute("role", "toolbar");
   toolbar.setAttribute("aria-label", "Transform tools");
-  viewport.append(toolbar);
+
   function singleId() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
@@ -204,7 +226,7 @@ async function start() {
     currentMode = mode;
     refreshGizmo();
     toolbar
-      .querySelectorAll("button")
+      .querySelectorAll("wa-button")
       .forEach((button) =>
         button.setAttribute(
           "aria-pressed",
@@ -213,8 +235,14 @@ async function start() {
       );
   }
   for (const [key, mode] of Object.entries(modes)) {
-    const button = document.createElement("button");
-    button.textContent = `${mode[0].toUpperCase() + mode.slice(1)} · ${key.toUpperCase()}`;
+    const button = document.createElement("wa-button");
+    button.size = "s";
+    button.variant = "neutral";
+    button.appearance = "plain";
+    buttonContent(button, mode);
+    button.setAttribute("aria-label", mode[0].toUpperCase() + mode.slice(1));
+    button.setAttribute("aria-keyshortcuts", key.toUpperCase());
+    button.id = "tool-" + mode;
     button.dataset.mode = mode;
     button.title =
       mode === "scale"
@@ -222,6 +250,10 @@ async function start() {
         : mode;
     button.addEventListener("click", () => choose(mode));
     toolbar.append(button);
+    const tooltip = document.createElement("wa-tooltip");
+    tooltip.setAttribute("for", button.id);
+    tooltip.textContent = `${mode[0].toUpperCase() + mode.slice(1)} · ${key.toUpperCase()}`;
+    toolbar.append(tooltip);
   }
   const selectionLabel = document.createElement("span");
   selectionLabel.className = "selection-label";
@@ -237,7 +269,7 @@ async function start() {
     };
   }
   const panelHost = element<HTMLElement>("properties");
-  const panel = createPropertiesPanel(panelHost, {
+  const panel = createPropertiesPanel(panelHost, element("outliner-panel"), {
     select(id, additive) {
       if (!dragId && !loading) selectObjects([id], additive);
     },
@@ -339,8 +371,9 @@ async function start() {
   }
   function updateHistoryButtons() {
     for (const id of ["scene-new", "scene-open", "scene-save", "scene-save-as"])
-      element<HTMLButtonElement>(id).disabled = loading || !!dragId;
+      element<WaButton>(id).disabled = loading || !!dragId;
     panelHost.inert = loading;
+    element("outliner-panel").inert = loading;
     const history = store.temporal.getState();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
@@ -391,8 +424,10 @@ async function start() {
     else history.undo();
     updateHistoryButtons();
   }
-  undoButton.addEventListener("click", () => historyAction(false));
-  redoButton.addEventListener("click", () => historyAction(true));
+  element("edit-menu").addEventListener("wa-select", (event) => {
+    const id = (event as WaSelectEvent).detail.item.id;
+    if (id === "undo" || id === "redo") historyAction(id === "redo");
+  });
   transform.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value;
     if (event.value) {
@@ -487,6 +522,7 @@ async function start() {
   }
   new ResizeObserver(() => {
     const { width, height } = viewport.getBoundingClientRect();
+    if (width <= 0 || height <= 0) return;
     webgl.setSize(width, height);
     camera.aspect = width / Math.max(1, height);
     camera.updateProjectionMatrix();
@@ -611,6 +647,7 @@ async function start() {
     if (event.key === "Alt" && !dragId) refreshGizmo();
   });
   window.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || dialogOpen()) return;
     if (
       !event.altKey &&
       (event.ctrlKey || event.metaKey) &&
@@ -618,16 +655,17 @@ async function start() {
     ) {
       event.preventDefault();
       if (event.repeat) return;
-      if (document.activeElement instanceof HTMLInputElement)
-        document.activeElement.blur();
+      blurEditor();
       if (event.key.toLowerCase() === "s") void saveProject(event.shiftKey);
       else void openProject();
       return;
     }
-    const editing =
-      event.target instanceof HTMLElement &&
-      (event.target.matches("input,textarea,select") ||
-        event.target.isContentEditable);
+    if (
+      element<WaDropdown>("file-menu").open ||
+      element<WaDropdown>("edit-menu").open
+    )
+      return;
+    const editing = isEditing(event);
     if (editing) return; // Preserve native text editing undo inside fields.
     const key = event.key.toLowerCase();
     if (
@@ -658,7 +696,7 @@ async function start() {
   });
   function setPlaying(value: boolean) {
     playing = value;
-    play.textContent = value ? "Ⅱ" : "▶";
+    buttonContent(play, value ? "pause" : "play");
     play.setAttribute(
       "aria-label",
       value ? "Pause animation" : "Play animation",
@@ -668,21 +706,17 @@ async function start() {
     // Temporary turntable preview is below authored transforms and excluded from history.
     for (const object of runtime.values())
       object.preview.rotation.y = (time / duration) * Math.PI * 2;
-    timeline.value = String(time);
+    timeline.value = time;
     element<HTMLOutputElement>("time").value =
       `${time.toFixed(2).padStart(5, "0")} / 12.00`;
   }
   const sceneInput = element<HTMLInputElement>("scene-file");
   function closeFileMenu() {
-    element<HTMLDetailsElement>("file-menu").open = false;
+    element<WaDropdown>("file-menu").open = false;
   }
-  function discardChanges() {
-    return (
-      !isDirty() ||
-      window.confirm(
-        "Discard unsaved changes? Cancel to return and save your scene first.",
-      )
-    );
+  async function discardChanges() {
+    closeFileMenu();
+    return !isDirty() || (await askDiscard());
   }
   function busy(value: boolean, message = "") {
     loading = value;
@@ -690,8 +724,7 @@ async function start() {
       setPlaying(false);
       cancelSelection();
     }
-    for (const id of ["open", "demo"])
-      element<HTMLButtonElement>(id).disabled = value;
+    for (const id of ["open", "demo"]) element<WaButton>(id).disabled = value;
     notice.textContent = message;
     syncScene();
     updateHistoryButtons();
@@ -769,6 +802,7 @@ async function start() {
       const destination = await saveDestination(
         sceneName,
         saveAs ? undefined : sceneHandle,
+        askFilename,
       );
       if (!destination) return;
       notice.textContent = "Saving scene…";
@@ -791,7 +825,7 @@ async function start() {
     }
   }
   async function loadProject(file: File, handle?: SceneFileHandle) {
-    if (loading || dragId || !discardChanges()) return;
+    if (loading || dragId || dialogOpen() || !(await discardChanges())) return;
     busy(true, "Opening scene…");
     const staged = new Map<string, RuntimeObject>();
     let committed = false;
@@ -862,8 +896,8 @@ async function start() {
           `Open failed: ${error instanceof Error ? error.message : "Could not read file."}`;
     }
   }
-  element("scene-new").addEventListener("click", () => {
-    if (loading || dragId || !discardChanges()) return;
+  async function newProject() {
+    if (loading || dragId || dialogOpen() || !(await discardChanges())) return;
     closeFileMenu();
     setPlaying(false);
     cancelSelection();
@@ -881,13 +915,23 @@ async function start() {
     syncScene();
     updateHistoryButtons();
     element("file-status").textContent = "New scene";
+  }
+  element("file-menu").addEventListener("wa-select", (event) => {
+    switch ((event as WaSelectEvent).detail.item.id) {
+      case "scene-new":
+        void newProject();
+        break;
+      case "scene-open":
+        void openProject();
+        break;
+      case "scene-save":
+        void saveProject();
+        break;
+      case "scene-save-as":
+        void saveProject(true);
+        break;
+    }
   });
-  element("scene-open").addEventListener("click", () => void openProject());
-  element("scene-save").addEventListener("click", () => void saveProject());
-  element("scene-save-as").addEventListener(
-    "click",
-    () => void saveProject(true),
-  );
   sceneInput.addEventListener("change", () => {
     const file = sceneInput.files?.[0];
     sceneInput.value = "";
@@ -905,8 +949,7 @@ async function start() {
     setPlaying(false);
     updateHistoryButtons();
     refreshGizmo();
-    for (const id of ["open", "demo"])
-      element<HTMLButtonElement>(id).disabled = true;
+    for (const id of ["open", "demo"]) element<WaButton>(id).disabled = true;
     play.disabled = rewind.disabled = timeline.disabled = true;
     notice.textContent = "Loading splats…";
     let candidate: SplatMesh | undefined,
@@ -950,8 +993,7 @@ async function start() {
       notice.textContent = `Could not load this scene. ${error instanceof Error ? error.message : "Try another splat file."}`;
     } finally {
       loading = false;
-      for (const id of ["open", "demo"])
-        element<HTMLButtonElement>(id).disabled = false;
+      for (const id of ["open", "demo"]) element<WaButton>(id).disabled = false;
       syncScene();
       updateHistoryButtons();
     }
@@ -1012,8 +1054,7 @@ async function start() {
     loading = true;
     syncScene();
     updateHistoryButtons();
-    for (const id of ["open", "demo"])
-      element<HTMLButtonElement>(id).disabled = true;
+    for (const id of ["open", "demo"]) element<WaButton>(id).disabled = true;
   });
   webgl.setAnimationLoop((now) => {
     const delta = previous ? Math.min((now - previous) / 1000, 0.1) : 0;

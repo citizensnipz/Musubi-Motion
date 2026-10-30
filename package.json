@@ -10,8 +10,11 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@awesome.me/webawesome": "^3.14.0",
     "@sparkjsdev/spark": "2.4.0",
+    "dockview": "^8.8.2",
     "fflate": "^0.8.3",
+    "lucide": "^1.65.0",
     "three": "0.180.0",
     "zundo": "^2.3.0",
     "zustand": "^5.0.16"

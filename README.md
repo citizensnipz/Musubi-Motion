@@ -18,6 +18,8 @@ Open the local URL printed by Vite. `npm run build` type-checks and builds the a
 ## Available now
 
 - A thin, responsive monochrome interface with light/dark themes, remembered locally.
+- Dockview resizable Viewport, Outliner, Properties, and Timeline panels. On narrow screens, Outliner and Properties share a tabbed panel below the viewport.
+- Web Awesome menus, dialogs, property fields, and playback controls with Lucide icons.
 - A built-in grayscale knot rendered as actual Gaussian splats, with no remote demo asset required.
 - Local PLY, SPZ, SPLAT, KSPLAT, and SOG file selection through Spark. Files are decoded in the browser, not uploaded to a server. File variants remain subject to Spark's decoder support.
 - Orbit, zoom, and reset-to-fit camera controls.
@@ -40,7 +42,7 @@ Here, "native" means that splats are first-class animation data throughout the e
 
 ## Foundation
 
-**Three.js + Spark is the selected foundation.** Three.js handles the scene, camera, and browser rendering integration; Spark handles Gaussian splats. The UI uses plain TypeScript and CSS with Vite, without a UI framework.
+**Three.js + Spark is the selected foundation.** Three.js handles the scene, camera, and browser rendering integration; Spark handles Gaussian splats. The UI uses vanilla TypeScript and CSS with Vite, Dockview for panel layout, Web Awesome web components for controls, and Lucide for icons. UI components call the existing scene commands; scene data, undo history, and `.msb` serialization remain independent of the UI libraries.
 
 Spark provides extension points for per-splat editing, procedural effects, and skeletal animation. These are upstream capabilities, not features implemented in this prototype. Any future WebGPU backend will require a compatible splat rendering path; replacing WebGLRenderer alone is not sufficient.
 

@@ -38,6 +38,8 @@ export async function pickScene(): Promise<
 export async function saveDestination(
   name: string,
   existing?: SceneFileHandle,
+  requestName: (name: string) => Promise<string | null> = async (name) =>
+    window.prompt("Save scene as", name),
 ): Promise<{ name: string; handle?: SceneFileHandle } | null> {
   if (existing) return { name: existing.name, handle: existing };
   const picker = (window as PickerWindow).showSaveFilePicker;
@@ -49,7 +51,7 @@ export async function saveDestination(
     });
     return { name: handle.name, handle };
   }
-  const requested = window.prompt("Save scene as", msbName(name));
+  const requested = await requestName(msbName(name));
   return requested === null ? null : { name: msbName(requested) };
 }
 export async function writeScene(

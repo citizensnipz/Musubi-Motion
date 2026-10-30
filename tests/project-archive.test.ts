@@ -184,6 +184,17 @@ describe("file destination behavior", () => {
     vi.stubGlobal("window", { prompt: () => null });
     expect(await saveDestination("Untitled")).toBeNull();
   });
+  it("uses the asynchronous UI filename dialog for download fallback", async () => {
+    vi.stubGlobal("window", {});
+    const requestName = vi.fn(async () => "take-02");
+    expect(await saveDestination("shot", undefined, requestName)).toEqual({
+      name: "take-02.msb",
+    });
+    expect(requestName).toHaveBeenCalledWith("shot.msb");
+    expect(
+      await saveDestination("shot", undefined, async () => null),
+    ).toBeNull();
+  });
   it("reuses a native handle for Save and closes writes before reporting completion", async () => {
     const events: string[] = [];
     const handle = {
