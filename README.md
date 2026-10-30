@@ -1,96 +1,116 @@
 # Musubi Motion
 
-Musubi Motion is a Gaussian-splat-native 3D animation engine for the browser, built on Three.js and Spark. It aims to make Gaussian splats first-class, animatable scene assets, with tools for composing scenes, sequencing motion, and applying procedural deformation and visual effects in real time.
+[![Status: Prototype](https://img.shields.io/badge/status-prototype-555555?style=flat-square)](#about)
+[![Three.js](https://img.shields.io/badge/Three.js-0.180-555555?style=flat-square)](https://threejs.org/)
+[![Spark](https://img.shields.io/badge/Spark-2.4-555555?style=flat-square)](https://sparkjs.dev/)
+[![WebGL2](https://img.shields.io/badge/renderer-WebGL2-555555?style=flat-square)](#technology)
+[![TypeScript](https://img.shields.io/badge/language-TypeScript-555555?style=flat-square)](https://www.typescriptlang.org/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-555555?style=flat-square)](LICENSE)
 
-**Status:** Initial browser prototype. The current runtime uses WebGL2 through Three.js's WebGLRenderer and Spark 2.4.0. WebGPU is not implemented.
+A browser-based Gaussian splat animation engine and editor, built on **Three.js and Spark**.
+
+## About
+
+Musubi Motion treats Gaussian splats as named, selectable scene objects with their own transforms and asset references. The goal is a focused browser workspace for composing and animating splat scenes, with familiar Maya-style controls and a minimal monochrome interface.
+
+**Current status: working editor prototype.** Scene composition, transform editing, portable scene files, and a turntable preview are implemented. Keyframe tracks, curve editing, skeletal animation, and per-splat deformation remain future work. The renderer uses WebGL2; WebGPU is not implemented.
+
+**Topics:** `gaussian-splatting` · `3d-animation` · `3d-editor` · `threejs` · `sparkjs` · `webgl2` · `typescript` · `dockview`
+
+## Features
+
+- **Splat scenes:** import local PLY, SPZ, SPLAT, KSPLAT, and SOG files; add multiple named objects; start with the included grayscale knot. Format variants depend on Spark's decoder support.
+- **Selection and transforms:** click or marquee selection, an Outliner, editable position/rotation/scale properties, and full X/Y/Z transform gizmos, including non-uniform scaling.
+- **Customizable workspace:** drag Dockview panel tabs to dock beside other panels or combine them as tabs. Resize panels with their dividers. Properties starts beside Outliner on desktop.
+- **Floating tools:** icon-only selection and transform controls sit inside the viewport. Unlock the panel to move it by its grip, then lock it in place.
+- **Monochrome UI:** light/dark themes, Web Awesome menus and fields, and Lucide icons. The theme is remembered locally; custom panel arrangements currently last for the session.
+- **Undo/redo:** the Edit menu and keyboard shortcuts cover imports, names, numeric properties, and completed gizmo drags. History retains up to 100 edits without copying splat buffers.
+- **Turntable preview:** play/pause, rewind, loop, and scrub a 12-second rotation preview. Authored transforms remain separate from playback.
+- **Portable scenes:** save and reopen `.msb` packages with scene data and source splat assets.
+
+Splat files are decoded in the browser, not uploaded to a server. The interface and included demo are grayscale; transform gizmos and the red X / blue Z grid origin lines retain axis colors. Imported splats retain their source colors.
 
 ## Run locally
 
-Requires Node.js 22.12+ (tested with 22.16).
+Use Node.js **22.12 or newer** and a browser with WebGL2 hardware acceleration.
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. `npm run build` type-checks and builds the application; `npm run preview` serves the production build. `npm test` checks scene data and undo history.
+Open the URL printed by Vite.
 
-## Available now
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the local development server |
+| `npm run build` | Type-check and create the production build |
+| `npm run preview` | Serve the production build locally |
+| `npm test` | Test scene data, history, archive validation, and file-saving behavior |
 
-- A thin, responsive monochrome interface with light/dark themes, remembered locally.
-- Dockview resizable Viewport, Outliner, Properties, and Timeline panels. On narrow screens, Outliner and Properties share a tabbed panel below the viewport.
-- Web Awesome menus, dialogs, property fields, and playback controls with Lucide icons.
-- A built-in grayscale knot rendered as actual Gaussian splats, with no remote demo asset required.
-- Local PLY, SPZ, SPLAT, KSPLAT, and SOG file selection through Spark. Files are decoded in the browser, not uploaded to a server. File variants remain subject to Spark's decoder support.
-- Orbit, zoom, and reset-to-fit camera controls.
-- A 12-second turntable with play/pause, rewind, looping, and scrubbing. This rotates the entire asset; it is not skeletal animation or per-splat deformation.
-- Loading and error messages, plus a WebGL2 availability check.
-- Multiple named objects, a scene outliner, and editable local position, rotation, and scale in the right properties panel.
-- Undo/redo for imports, renaming, numeric edits, and completed gizmo drags. History keeps up to 100 edits without copying splat buffers.
+## Controls
 
-The interface and demo use grayscale; gizmos and the X/Z grid origin lines retain their axis colors. Imported assets retain their source colors. Import splat and Add demo add independent objects to the scene. Scenes can be saved and reopened as portable `.msb` files containing their splat assets. Autosave is not implemented.
+| Action | Control |
+| --- | --- |
+| Select / hide gizmo | Q |
+| Translate | W |
+| Rotate | E |
+| Scale | R |
+| Orbit | Alt + left drag |
+| Pan | Alt + middle drag |
+| Dolly | Alt + right drag |
+| Zoom | Scroll wheel |
+| Select object | Click a splat surface or Outliner row |
+| Marquee select | Drag a rectangle in the viewport |
+| Toggle selection | Shift + click / marquee |
+| Clear selection / cancel gizmo drag | Escape |
+| Undo | Ctrl+Z; Maya-style Z outside text fields |
+| Redo | Ctrl+Y or Ctrl+Shift+Z; Maya-style Shift+Z outside text fields |
+| Save / Save as | Ctrl+S / Ctrl+Shift+S |
+| Open scene | Ctrl+O |
 
-## Project direction (future work)
+Command can replace Ctrl for the application shortcuts on macOS. Text fields retain native text undo. Enter or leaving a property field commits its value. Gizmos and properties edit one selected object at a time. Marquee selection includes objects with splat centers inside the rectangle.
 
-- Compose scenes from multiple Gaussian splat assets with independent transforms and animation tracks.
-- Provide deterministic timeline playback, seeking, looping, and interpolation for objects, cameras, and effect parameters.
-- Support procedural animation of splat position, orientation, scale, color, and opacity.
-- Explore skeletal or other structured deformation after validating the basic animation pipeline.
-- Save reusable scene and animation descriptions and play them directly in the browser.
+Drag a **panel title tab** toward another panel's edge to split the space, or toward its center to combine them as tabs. The floating tool panel is separate: click its lock icon to unlock it, then drag the grip. An unlocked grip also supports arrow-key nudging, with Shift for larger steps.
 
-Here, "native" means that splats are first-class animation data throughout the engine. It does not require writing a new rasterizer. Capture reconstruction and model training are outside the initial runtime scope; the first prototype will use existing assets. Recorded 4D splat sequences are a separate future capability from animating a static splat asset.
+## Scene files
 
-## Foundation
+Use **File → New scene / Open scene / Save / Save as**. An asterisk beside the scene name indicates unsaved edits.
 
-**Three.js + Spark is the selected foundation.** Three.js handles the scene, camera, and browser rendering integration; Spark handles Gaussian splats. The UI uses vanilla TypeScript and CSS with Vite, Dockview for panel layout, Web Awesome web components for controls, and Lucide for icons. UI components call the existing scene commands; scene data, undo history, and `.msb` serialization remain independent of the UI libraries.
+An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, the viewport camera, and the timeline position. It does not store undo history or the UI panel arrangement.
 
-Spark provides extension points for per-splat editing, procedural effects, and skeletal animation. These are upstream capabilities, not features implemented in this prototype. Any future WebGPU backend will require a compatible splat rendering path; replacing WebGLRenderer alone is not sufficient.
+Supported browsers can save back to a selected file through native file pickers. Other browsers download an `.msb` copy. New/Open asks before discarding unsaved edits; opening stages the scene before replacing the current one. Undo history starts fresh after opening.
 
-## Next milestones
+Packages are built in memory and currently capped at **512 MiB**. Autosave and recovery snapshots are not implemented. See [MSB-FORMAT.md](MSB-FORMAT.md) for the format and validation rules.
 
-Build on the current Three.js/Spark prototype:
+## Technology
 
-1. Extend the current multi-object scene model with grouping and validated parenting.
-2. Add a timeline with play, pause, seek, and loop. Animate an object and a camera from absolute timeline time so seeking produces repeatable results.
-3. Add one visible per-splat deformation, such as a masked bend or wave. Validate changing orientation and scale as well as position where the deformation requires it.
-4. Inspect overlap sorting, culling bounds, and visual stability while both assets and the camera move. A visually plausible static viewer is insufficient evidence for animated splats.
-5. Measure load-to-visible time, frame-time distribution, and memory where measurable. Record asset size, splat count, resolution, device, browser, and active graphics backend.
-6. Add recovery snapshots and efficient project-folder saves for large scenes.
+| Layer | Foundation |
+| --- | --- |
+| Scene, camera, and rendering integration | Three.js |
+| Gaussian splat rendering and decoding | Spark 2.4, using WebGL2 |
+| Docking and resizable panels | Dockview |
+| Menus, dialogs, and property controls | Web Awesome web components |
+| Icons | Lucide |
+| Scene state and undo history | Zustand and Zundo |
+| Scene archive compression | fflate |
+| Application and tooling | Vanilla TypeScript, CSS, Vite, and Vitest |
 
-The first milestone is a small, repeatable animated scene with correct overlap and reliable scrubbing. A full editor, custom file format, renderer fork, and training pipeline can wait until that foundation works.
+The document model follows Maya's transform/shape organization with stable IDs and separate asset references. UI components call scene commands; scene data, undo history, and serialization remain independent of the UI libraries. GPU resources and splat buffers stay outside undo snapshots.
 
-## Architecture boundary
+Non-uniform scaling uses Spark covariance rendering with extended-precision splats. Scale values must remain positive, with a minimum of 0.001. See [SCALING-EXPERIMENT.md](SCALING-EXPERIMENT.md) for validation and limitations, and [SCENE-ARCHITECTURE.md](SCENE-ARCHITECTURE.md) for the document model.
 
-Musubi should own scene identifiers, animation clips, tracks, interpolation, playback state, and serialization. The underlying engine should own device creation, rendering, asset upload, and sorting. Use a small adapter around the chosen engine; avoid building multiple complete backends before a concrete need emerges.
+## Roadmap
 
-## Technical references
+- Expose grouping and parenting tools for scene organization.
+- Add editable keyframe tracks and deterministic playback for objects and cameras.
+- Add per-splat deformation and validate covariance, bounds, and overlap sorting during animation.
+- Explore skeletal or structured deformation after validating the basic animation workflow.
+- Measure load time, frame time, and memory across representative scenes and devices.
+- Add recovery snapshots and more efficient saving for large projects.
 
-Reviewed October 30, 2026. These document upstream capabilities, not benchmarks performed by this project.
-
-- [Three.js](https://threejs.org/docs/)
-- [Spark capabilities and source](https://github.com/sparkjsdev/spark)
-- [Spark browser integration](https://sparkjs.dev/docs/)
+Capture reconstruction, model training, and recorded 4D splat playback are outside the current scope. A future WebGPU backend needs a compatible splat rendering path; switching the Three.js renderer alone is insufficient.
 
 ## License
 
 [Apache License 2.0](LICENSE).
-
-## Viewport controls
-
-W: translate. E: rotate. R: scale individual axes, planes, or uniformly with the center handle. Q: hide gizmo.
-Alt + left drag: orbit. Alt + middle drag: pan. Alt + right drag: dolly. Scroll: zoom.
-The grid lies on world Y=0, with red X and blue Z origin lines. Transform edits remain separate from turntable playback. Transforms are included in saved `.msb` scenes.
-
-Selection: click a splat surface or an outliner row to select an object. Drag a rectangle to select objects with splat centers inside; hold Shift to toggle selection. Click empty space or press Escape to clear. Alt-drag navigates without selecting. Properties and gizmos edit one selected object at a time.
-
-Ctrl+Z: undo. Ctrl+Y or Ctrl+Shift+Z: redo. Maya-style Z / Shift+Z also work outside text fields. Enter or leaving a property field commits its value; typing retains native text undo. Escape cancels an active gizmo drag.
-
-The scene document follows Maya's transform/shape organization with stable IDs and separate asset references. See [SCENE-ARCHITECTURE.md](SCENE-ARCHITECTURE.md) for the implemented subset and the save/load plan.
-
-Non-uniform scaling uses Spark covariance rendering with extended-precision splats. Procedural buffers are finalized through Spark's public initialization API. Scales stay positive (minimum 0.001). See SCALING-EXPERIMENT.md for validation and limits.
-
-## Scene files
-
-Use **File > New scene / Open scene / Save / Save as**. Ctrl+S saves; Ctrl+Shift+S saves as; Ctrl+O opens (Cmd on macOS). The scene name shows an asterisk for unsaved edits. Save includes object names, IDs, hierarchy, transforms, shape offsets, original splat files, and the viewport camera and timeline position.
-
-Native file pickers allow saving back to the selected file. Other browsers download an `.msb` copy. Opening prepares the complete scene before replacing your work; New/Open prompt before discarding unsaved edits. Undo history starts fresh after opening. Current packages are capped at 512 MiB and are built in memory. See [MSB-FORMAT.md](MSB-FORMAT.md).
