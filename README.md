@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. `npm run build` type-checks and builds the application; `npm run preview` serves the production build.
+Open the local URL printed by Vite. `npm run build` type-checks and builds the application; `npm run preview` serves the production build. `npm test` checks scene data and undo history.
 
 ## Available now
 
@@ -23,8 +23,10 @@ Open the local URL printed by Vite. `npm run build` type-checks and builds the a
 - Orbit, zoom, and reset-to-fit camera controls.
 - A 12-second turntable with play/pause, rewind, looping, and scrubbing. This rotates the entire asset; it is not skeletal animation or per-splat deformation.
 - Loading and error messages, plus a WebGL2 availability check.
+- Multiple named objects, a scene outliner, and editable local position, rotation, and scale in the right properties panel.
+- Undo/redo for imports, renaming, numeric edits, and completed gizmo drags. History keeps up to 100 edits without copying splat buffers.
 
-The interface and demo use only grayscale. Imported assets retain their source colors. Loading a file replaces the current asset; multi-asset editing and scene saving are future work.
+The interface and demo use grayscale; gizmos and the X/Z grid origin lines retain their axis colors. Imported assets retain their source colors. Import splat and Add demo add independent objects to the scene. Scenes are currently session-only; saving and reloading projects is future work.
 
 ## Project direction (future work)
 
@@ -46,7 +48,7 @@ Spark provides extension points for per-splat editing, procedural effects, and s
 
 Build on the current Three.js/Spark prototype:
 
-1. Load two splat assets into the same scene, with orbit controls and independent transforms.
+1. Extend the current multi-object scene model with grouping and validated parenting.
 2. Add a timeline with play, pause, seek, and loop. Animate an object and a camera from absolute timeline time so seeking produces repeatable results.
 3. Add one visible per-splat deformation, such as a masked bend or wave. Validate changing orientation and scale as well as position where the deformation requires it.
 4. Inspect overlap sorting, culling bounds, and visual stability while both assets and the camera move. A visually plausible static viewer is insufficient evidence for animated splats.
@@ -70,3 +72,17 @@ Reviewed October 30, 2026. These document upstream capabilities, not benchmarks 
 ## License
 
 [Apache License 2.0](LICENSE).
+
+## Viewport controls
+
+W: translate. E: rotate. R: scale individual axes, planes, or uniformly with the center handle. Q: hide gizmo.
+Alt + left drag: orbit. Alt + middle drag: pan. Alt + right drag: dolly. Scroll: zoom.
+The grid lies on world Y=0, with red X and blue Z origin lines. Transform edits remain separate from turntable playback. Transforms are currently session-only.
+
+Selection: click a splat surface or an outliner row to select an object. Drag a rectangle to select objects with splat centers inside; hold Shift to toggle selection. Click empty space or press Escape to clear. Alt-drag navigates without selecting. Properties and gizmos edit one selected object at a time.
+
+Ctrl+Z: undo. Ctrl+Y or Ctrl+Shift+Z: redo. Maya-style Z / Shift+Z also work outside text fields. Enter or leaving a property field commits its value; typing retains native text undo. Escape cancels an active gizmo drag.
+
+The scene document follows Maya's transform/shape organization with stable IDs and separate asset references. See [SCENE-ARCHITECTURE.md](SCENE-ARCHITECTURE.md) for the implemented subset and the save/load plan.
+
+Non-uniform scaling uses Spark covariance rendering with extended-precision splats. Procedural buffers are finalized through Spark's public initialization API. Scales stay positive (minimum 0.001). See SCALING-EXPERIMENT.md for validation and limits.

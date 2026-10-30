@@ -4,17 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "vitest run",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@sparkjsdev/spark": "2.4.0",
-    "three": "0.180.0"
+    "three": "0.180.0",
+    "zundo": "^2.3.0",
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@types/three": "^0.180.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

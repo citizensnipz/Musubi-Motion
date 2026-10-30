@@ -30,9 +30,9 @@
           <span class="version">0.1</span>
         </div>
         <nav aria-label="Workspace controls">
-          <button id="demo" title="Load the built-in splat study">Demo</button>
+          <button id="demo" title="Add a built-in splat study">Add demo</button>
           <button id="open" class="primary">
-            Open splat <span aria-hidden="true">↗</span>
+            Import splat <span aria-hidden="true">↗</span>
           </button>
           <span class="divider"></span>
           <button
@@ -48,23 +48,34 @@
           </button>
         </nav>
       </header>
-      <main id="viewport" aria-label="3D splat viewport">
-        <div class="scene-label">
-          <span class="eyebrow">SCENE / 01</span>
-          <h2 id="asset-name">Splat study</h2>
-          <p id="asset-detail">Preparing scene…</p>
-        </div>
-        <div class="view-controls">
-          <button id="reset" title="Fit the scene to the viewport">
-            Reset view
-          </button>
-        </div>
-        <div id="notice" role="status" aria-live="polite"></div>
-        <div class="viewport-footer">
-          <span>Drag to orbit <span class="dot">·</span> Scroll to zoom</span
-          ><span>THREE.JS / SPARK <span class="dot">·</span> WEBGL2</span>
-        </div>
-      </main>
+      <div class="workspace">
+        <main id="viewport" aria-label="3D splat viewport">
+          <div class="scene-label">
+            <span class="eyebrow">SCENE / 01</span>
+            <h2 id="asset-name">Splat study</h2>
+            <p id="asset-detail">Preparing scene…</p>
+          </div>
+          <div class="view-controls">
+            <button id="reset" title="Fit the scene to the viewport">
+              Reset view
+            </button>
+          </div>
+          <div id="notice" role="status" aria-live="polite"></div>
+          <div class="viewport-footer">
+            <span
+              >Alt + left: orbit / middle: pan / right: dolly
+              <span class="dot">·</span> Scroll to zoom</span
+            ><span>THREE.JS / SPARK <span class="dot">·</span> WEBGL2</span>
+          </div>
+        </main>
+        <aside class="inspector" aria-label="Scene and object properties">
+          <div class="history-tools" role="toolbar" aria-label="Edit history">
+            <button id="undo" disabled>↶ Undo</button
+            ><button id="redo" disabled>↷ Redo</button>
+          </div>
+          <div id="properties"></div>
+        </aside>
+      </div>
       <footer>
         <div class="transport">
           <button id="play" class="play" aria-label="Play animation" disabled>
