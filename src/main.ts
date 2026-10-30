@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
-import { addSplat, emptyScene, transformNodes } from "./scene-document.ts";
+import { addSplat, emptyScene, transformNodes, deleteSceneItems } from "./scene-document.ts";
 import type {
   SceneDocument,
   AssetRecord,
@@ -43,7 +43,11 @@ import type WaButton from "@awesome.me/webawesome/dist/components/button/button.
 import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.js";
 import type WaDropdown from "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
 import "./style.css";
-mountWorkspace();
+import { mountSkeleton } from "./skeleton.ts";
+import { createRiggingPanel, mountRiggingPanel } from "./rigging-panel.ts";
+const riggingPanel = createRiggingPanel();
+const workspace = mountWorkspace(riggingPanel);
+mountRiggingPanel(riggingPanel, workspace);
 hydrateIcons();
 mountToolPalette();
 const element = <T extends HTMLElement>(id: string) =>
@@ -159,6 +163,7 @@ async function start() {
     time = 0,
     previous = 0;
   let dragId: string | undefined;
+  const skeleton = mountSkeleton(store, world, riggingPanel, () => !loading && !dragId);
   let cancelDrag = false;
   const modes = {
     q: "select",
@@ -175,7 +180,7 @@ async function start() {
       controls.enabled = event.pointerType === "touch" || event.altKey;
       transform.enabled =
         !event.altKey &&
-        selected.size === 1 &&
+        (selected.size === 1 || !!skeleton.selectedId) &&
         currentMode !== "select" &&
         !loading;
     },
@@ -209,6 +214,15 @@ async function start() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
+    if (skeleton.selectedBone) {
+      if ((currentMode === "translate" || currentMode === "rotate") && !loading) {
+        transform.attach(skeleton.selectedBone);
+        transform.setMode(currentMode);
+        transform.enabled = true;
+        transform.getHelper().visible = true;
+      } else { transform.detach(); transform.enabled = false; }
+      return;
+    }
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
     if (object && currentMode !== "select" && !loading) {
@@ -259,6 +273,19 @@ async function start() {
   selectionLabel.className = "selection-label";
   selectionLabel.setAttribute("role", "status");
   viewport.append(selectionLabel);
+  riggingPanel.addEventListener("joint-selection-change", () => {
+    if (skeleton.selectedIds.size) {
+      selected.clear();
+      for (const object of runtime.values()) object.box.visible = false;
+      selectionLabel.textContent = skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : `${skeleton.selectedIds.size} joints selected`;
+      updatePanel();
+    }
+    if (!skeleton.selectedIds.size) {
+      selectionLabel.textContent = selected.size ? `${selected.size} objects selected` : "Nothing selected";
+      updatePanel();
+    }
+    refreshGizmo();
+  });
   function readChannels(object: THREE.Object3D): TransformChannels {
     return {
       position: object.position.toArray() as Vec3,
@@ -270,14 +297,38 @@ async function start() {
   }
   const panelHost = element<HTMLElement>("properties");
   const panel = createPropertiesPanel(panelHost, element("outliner-panel"), {
+    reparent(id, parentId) {
+      if (loading || dragId) return;
+      try { skeleton.reparent(id, parentId); }
+      catch { notice.textContent = "Cannot parent a joint to itself or its descendants."; }
+    },
     select(id, additive) {
-      if (!dragId && !loading) selectObjects([id], additive);
+      if (dragId || loading) return;
+      if (store.getState().document.joints?.some(j => j.id === id)) skeleton.selectMany([id], additive);
+      else selectObjects([id], additive);
     },
     rename(id, name) {
+      const doc = store.getState().document;
+      if (!loading && !dragId && doc.joints?.some(j => j.id === id)) {
+        if (name.trim()) store.setState({ document: { ...doc, joints: doc.joints.map(j => j.id === id ? {...j, name: name.trim()} : j) }, editLabel: "Rename joint" });
+        return;
+      }
       if (!loading && !dragId) renameObject(store, id, name);
     },
     channel(id, channel, axis, value) {
       if (loading || dragId) return;
+      const joint = store.getState().document.joints?.find(j => j.id === id);
+      if (joint) {
+        if (channel === "rotation") {
+          const rotation = [...(joint.rotation ?? [0,0,0])] as Vec3; rotation[axis] = value;
+          skeleton.commitMove(id, joint.position, rotation);
+        }
+        if (channel === "position") {
+          const position = [...joint.position] as Vec3; position[axis] = value;
+          skeleton.commitMove(id, position);
+        }
+        return;
+      }
       const node = store.getState().document.nodes[id];
       if (node?.type !== "transform") return;
       setPlaying(false);
@@ -299,10 +350,13 @@ async function start() {
     const shape = Object.values(doc.nodes).find(
       (node) => node.type === "splatShape" && node.parentId === id,
     );
-    panel.update(transformNodes(doc), selected, shape?.name, preview);
+    const jointNodes = (doc.joints ?? []).map(j => ({...j, type: "transform" as const, joint: true,
+      rotationOrder: "XYZ" as const, rotation: j.rotation ?? [0,0,0] as Vec3, scale: [1,1,1] as Vec3 }));
+    panel.update([...transformNodes(doc), ...jointNodes], skeleton.selectedIds.size ? skeleton.selectedIds : selected, shape?.name, preview);
   }
   function selectObjects(ids: string[], additive = false) {
     if (dragId) return;
+    if (skeleton.selectedIds.size) skeleton.select("");
     const doc = store.getState().document;
     const next = additive ? new Set(selected) : new Set<string>();
     for (const id of ids)
@@ -319,7 +373,7 @@ async function start() {
       [...selected].filter((id) => doc.nodes[id]?.type === "transform"),
     );
     for (const [id, object] of runtime) object.box.visible = selected.has(id);
-    selectionLabel.textContent = selected.size
+    selectionLabel.textContent = skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
       ? `${selected.size} object${selected.size === 1 ? "" : "s"} selected`
       : "Nothing selected";
     refreshGizmo();
@@ -431,12 +485,20 @@ async function start() {
   transform.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value;
     if (event.value) {
-      dragId = singleId();
+      dragId = skeleton.selectedId || singleId();
       cancelDrag = false;
       setPlaying(false);
     } else if (dragId) {
       const id = dragId;
+      const joint = skeleton.selectedId === id ? skeleton.selectedBone : undefined;
+      const jointPosition = joint?.position.toArray() as Vec3 | undefined;
       dragId = undefined;
+      if (jointPosition) {
+        if (!cancelDrag) skeleton.commitMove(id, jointPosition, readChannels(joint!).rotation);
+        else skeleton.reset();
+        updateHistoryButtons();
+        return;
+      }
       const object = runtime.get(id);
       if (!cancelDrag && object)
         commitChannels(
@@ -451,6 +513,7 @@ async function start() {
     updateHistoryButtons();
   });
   transform.addEventListener("objectChange", () => {
+    if (skeleton.selectedId) { skeleton.preview(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
     if (!object) return;
@@ -602,6 +665,8 @@ async function start() {
     }));
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) {
       raycaster.setFromCamera(end, camera);
+      const jointHit = skeleton.pick(raycaster);
+      if (jointHit) { skeleton.selectMany([jointHit], start.additive); return; }
       const hits = raycaster.intersectObjects(
         objects.map(({ object }) => object.mesh),
         false,
@@ -613,6 +678,8 @@ async function start() {
     } else {
       const begin = ndc(start.x, start.y),
         hits: string[] = [];
+      const jointHits = skeleton.marquee(begin, end, camera);
+      if (jointHits.length) { skeleton.selectMany(jointHits, start.additive); return; }
       for (const { id, object } of objects)
         for (let i = 0; i < object.centers.length; i += 3) {
           projected
@@ -678,6 +745,15 @@ async function start() {
       return;
     }
     if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+    if (key === "delete") {
+      if (loading || dragId) return;
+      event.preventDefault();
+      const ids = skeleton.selectedIds.size ? skeleton.selectedIds : selected;
+      if (!ids.size) return;
+      setPlaying(false);
+      store.setState({ document: deleteSceneItems(store.getState().document, ids), editLabel: "Delete selection" });
+      return;
+    }
     if (key === "z") {
       event.preventDefault();
       historyAction(event.shiftKey);

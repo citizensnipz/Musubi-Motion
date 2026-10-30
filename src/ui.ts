@@ -33,6 +33,19 @@ import {
   GripHorizontal,
   LockKeyhole,
   LockKeyholeOpen,
+  PanelLeft,
+  Bone,
+  Link,
+  Unlink,
+  Paintbrush,
+  Weight,
+  Target,
+  GitBranch,
+  FlipHorizontal2,
+  Pin,
+  SlidersHorizontal,
+  KeyRound,
+  RotateCcw,
 } from "lucide";
 
 const icons = {
@@ -59,6 +72,19 @@ const icons = {
   grip: GripHorizontal,
   lock: LockKeyhole,
   unlock: LockKeyholeOpen,
+  sidebar: PanelLeft,
+  bone: Bone,
+  bind: Link,
+  unbind: Unlink,
+  paint: Paintbrush,
+  weight: Weight,
+  target: Target,
+  chain: GitBranch,
+  mirror: FlipHorizontal2,
+  pin: Pin,
+  limits: SlidersHorizontal,
+  key: KeyRound,
+  rest: RotateCcw,
 };
 export type IconName = keyof typeof icons;
 export function icon(name: IconName) {

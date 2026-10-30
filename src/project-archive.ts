@@ -1,4 +1,5 @@
 import { strFromU8, strToU8, unzip, zip } from "fflate";
+import { validateJoints } from "./skeleton.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 
 export const MAX_PROJECT_BYTES = 512 * 1024 * 1024;
@@ -51,6 +52,7 @@ function finite(value: unknown): asserts value is number {
 }
 export function validateScene(value: unknown): SceneDocument {
   const doc = record(value);
+  if (doc.joints !== undefined) validateJoints(doc.joints as import("./skeleton.ts").Joint[]);
   if (doc.format !== "musubi-scene" || doc.version !== 1)
     fail("Unsupported scene format or version.");
   if (doc.upAxis !== "Y" || doc.units !== "unitless")

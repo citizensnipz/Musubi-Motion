@@ -2,14 +2,18 @@ import { createDockview } from "dockview";
 import "dockview/dist/styles/dockview.css";
 
 // Keep each existing content element alive, including the WebGL canvas, through layout changes.
-export function mountWorkspace() {
+export function mountWorkspace(riggingContent: HTMLElement) {
   const host = document.getElementById("workspace")!;
+  const parking = document.createElement("div");
+  parking.hidden = true;
+  document.body.append(parking);
   const contents = new Map(
     ["viewport", "outliner-panel", "properties", "timeline-panel"].map((id) => [
       id,
       document.getElementById(id)!,
     ]),
   );
+  contents.set("rigging", riggingContent);
   const api = createDockview(host, {
     theme: { name: "musubi", className: "dockview-theme-musubi", gap: 4 },
     disableFloatingGroups: true,
@@ -17,7 +21,7 @@ export function mountWorkspace() {
     createComponent(options) {
       const element = contents.get(options.name);
       if (!element) throw Error(`Unknown panel: ${options.name}`);
-      return { element, init() {} };
+      return { element, init() {}, dispose() { parking.append(element); } };
     },
     createTabComponent() {
       const element = document.createElement("span");
@@ -27,6 +31,18 @@ export function mountWorkspace() {
         element,
         init(parameters) {
           element.textContent = parameters.title;
+          const close = document.createElement("button");
+          close.className = "panel-close";
+          close.textContent = "×";
+          close.title = `Close ${parameters.title}`;
+          close.setAttribute("aria-label", close.title);
+          close.addEventListener("pointerdown", (event) => event.stopPropagation());
+          close.addEventListener("click", (event) => {
+            event.stopPropagation();
+            customized = true;
+            parameters.api.close();
+          });
+          element.append(close);
         },
       };
     },
@@ -78,7 +94,7 @@ export function mountWorkspace() {
       renderer: "always",
       position: {
         referencePanel: "outliner",
-        direction: compact ? "within" : "right",
+        direction: "within",
       },
       minimumWidth: 240,
       minimumHeight: 220,
@@ -87,10 +103,27 @@ export function mountWorkspace() {
     api
       .getPanel("outliner")!
       .api.setSize(compact ? { height: 260 } : { width: 240 });
-    if (!compact) api.getPanel("properties")!.api.setSize({ width: 290 });
-    api.getPanel(compact ? "properties" : "viewport")!.api.setActive();
+    if (!compact) api.getPanel("properties")!.api.setSize({ width: Math.max(290, host.clientWidth * 0.16) });
+    api.getPanel("properties")!.api.setActive();
   }
-  arrange();
+  const layoutKey = "musubi-workspace-v1";
+  let restored = false;
+  try {
+    const saved = localStorage.getItem(layoutKey);
+    if (saved) { api.fromJSON(JSON.parse(saved)); restored = true; customized = true; }
+  } catch { /* Fall back to the default if storage is unavailable or incompatible. */ }
+  if (!restored) arrange();
+  // Keep closed content mounted so scene updates can still find its elements.
+  for (const content of contents.values()) {
+    if (!host.contains(content)) parking.append(content);
+  }
+  function saveLayout() {
+    try { localStorage.setItem(layoutKey, JSON.stringify(api.toJSON())); }
+    catch { /* Restricted storage must not interrupt editing. */ }
+  }
+  api.onDidLayoutChange(() => { customized = true; saveLayout(); });
+  window.addEventListener("pagehide", saveLayout);
+  saveLayout();
   api.onDidMovePanel(() => {
     customized = true;
   });
@@ -103,5 +136,38 @@ export function mountWorkspace() {
     }
   }).observe(host);
   document.getElementById("panel-staging")!.remove();
-  return api;
+  const panels = {
+    properties: { component: "properties", title: "Properties" },
+    outliner: { component: "outliner-panel", title: "Outliner" },
+    viewport: { component: "viewport", title: "Viewport" },
+    timeline: { component: "timeline-panel", title: "Timeline" },
+  };
+  for (const [id, config] of Object.entries(panels)) {
+    document.getElementById(`view-${id}`)!.addEventListener("click", () => {
+      customized = true;
+      const existing = api.getPanel(id);
+      if (existing) { existing.api.setActive(); return; }
+      api.addPanel({ id, ...config, tabComponent: "label", renderer: "always",
+        minimumWidth: 220, minimumHeight: 100,
+        position: api.panels.length ? { direction: id === "timeline" ? "below" : "right" } : undefined,
+      }).api.setActive();
+    });
+  }
+  return {
+    showRigging() {
+      customized = true;
+      const existing = api.getPanel("rigging");
+      if (existing) { existing.api.setActive(); return; }
+      api.addPanel({
+        id: "rigging", component: "rigging", title: "Rigging", tabComponent: "label",
+        renderer: "always", minimumWidth: 240, minimumHeight: 180,
+        position: api.getPanel("properties") ? { referencePanel: "properties", direction: "within" }
+          : api.panels.length ? { direction: "right" } : undefined,
+      }).api.setActive();
+    },
+    hideRigging() {
+      const panel = api.getPanel("rigging");
+      if (panel) api.removePanel(panel);
+    },
+  };
 }

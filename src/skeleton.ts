@@ -1,0 +1,173 @@
+import * as THREE from "three";
+import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
+import type WaDropdownItem from "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
+import type { SceneStore } from "./scene-store.ts";
+export type Joint = { id: string; name: string; parentId: string | null; position: [number, number, number]; rotation?: [number, number, number] };
+export function validateJoints(joints: Joint[]) {
+  if (!Array.isArray(joints) || joints.length > 1000) throw Error("Invalid joints");
+  const ids = new Set(joints.map(j => j.id));
+  if (ids.size !== joints.length) throw Error("Duplicate joint IDs");
+  for (const j of joints) {
+    if (j.rotation !== undefined && (!Array.isArray(j.rotation) || j.rotation.length !== 3 || !j.rotation.every(Number.isFinite))) throw Error("Invalid joint rotation");
+    if (typeof j.id !== "string" || typeof j.name !== "string" || !j.name.trim() || !Array.isArray(j.position) || j.position.length !== 3 || !j.position.every(Number.isFinite)) throw Error("Invalid joint");
+    const seen = new Set([j.id]);
+    let parent = j.parentId;
+    while (parent !== null) {
+      if (!ids.has(parent) || seen.has(parent)) throw Error("Invalid joint hierarchy");
+      seen.add(parent); parent = joints.find(n => n.id === parent)!.parentId;
+    }
+  }
+}
+export function reparentJoint(joints: Joint[], id: string, parentId: string | null): Joint[] {
+  validateJoints(joints);
+  validateJoints(joints.map(j => j.id === id ? {...j, parentId} : j));
+  const world = (key: string): THREE.Matrix4 => {
+    const j = joints.find(n => n.id === key)!;
+    const r = (j.rotation ?? [0,0,0]).map(THREE.MathUtils.degToRad);
+    const local = new THREE.Matrix4().compose(new THREE.Vector3(...j.position), new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0],r[1],r[2])), new THREE.Vector3(1,1,1));
+    return j.parentId ? world(j.parentId).multiply(local) : local;
+  };
+  const local = (parentId ? world(parentId).invert() : new THREE.Matrix4()).multiply(world(id));
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(); local.decompose(p, q, new THREE.Vector3());
+  const e = new THREE.Euler().setFromQuaternion(q);
+  const position = p.toArray() as Joint["position"];
+  const rotation = [e.x,e.y,e.z].map(THREE.MathUtils.radToDeg) as Joint["position"];
+  const next = joints.map(j => j.id === id ? { ...j, parentId, position, rotation } : j);
+  validateJoints(next); return next;
+}
+export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLElement, available: () => boolean) {
+  let selected = "";
+  let selection = new Set<string>();
+  const bones = new Map<string, THREE.Bone>();
+  const markers: THREE.Mesh[] = [];
+  const links: { line: THREE.Line; child: string; parent: string }[] = [];
+  const layer = new THREE.Group(); world.add(layer);
+  const geometry = new THREE.SphereGeometry(.065, 12, 8);
+  const material = new THREE.MeshBasicMaterial({ color: 0xdedede, depthTest: false });
+  const activeMaterial = new THREE.MeshBasicMaterial({ color: 0xffb84d, depthTest: false });
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0xcccccc, depthTest: false });
+  const editor = document.createElement("div"); editor.className = "joint-editor";
+  host.append(editor);
+  const status = host.querySelector(".rigging-status")!;
+  const joints = () => store.getState().document.joints ?? [];
+  const commit = (next: Joint[], editLabel: string) => {
+    if (!available()) return;
+    validateJoints(next);
+    store.setState({ document: { ...store.getState().document, joints: next }, editLabel });
+  };
+  function render() {
+    selection = new Set([...selection].filter(id => joints().some(j => j.id === id)));
+    selected = selection.size === 1 ? [...selection][0] : "";
+    for (const child of [...layer.children]) {
+      if (child instanceof THREE.Line) child.geometry.dispose();
+      layer.remove(child);
+    }
+    bones.clear(); markers.length = 0; links.length = 0;
+    for (const j of joints()) {
+      const bone = new THREE.Bone(); bone.name = j.name; bone.position.fromArray(j.position);
+      const r = (j.rotation ?? [0,0,0]).map(THREE.MathUtils.degToRad);
+      bone.rotation.set(r[0],r[1],r[2]);
+      bones.set(j.id, bone);
+      const marker = new THREE.Mesh(geometry, selection.has(j.id) ? activeMaterial : material);
+      marker.userData.jointId = j.id;
+      markers.push(marker);
+      marker.renderOrder = 10; bone.add(marker);
+    }
+    for (const j of joints()) (j.parentId ? bones.get(j.parentId)! : layer).add(bones.get(j.id)!);
+    layer.updateMatrixWorld(true);
+    for (const j of joints()) if (j.parentId) {
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+        bones.get(j.id)!.getWorldPosition(new THREE.Vector3()), bones.get(j.parentId)!.getWorldPosition(new THREE.Vector3())
+      ]), lineMaterial); line.renderOrder = 10; layer.add(line);
+      links.push({ line, child: j.id, parent: j.parentId });
+    }
+    editor.replaceChildren();
+    status.textContent = "Create joints, select one below, then choose its parent. Positions are local to the parent. Skinning is not enabled yet.";
+    const list = document.createElement("select"); list.setAttribute("aria-label", "Selected joint");
+    list.add(new Option("New root / no joint selected", ""));
+    for (const j of joints()) list.add(new Option(j.name, j.id));
+    if (!bones.has(selected)) selected = "";
+    list.value = selected; list.onchange = () => { selection = new Set(list.value ? [list.value] : []); render(); }; editor.append(list);
+    const joint = joints().find(j => j.id === selected);
+    host.dispatchEvent(new Event("joint-selection-change"));
+    if (!joint) return;
+    const name = document.createElement("input"); name.value = joint.name; name.setAttribute("aria-label", "Joint name");
+    name.onchange = () => { if (name.value.trim()) commit(joints().map(j => j.id === selected ? {...j, name: name.value.trim()} : j), "Rename joint"); }; editor.append(name);
+    for (let axis = 0; axis < 3; axis++) {
+      const label = document.createElement("label"); label.textContent = `Position ${"XYZ"[axis]}`;
+      const input = document.createElement("input"); input.type = "number"; input.step = "0.1"; input.value = String(joint.position[axis]);
+      input.onchange = () => { if (Number.isFinite(input.valueAsNumber)) commit(joints().map(j => { if (j.id !== selected) return j; const position = [...j.position] as Joint["position"]; position[axis] = input.valueAsNumber; return {...j, position}; }), "Move joint"); };
+      label.append(input); editor.append(label);
+    }
+    const parent = document.createElement("select"); parent.id = "joint-parent"; parent.setAttribute("aria-label", "Parent joint"); parent.add(new Option("Skeleton root", ""));
+    for (const j of joints()) {
+      try { reparentJoint(joints(), selected, j.id); parent.add(new Option(j.name, j.id)); } catch { /* Exclude self and descendants. */ }
+    }
+    parent.value = joint.parentId ?? ""; editor.append(parent);
+    const apply = document.createElement("button"); apply.textContent = "Parent joint";
+    apply.onclick = () => commit(reparentJoint(joints(), selected, parent.value || null), "Parent joint"); editor.append(apply);
+  }
+  const controls = new Set([
+    ...Array.from(document.querySelectorAll<WaButton | WaDropdownItem>("[data-rig-action]")),
+    ...Array.from(host.querySelectorAll<WaButton | WaDropdownItem>("[data-rig-action]")),
+  ]);
+  for (const control of controls) {
+    const label = control.dataset.rigAction;
+    if (label !== "Create joints" && label !== "Parent joints" && label !== "FK rotate") continue;
+    control.disabled = false;
+    control.title = label;
+    control.addEventListener("click", () => {
+      if (!available()) return;
+      if (label === "FK rotate") document.getElementById("tool-rotate")!.click();
+      if (label === "Create joints") {
+        const parentId = joints().some(j => j.id === selected) ? selected : null;
+        const id = crypto.randomUUID(); selection = new Set([id]); selected = id;
+        commit([...joints(), { id, name: `joint${joints().length + 1}`, parentId, position: parentId ? [0, 1, 0] : [0, 0, 0] }], "Create joint");
+      }
+    });
+  }
+  store.subscribe(render); render();
+  return {
+    get selectedId() { return selected; },
+    get selectedIds() { return new Set(selection); },
+    get selectedBone() { return bones.get(selected); },
+    select(id: string) { selection = new Set(id ? [id] : []); render(); },
+    selectMany(ids: string[], additive = false) {
+      const next = additive ? new Set(selection) : new Set<string>();
+      for (const id of ids) {
+        if (additive && next.has(id)) next.delete(id); else next.add(id);
+      }
+      selection = next; render();
+    },
+    marquee(begin: THREE.Vector2, end: THREE.Vector2, camera: THREE.Camera) {
+      layer.updateMatrixWorld(true);
+      return [...bones].filter(([, bone]) => {
+        const p = bone.getWorldPosition(new THREE.Vector3()).project(camera);
+        return p.z >= -1 && p.z <= 1 && p.x >= Math.min(begin.x,end.x) && p.x <= Math.max(begin.x,end.x)
+          && p.y >= Math.min(begin.y,end.y) && p.y <= Math.max(begin.y,end.y);
+      }).map(([id]) => id);
+    },
+    pick(raycaster: THREE.Raycaster) {
+      layer.updateMatrixWorld(true);
+      return raycaster.intersectObjects(markers, false)[0]?.object.userData.jointId as string | undefined;
+    },
+    preview() {
+      layer.updateMatrixWorld(true);
+      for (const {line, child, parent} of links) {
+        const positions = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+        const a = bones.get(child)!.getWorldPosition(new THREE.Vector3());
+        const b = bones.get(parent)!.getWorldPosition(new THREE.Vector3());
+        positions.setXYZ(0, a.x, a.y, a.z); positions.setXYZ(1, b.x, b.y, b.z);
+        positions.needsUpdate = true; line.geometry.computeBoundingSphere();
+      }
+    },
+    commitMove(id: string, position: Joint["position"], rotation?: Joint["rotation"]) {
+      commit(joints().map(j => j.id === id ? {...j, position, ...(rotation ? {rotation} : {})} : j), rotation ? "Transform joint" : "Move joint");
+    },
+    reparent(id: string, parentId: string | null) {
+      commit(reparentJoint(joints(), id, parentId), "Parent joint");
+    },
+    reset: render,
+  };
+}
+

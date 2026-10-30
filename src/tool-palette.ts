@@ -1,10 +1,10 @@
 import { buttonContent } from "./ui.ts";
 
-export function mountToolPalette() {
+export function mountToolPalette(ids = { panel: "tool-palette", handle: "palette-drag", lock: "palette-lock" }, label = "tool panel") {
   const viewport = document.getElementById("viewport")!;
-  const panel = document.getElementById("tool-palette")!;
-  const handle = document.getElementById("palette-drag")!;
-  const lock = document.getElementById("palette-lock")!;
+  const panel = document.getElementById(ids.panel)!;
+  const handle = document.getElementById(ids.handle)!;
+  const lock = document.getElementById(ids.lock)!;
   let locked = true;
   let drag:
     { id: number; x: number; y: number; left: number; top: number } | undefined;
@@ -27,11 +27,11 @@ export function mountToolPalette() {
     lock.setAttribute("aria-pressed", String(locked));
     lock.setAttribute(
       "aria-label",
-      locked ? "Unlock tool panel" : "Lock tool panel",
+      locked ? `Unlock ${label}` : `Lock ${label}`,
     );
     handle.setAttribute("aria-disabled", String(locked));
     handle.title = locked
-      ? "Unlock to move tool panel"
+      ? `Unlock to move ${label}`
       : "Drag to move · Arrow keys to nudge";
     buttonContent(lock, locked ? "lock" : "unlock");
   });
@@ -80,7 +80,7 @@ export function mountToolPalette() {
   });
   // Keep the handle reachable when Dockview panels or the browser are resized.
   new ResizeObserver(() => {
-    if (viewport.clientWidth && viewport.clientHeight)
+    if (panel.parentElement === viewport && viewport.clientWidth && viewport.clientHeight)
       place(panel.offsetLeft, panel.offsetTop);
   }).observe(viewport);
 }

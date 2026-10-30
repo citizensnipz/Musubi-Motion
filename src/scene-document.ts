@@ -24,6 +24,7 @@ export type AssetRecord = { id: string } & (
   | { kind: "file"; fileName: string; byteLength: number }
 );
 export type SceneDocument = {
+  joints?: import("./skeleton.ts").Joint[];
   format: "musubi-scene";
   version: 1;
   upAxis: "Y";
@@ -122,6 +123,24 @@ export function addSplat(
 }
 
 // Scene metadata is renderer-independent. Asset bytes are intentionally external.
+export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>): SceneDocument {
+  const removed = new Set(ids);
+  const all = [...Object.values(doc.nodes), ...(doc.joints ?? [])];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of all) if (node.parentId && removed.has(node.parentId) && !removed.has(node.id)) {
+      removed.add(node.id); changed = true;
+    }
+  }
+  const nodes = Object.fromEntries(Object.entries(doc.nodes).filter(([id]) => !removed.has(id)));
+  const retainedAssets = new Set(Object.values(nodes).filter(n => n.type === "splatShape").map(n => n.assetId));
+  return { ...doc, nodes, rootIds: doc.rootIds.filter(id => !removed.has(id)),
+    assets: Object.fromEntries(Object.entries(doc.assets).filter(([id]) => retainedAssets.has(id))),
+    ...(doc.joints ? { joints: doc.joints.filter(j => !removed.has(j.id)) } : {}),
+  };
+}
+
 export function serializeScene(doc: SceneDocument): string {
   return JSON.stringify(doc, null, 2);
 }
