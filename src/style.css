@@ -1,0 +1,339 @@
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color-scheme: dark;
+  --bg: #171717;
+  --panel: #1c1c1c;
+  --line: #333;
+  --text: #e5e5e5;
+  --muted: #999;
+  --hover: #303030;
+  --strong: #eee;
+  --inverse: #181818;
+  font-synthesis: none;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f2f2;
+  --panel: #fafafa;
+  --line: #d7d7d7;
+  --text: #252525;
+  --muted: #686868;
+  --hover: #e7e7e7;
+  --strong: #292929;
+  --inverse: #fafafa;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  border-radius: 5px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover {
+  background: var(--hover);
+}
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 4px;
+}
+#app {
+  height: 100dvh;
+  min-height: 380px;
+  display: grid;
+  grid-template-rows: 64px minmax(0, 1fr) 88px;
+  background: var(--bg);
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 26px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  gap: 16px;
+}
+.brand,
+nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand svg {
+  width: 25px;
+  height: 25px;
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+h1 {
+  font-size: 15px;
+  letter-spacing: -0.4px;
+  font-weight: 600;
+  margin: 0;
+}
+h1 span {
+  font-weight: 400;
+  color: var(--muted);
+}
+.version {
+  font: 10px monospace;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 2px 5px;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+nav {
+  gap: 6px;
+}
+.primary {
+  border-color: var(--line);
+  background: var(--bg);
+}
+.primary span {
+  margin-left: 14px;
+}
+.divider {
+  height: 20px;
+  width: 1px;
+  background: var(--line);
+  margin: 0 8px;
+}
+.theme-button {
+  padding: 7px;
+}
+.theme-button svg {
+  display: block;
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+main {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+.scene-label {
+  position: absolute;
+  top: 30px;
+  left: 30px;
+  pointer-events: none;
+  z-index: 1;
+}
+.eyebrow {
+  font: 10px monospace;
+  letter-spacing: 1.7px;
+  color: var(--muted);
+}
+h2 {
+  font-size: 18px;
+  font-weight: 450;
+  letter-spacing: -0.3px;
+  margin: 10px 0 6px;
+  max-width: 55vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-label p {
+  font: 11px monospace;
+  color: var(--muted);
+  margin: 0;
+}
+.view-controls {
+  position: absolute;
+  right: 24px;
+  top: 26px;
+  z-index: 1;
+}
+.view-controls button {
+  border-color: var(--line);
+  background: var(--bg);
+}
+.viewport-footer {
+  position: absolute;
+  bottom: 22px;
+  left: 30px;
+  right: 30px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  pointer-events: none;
+  letter-spacing: 0.2px;
+}
+.viewport-footer > span:last-child {
+  font: 9px monospace;
+  letter-spacing: 1px;
+}
+.dot {
+  margin: 0 8px;
+}
+#notice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 90%;
+  padding: 14px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  z-index: 2;
+}
+#notice:empty {
+  display: none;
+}
+footer {
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+  gap: 28px;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.play {
+  background: var(--strong);
+  color: var(--inverse);
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font-size: 12px;
+}
+.play:hover {
+  background: var(--muted);
+}
+.animation-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 10px;
+}
+.timeline {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+}
+.timeline input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--text);
+  height: 3px;
+  cursor: pointer;
+}
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  font: 9px monospace;
+  color: var(--muted);
+}
+output {
+  font: 11px monospace;
+  white-space: nowrap;
+  color: var(--muted);
+  min-width: 100px;
+  text-align: right;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 640px) {
+  header {
+    padding: 0 14px;
+  }
+  .brand,
+  nav {
+    gap: 5px;
+  }
+  .version {
+    display: none;
+  }
+  h1 {
+    font-size: 13px;
+  }
+  button {
+    padding: 8px;
+  }
+  .primary span {
+    margin-left: 4px;
+  }
+  .divider {
+    margin: 0 3px;
+  }
+  .scene-label {
+    left: 20px;
+    top: 23px;
+  }
+  .view-controls {
+    right: 14px;
+    top: 19px;
+  }
+  .viewport-footer {
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+  }
+  .viewport-footer > span:last-child {
+    display: none;
+  }
+  footer {
+    padding: 0 16px;
+    gap: 14px;
+  }
+  .animation-label {
+    display: none;
+  }
+  output {
+    font-size: 10px;
+    min-width: 90px;
+  }
+  #app {
+    grid-template-rows: 58px minmax(0, 1fr) 80px;
+  }
+}

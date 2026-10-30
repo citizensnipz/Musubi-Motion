@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#171717" />
+    <meta
+      name="description"
+      content="Musubi Motion — a minimal Gaussian splat animation workspace powered by Three.js and Spark."
+    />
+    <title>Musubi Motion</title>
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("musubi-theme") ||
+          (matchMedia("(prefers-color-scheme: light)").matches
+            ? "light"
+            : "dark");
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div class="brand">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 16V8l8 8V8l8 8V8" />
+          </svg>
+          <h1>Musubi <span>Motion</span></h1>
+          <span class="version">0.1</span>
+        </div>
+        <nav aria-label="Workspace controls">
+          <button id="demo" title="Load the built-in splat study">Demo</button>
+          <button id="open" class="primary">
+            Open splat <span aria-hidden="true">↗</span>
+          </button>
+          <span class="divider"></span>
+          <button
+            id="theme"
+            class="theme-button"
+            aria-label="Switch to light theme"
+            title="Switch theme"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="10" r="6" />
+              <path d="M10 4a6 6 0 0 1 0 12Z" fill="currentColor" />
+            </svg>
+          </button>
+        </nav>
+      </header>
+      <main id="viewport" aria-label="3D splat viewport">
+        <div class="scene-label">
+          <span class="eyebrow">SCENE / 01</span>
+          <h2 id="asset-name">Splat study</h2>
+          <p id="asset-detail">Preparing scene…</p>
+        </div>
+        <div class="view-controls">
+          <button id="reset" title="Fit the scene to the viewport">
+            Reset view
+          </button>
+        </div>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <div class="viewport-footer">
+          <span>Drag to orbit <span class="dot">·</span> Scroll to zoom</span
+          ><span>THREE.JS / SPARK <span class="dot">·</span> WEBGL2</span>
+        </div>
+      </main>
+      <footer>
+        <div class="transport">
+          <button id="play" class="play" aria-label="Play animation" disabled>
+            ▶</button
+          ><button
+            id="rewind"
+            aria-label="Rewind animation"
+            title="Rewind"
+            disabled
+          >
+            ↶</button
+          ><span class="animation-label">Turntable</span>
+        </div>
+        <label class="timeline"
+          ><span class="sr-only">Animation time in seconds</span
+          ><input
+            id="timeline"
+            type="range"
+            min="0"
+            max="12"
+            step="0.01"
+            value="0"
+            disabled
+          /><span class="ticks" aria-hidden="true"
+            ><span>0s</span><span>3s</span><span>6s</span><span>9s</span
+            ><span>12s</span></span
+          ></label
+        >
+        <output id="time" for="timeline">00.00 / 12.00</output>
+      </footer>
+    </div>
+    <input
+      id="file"
+      type="file"
+      accept=".ply,.spz,.splat,.ksplat,.sog"
+      hidden
+    />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
