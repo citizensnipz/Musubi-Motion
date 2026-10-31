@@ -43,9 +43,9 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
   const links: { line: THREE.Line; child: string; parent: string }[] = [];
   const layer = new THREE.Group(); world.add(layer);
   const geometry = new THREE.SphereGeometry(.065, 12, 8);
-  const material = new THREE.MeshBasicMaterial({ color: 0xdedede, depthTest: false });
-  const activeMaterial = new THREE.MeshBasicMaterial({ color: 0xffb84d, depthTest: false });
-  const lineMaterial = new THREE.LineBasicMaterial({ color: 0xcccccc, depthTest: false });
+  const material = new THREE.MeshBasicMaterial({ color: 0xdedede, depthTest: false, depthWrite: false, transparent: true });
+  const activeMaterial = new THREE.MeshBasicMaterial({ color: 0xffb84d, depthTest: false, depthWrite: false, transparent: true });
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0xcccccc, depthTest: false, depthWrite: false, transparent: true });
   const editor = document.createElement("div"); editor.className = "joint-editor";
   host.append(editor);
   const status = host.querySelector(".rigging-status")!;
@@ -71,18 +71,18 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       const marker = new THREE.Mesh(geometry, selection.has(j.id) ? activeMaterial : material);
       marker.userData.jointId = j.id;
       markers.push(marker);
-      marker.renderOrder = 10; bone.add(marker);
+      marker.renderOrder = 100000; bone.add(marker);
     }
     for (const j of joints()) (j.parentId ? bones.get(j.parentId)! : layer).add(bones.get(j.id)!);
     layer.updateMatrixWorld(true);
     for (const j of joints()) if (j.parentId) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
         bones.get(j.id)!.getWorldPosition(new THREE.Vector3()), bones.get(j.parentId)!.getWorldPosition(new THREE.Vector3())
-      ]), lineMaterial); line.renderOrder = 10; layer.add(line);
+      ]), lineMaterial); line.renderOrder = 100000; layer.add(line);
       links.push({ line, child: j.id, parent: j.parentId });
     }
     editor.replaceChildren();
-    status.textContent = "Create joints, select one below, then choose its parent. Positions are local to the parent. Skinning is not enabled yet.";
+    status.textContent = "Select a splat and Shift-select the joints to bind, then use Bind splats. Only selected joints receive automatic distance weights.";
     const list = document.createElement("select"); list.setAttribute("aria-label", "Selected joint");
     list.add(new Option("New root / no joint selected", ""));
     for (const j of joints()) list.add(new Option(j.name, j.id));
@@ -128,7 +128,9 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
   }
   store.subscribe(render); render();
   return {
+    setVisible(visible:boolean) { layer.visible=visible; },
     get selectedId() { return selected; },
+    boneMatrix(id: string) { layer.updateMatrixWorld(true); return bones.get(id)?.matrixWorld.clone(); },
     get selectedIds() { return new Set(selection); },
     get selectedBone() { return bones.get(selected); },
     select(id: string) { selection = new Set(id ? [id] : []); render(); },
@@ -140,6 +142,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       selection = next; render();
     },
     marquee(begin: THREE.Vector2, end: THREE.Vector2, camera: THREE.Camera) {
+      if(!layer.visible)return [];
       layer.updateMatrixWorld(true);
       return [...bones].filter(([, bone]) => {
         const p = bone.getWorldPosition(new THREE.Vector3()).project(camera);
@@ -148,6 +151,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       }).map(([id]) => id);
     },
     pick(raycaster: THREE.Raycaster) {
+      if(!layer.visible)return undefined;
       layer.updateMatrixWorld(true);
       return raycaster.intersectObjects(markers, false)[0]?.object.userData.jointId as string | undefined;
     },

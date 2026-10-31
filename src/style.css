@@ -174,6 +174,24 @@ kbd {
   box-shadow: 0 2px 8px #0002;
   user-select: none;
 }
+#viewport-tools {
+  position: absolute; top: 10px; z-index: 6; display: flex; align-items: center;
+  gap: 2px; padding: 4px; max-width: calc(100% - 24px); overflow-x: auto;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  box-shadow: 0 2px 8px #0002; user-select: none;
+}
+#viewport-tools button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+  flex-shrink: 0; min-width: 28px; height: 30px; padding: 3px;
+  border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer;
+}
+#viewport-tools button:hover, #viewport-tools button[aria-pressed="true"] { background: var(--line); color: var(--text); }
+#viewport-tools button:focus-visible { outline: 1px solid var(--text); outline-offset: -1px; }
+#viewport-tools .camera-view { flex-direction: column; gap: 0; font-size: 9px; }
+#viewport-tools .camera-view svg { width: 13px; height: 13px; }
+#viewport-tools .viewport-divider { border-left: 1px solid var(--line); margin-left: 3px; }
+#viewport-tools-drag { touch-action: none; cursor: grab !important; min-width: 20px !important; }
+#viewport-tools-drag[aria-disabled="true"] { cursor: default !important; opacity: .4; }
 #palette-drag {
   flex-shrink: 0;
   display: flex;
@@ -480,6 +498,20 @@ wa-input::part(form-control-label) {
   margin: 20px 0 0;
   border: 0;
 }
+.channel-fields fieldset { position: relative; display: flex; flex-direction: column; gap: 3px; padding-left: 86px; margin-top: 12px; min-width: 0; }
+.channel-fields legend { position: absolute; left: 0; top: 4px; width: 78px; text-align: right; margin: 0; }
+.property-axis-row { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.axis-scrub { font-size: 10px; color: var(--muted); cursor: ew-resize; user-select: none; touch-action: none; width: 12px; }
+.property-axis-row wa-input { width: 100%; max-width: 140px; min-width: 0; }
+.property-axis-row wa-input::part(form-control-label) { display: none; }
+.property-axis-row wa-input::part(base) { min-height: 25px; height: 25px; }
+.property-axis-row wa-input::part(input) { font-size: 11px; padding: 2px 7px; }
+#properties .elasticity-fields { display: flex; flex-direction: column; gap: 4px; }
+#properties .elasticity-fields label { display: grid; grid-template-columns: minmax(78px,1fr) minmax(60px,140px); align-items: center; gap: 8px; text-align: right; }
+#properties .elasticity-fields input { height: 25px; min-width: 0; box-sizing: border-box; padding: 2px 7px; font-size: 11px; }
+[data-locked] { opacity: .55; }
+.property-context { position: fixed; z-index: 10000; background: var(--panel); border: 1px solid var(--line); padding: 4px; border-radius: 4px; }
+.property-context button { background: transparent; color: var(--text); border: 0; padding: 6px 20px; cursor: pointer; }
 .channel-fields legend {
   font-size: 11px;
   margin-bottom: 10px;
@@ -781,3 +813,18 @@ wa-dialog::part(footer) {
 .hierarchy-toggle:disabled { cursor: default; }
 
 .outliner-rename { min-width: 0; flex: 1; padding: 5px 8px; border: 1px solid var(--muted); background: var(--bg); color: var(--text); font: inherit; }
+
+#terminal-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+.terminal-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.terminal-toolbar button { background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
+.terminal-output { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px; font: 11px/1.6 Consolas, monospace; user-select: text; }
+.terminal-entry { display: flex; gap: 12px; overflow-wrap: anywhere; }
+.terminal-entry time { color: var(--muted); flex-shrink: 0; }
+.terminal-entry.error { color: #e67b7b; }
+
+.elasticity-properties { padding: 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.elasticity-properties h3 { font-size: 12px; margin: 0 0 10px; }
+.elasticity-scope { color: var(--muted); overflow-wrap: anywhere; }
+.elasticity-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.elasticity-fields label { display: flex; flex-direction: column; gap: 4px; }
+.elasticity-properties input, .elasticity-properties button { min-width: 0; padding: 6px; color: var(--text); background: var(--bg); border: 1px solid var(--line); }

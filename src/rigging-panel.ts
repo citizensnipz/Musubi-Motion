@@ -2,6 +2,7 @@ import { buttonContent, icon, type IconName } from "./ui.ts";
 import { mountToolPalette } from "./tool-palette.ts";
 
 const groups: { title: string; tools: [string, IconName][] }[] = [
+  { title: "Deformation", tools: [["Elasticity", "scale"]] },
   { title: "Skeleton", tools: [["Create joints", "bone"], ["Parent joints", "chain"], ["Mirror joints", "mirror"]] },
   { title: "Binding & weights", tools: [["Bind splats", "bind"], ["Unbind splats", "unbind"], ["Automatic weights", "weight"], ["Paint weights", "paint"]] },
   { title: "FK / IK", tools: [["FK rotate", "rotate"], ["Create IK chain", "chain"], ["Move IK target", "target"], ["Pole target", "pin"], ["Joint limits", "limits"], ["IK / FK blend", "scale"]] },

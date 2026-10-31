@@ -12,6 +12,8 @@ export type TransformNode = TransformChannels & {
   rotationOrder: "XYZ";
 };
 export type SplatShapeNode = {
+  elasticity?: import("./elasticity").Elasticity;
+  binding?: { jointIds: string[]; restMatrices: number[][] };
   id: string;
   type: "splatShape";
   name: string;

@@ -29,6 +29,7 @@ export function mountToolPalette(ids = { panel: "tool-palette", handle: "palette
       "aria-label",
       locked ? `Unlock ${label}` : `Lock ${label}`,
     );
+    lock.title=locked ? `Unlock ${label}` : `Lock ${label}`;
     handle.setAttribute("aria-disabled", String(locked));
     handle.title = locked
       ? `Unlock to move ${label}`

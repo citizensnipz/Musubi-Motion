@@ -63,6 +63,14 @@ function changeManifest(
   entries["scene.json"] = strToU8(JSON.stringify(manifest));
 }
 describe("portable MSB archives", () => {
+  it("preserves orthographic views and accepts older camera snapshots", async () => {
+    const snapshot={...editor,camera:{...editor.camera,view:"top" as const,height:12}};
+    const opened=await decodeProject(await encodeProject(emptyScene(),new Map(),snapshot));
+    expect(opened.editor).toEqual(snapshot);
+    const legacy=await decodeProject(await encodeProject(emptyScene(),new Map(),editor));
+    expect(legacy.editor.camera.view).toBeUndefined();
+    await expect(encodeProject(emptyScene(),new Map(),{...snapshot,camera:{...snapshot.camera,height:-1}})).rejects.toThrow("orthographic");
+  });
   it("round trips all IDs, shape offsets, transforms, editor state and original bytes", async () => {
     const { scene, files } = fixture();
     const packed = await encodeProject(scene, files, editor);

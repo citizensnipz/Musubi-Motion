@@ -2,7 +2,7 @@ import { createDockview } from "dockview";
 import "dockview/dist/styles/dockview.css";
 
 // Keep each existing content element alive, including the WebGL canvas, through layout changes.
-export function mountWorkspace(riggingContent: HTMLElement) {
+export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTMLElement) {
   const host = document.getElementById("workspace")!;
   const parking = document.createElement("div");
   parking.hidden = true;
@@ -14,6 +14,7 @@ export function mountWorkspace(riggingContent: HTMLElement) {
     ]),
   );
   contents.set("rigging", riggingContent);
+  contents.set("terminal", terminalContent);
   const api = createDockview(host, {
     theme: { name: "musubi", className: "dockview-theme-musubi", gap: 4 },
     disableFloatingGroups: true,
@@ -137,6 +138,7 @@ export function mountWorkspace(riggingContent: HTMLElement) {
   }).observe(host);
   document.getElementById("panel-staging")!.remove();
   const panels = {
+    terminal: { component: "terminal", title: "Terminal" },
     properties: { component: "properties", title: "Properties" },
     outliner: { component: "outliner-panel", title: "Outliner" },
     viewport: { component: "viewport", title: "Viewport" },
@@ -149,7 +151,7 @@ export function mountWorkspace(riggingContent: HTMLElement) {
       if (existing) { existing.api.setActive(); return; }
       api.addPanel({ id, ...config, tabComponent: "label", renderer: "always",
         minimumWidth: 220, minimumHeight: 100,
-        position: api.panels.length ? { direction: id === "timeline" ? "below" : "right" } : undefined,
+        position: api.panels.length ? { direction: id === "timeline" || id === "terminal" ? "below" : "right" } : undefined,
       }).api.setActive();
     });
   }

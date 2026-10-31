@@ -46,6 +46,7 @@ import {
   SlidersHorizontal,
   KeyRound,
   RotateCcw,
+  Grid2x2,
 } from "lucide";
 
 const icons = {
@@ -85,6 +86,7 @@ const icons = {
   limits: SlidersHorizontal,
   key: KeyRound,
   rest: RotateCcw,
+  grid: Grid2x2,
 };
 export type IconName = keyof typeof icons;
 export function icon(name: IconName) {

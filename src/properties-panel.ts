@@ -1,6 +1,7 @@
 import type { TransformChannels, TransformNode } from "./scene-document.ts";
 import type WaInput from "@awesome.me/webawesome/dist/components/input/input.js";
 import { icon } from "./ui.ts";
+import { propertyInteraction } from "./property-interaction";
 
 export function createPropertiesPanel(
   host: HTMLElement,
@@ -27,6 +28,8 @@ export function createPropertiesPanel(
     fields = host.querySelector<HTMLElement>("#properties-fields")!,
     name = host.querySelector<WaInput>("#object-name")!;
   let activeId: string | undefined;
+  const refreshLocks:Array<()=>void>=[];
+  refreshLocks.push(propertyInteraction(name,()=>`${activeId}/name`));
   const inputs: Array<{
     input: WaInput;
     channel: keyof TransformChannels;
@@ -47,14 +50,15 @@ export function createPropertiesPanel(
       input.label = `${legend.textContent} ${letter}`;
       // A short visible axis label and a full accessible label share the same label slot.
       const label = document.createElement("span");
-      label.slot = "label";
+      label.className = "axis-scrub";
       label.innerHTML = `<span aria-hidden="true">${letter}</span><span class="sr-only">${legend.textContent} ${letter}</span>`;
-      input.append(label);
+      const row=document.createElement("div");row.className="property-axis-row";row.append(label,input);
+      refreshLocks.push(propertyInteraction(input,()=>`${activeId}/${channel}/${axis}`,label));
       input.dataset.channel = channel;
       input.dataset.axis = String(axis);
       input.addEventListener("change", () => {
         if (
-          activeId &&
+          activeId && !input.readonly &&
           input.value !== null &&
           input.value.trim() !== "" &&
           Number.isFinite(Number(input.value))
@@ -69,12 +73,12 @@ export function createPropertiesPanel(
         }
       });
       inputs.push({ input, channel, axis });
-      group.append(input);
+      group.append(row);
     }
     host.querySelector(".channel-fields")!.append(group);
   }
   name.addEventListener("change", () => {
-    if (activeId) handlers.rename(activeId, name.value ?? "");
+    if (activeId && !name.readonly) handlers.rename(activeId, name.value ?? "");
     name.blur();
   });
   name.addEventListener("keydown", (event) => {
@@ -209,6 +213,7 @@ export function createPropertiesPanel(
       if (!single) return;
       if (document.activeElement !== name) name.value = single.name;
       const channels = preview ?? single;
+      refreshLocks.forEach(refresh=>refresh());
       for (const { input, channel, axis } of inputs)
       {
         input.disabled = !!single.joint && channel === "scale";

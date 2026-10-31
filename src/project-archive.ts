@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzip, zip } from "fflate";
 import { validateJoints } from "./skeleton.ts";
+import { validateElasticity } from "./elasticity";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 
 export const MAX_PROJECT_BYTES = 512 * 1024 * 1024;
@@ -12,6 +13,8 @@ export type EditorSnapshot = {
     fov: number;
     near: number;
     far: number;
+    view?: import("./viewport-tools").ViewName;
+    height?: number;
   };
   time: number;
 };
@@ -116,6 +119,20 @@ export function validateScene(value: unknown): SceneDocument {
         fail("Unsupported rotation order or scale.");
       parents.set(key, parent as string | null);
     } else if (node.type === "splatShape") {
+      if (node.elasticity !== undefined) {
+        validateElasticity(node.elasticity);
+        if (!node.binding) fail("Elasticity requires a binding.");
+      }
+      if (node.binding !== undefined) {
+        const binding = record(node.binding);
+        if (!Array.isArray(binding.jointIds) || !binding.jointIds.length || binding.jointIds.length > 256 ||
+          new Set(binding.jointIds).size !== binding.jointIds.length || !Array.isArray(binding.restMatrices) ||
+          binding.restMatrices.length !== binding.jointIds.length) fail("Invalid splat binding.");
+        for (const jointId of binding.jointIds as unknown[]) id(jointId);
+        for (const matrix of binding.restMatrices as unknown[]) {
+          if (!Array.isArray(matrix) || matrix.length !== 16 || !matrix.every(n => typeof n === "number" && Number.isFinite(n))) fail("Invalid bind matrix.");
+        }
+      }
       if (parent === null) fail("Shape has no transform.");
       id(node.assetId);
       if (!Object.hasOwn(assets, node.assetId))
@@ -163,6 +180,8 @@ function validateEditor(value: unknown): EditorSnapshot {
   finite(camera.fov);
   finite(camera.near);
   finite(camera.far);
+  if(camera.view!==undefined&&!["perspective","front","back","left","right","top","bottom"].includes(camera.view as string))fail("Invalid saved camera view.");
+  if(camera.height!==undefined&&(typeof camera.height!=="number"||!Number.isFinite(camera.height)||camera.height<=0))fail("Invalid orthographic height.");
   finite(editor.time);
   if (
     camera.fov < 1 ||

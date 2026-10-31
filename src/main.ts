@@ -44,9 +44,15 @@ import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.
 import type WaDropdown from "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
 import "./style.css";
 import { mountSkeleton } from "./skeleton.ts";
+import { createBinding } from "./splat-binding.ts";
+import { createTerminal } from "./terminal-panel.ts";
+import { elasticityDefaults, elasticEdges, validateElasticity } from "./elasticity";
+import { createElasticityPanel } from "./elasticity-panel";
+import { mountViewportTools, type ViewName } from "./viewport-tools";
 import { createRiggingPanel, mountRiggingPanel } from "./rigging-panel.ts";
 const riggingPanel = createRiggingPanel();
-const workspace = mountWorkspace(riggingPanel);
+const terminal = createTerminal();
+const workspace = mountWorkspace(riggingPanel, terminal.element);
 mountRiggingPanel(riggingPanel, workspace);
 hydrateIcons();
 mountToolPalette();
@@ -54,6 +60,7 @@ const element = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const viewport = element<HTMLDivElement>("viewport");
 const notice = element<HTMLDivElement>("notice");
+terminal.watchNotices(notice);
 const play = element<WaButton>("play");
 const rewind = element<WaButton>("rewind");
 const timeline = element<WaSlider>("timeline");
@@ -133,7 +140,10 @@ async function start() {
   viewport.prepend(webgl.domElement);
   scene = new THREE.Scene();
   const world = scene;
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
+  const perspective = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
+  const orthographic = new THREE.OrthographicCamera(-4,4,4,-4,.01,1000);
+  let camera:THREE.PerspectiveCamera|THREE.OrthographicCamera=perspective;
+  let activeView:ViewName="perspective", gizmosVisible=true, jointsVisible=true;
   const store = createSceneStore();
   // GPU objects and asset bytes are excluded from the document and undo snapshots.
   const runtime = new Map<string, RuntimeObject>();
@@ -164,6 +174,71 @@ async function start() {
     previous = 0;
   let dragId: string | undefined;
   const skeleton = mountSkeleton(store, world, riggingPanel, () => !loading && !dragId);
+  const bindings = new Map<string, { signature: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
+  function boundSelection(object:RuntimeObject) {
+    return [...bindings.values()].find(b=>b.mesh===object.mesh)?.skin.selection();
+  }
+  function updateBindings() {
+    const doc = store.getState().document;
+    const shapes = Object.values(doc.nodes).filter((n): n is SplatShapeNode => n.type === "splatShape");
+    for (const [id, entry] of bindings) {
+      const shape = shapes.find(s => s.id === id);
+      if (!shape?.binding || JSON.stringify([shape.binding, shape.elasticity, doc.joints?.map(j => [j.id, j.parentId])]) !== entry.signature || runtime.get(shape.parentId)?.mesh !== entry.mesh) {
+        entry.skin.dispose(); bindings.delete(id);
+      }
+    }
+    for (const shape of shapes) if (shape.binding) {
+      const object = runtime.get(shape.parentId);
+      if (!object) continue;
+      if (!bindings.has(shape.id)) bindings.set(shape.id, {signature:JSON.stringify([shape.binding, shape.elasticity, doc.joints?.map(j => [j.id, j.parentId])]),mesh:object.mesh,skin:createBinding(object.mesh,shape.binding,shape.elasticity,doc.joints)});
+      bindings.get(shape.id)!.skin.update(id => skeleton.boneMatrix(id));
+    }
+  }
+  for (const control of [...Array.from(document.querySelectorAll<WaButton>("[data-rig-action]")), ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action]"))]) {
+    const action = control.dataset.rigAction;
+    if (action === "Elasticity") {
+      control.disabled = false; control.title = "Apply Elasticity to selected bound objects";
+      control.addEventListener("click", () => {
+        if (loading || dragId) return;
+        const doc = store.getState().document;
+        const shapes = Object.values(doc.nodes).filter((n): n is SplatShapeNode => n.type === "splatShape" && selected.has(n.parentId));
+        if (!shapes.length || shapes.some(s=>!s.binding)) { notice.textContent="Select an object already bound to joints."; return; }
+        const scope = skeleton.selectedIds.size ? [...skeleton.selectedIds] : null;
+        if (shapes.some(s=>!elasticEdges(s.binding!.jointIds,doc.joints??[],scope).length)) { notice.textContent="Elasticity requires a bound parent–child connection. Select both endpoints, or no joints for all connections."; return; }
+        const nodes = {...doc.nodes};
+        for (const shape of shapes) nodes[shape.id]={...shape,elasticity:{...elasticityDefaults,...shape.elasticity,joints:scope}};
+        store.setState({document:{...doc,nodes},editLabel:"Apply Elasticity"});
+        terminal.log(`Elasticity applied to ${shapes.length} objects; ${scope ? scope.length + " selected joints" : "all bound connections"}.`);
+      });
+      continue;
+    }
+    if (action !== "Bind splats" && action !== "Unbind splats") continue;
+    control.disabled = false; control.title = action;
+    control.addEventListener("click", () => {
+      if (loading || dragId) return;
+      const doc = store.getState().document;
+      const shapes = Object.values(doc.nodes).filter((n): n is SplatShapeNode => n.type === "splatShape" && selected.has(n.parentId));
+      const joints = (doc.joints ?? []).filter(j => skeleton.selectedIds.has(j.id));
+      if (action === "Bind splats" && !joints.length) return;
+      if (!shapes.length) { notice.textContent = "Select a splat object in the Outliner first."; return; }
+      if (action === "Bind splats" && joints.length > 256) { notice.textContent = "Select at most 256 joints for binding."; return; }
+      setPlaying(false); time = 0; updateTime(); world.updateMatrixWorld(true);
+      terminal.log(`${action}: ${shapes.length} object(s); ${joints.length} selected joint(s).`);
+      if (action === "Bind splats") terminal.log(`Joint influences: ${joints.map(j => j.name).join(", ")}. Up to four nearest joints per splat; inverse-distance weights.`);
+      const nodes = {...doc.nodes};
+      for (const shape of shapes) {
+        const mesh = runtime.get(shape.parentId)!.mesh;
+        terminal.log(`${action}: ${doc.nodes[shape.parentId].name}; ${runtime.get(shape.parentId)!.count.toLocaleString()} splats.`);
+        mesh.updateWorldMatrix(true,false);
+        const inverse = mesh.matrixWorld.clone().invert();
+        nodes[shape.id] = {...shape, elasticity: undefined, binding: action === "Unbind splats" ? undefined : {
+          jointIds: joints.map(j=>j.id), restMatrices: joints.map(j=>inverse.clone().multiply(skeleton.boneMatrix(j.id)!).toArray())
+        }};
+      }
+      store.setState({document:{...doc,nodes},editLabel:action});
+      notice.textContent = action === "Bind splats" ? `Bound to ${joints.length} selected joints using automatic distance weights.` : "Splats unbound.";
+    });
+  }
   let cancelDrag = false;
   const modes = {
     q: "select",
@@ -179,6 +254,7 @@ async function start() {
     (event) => {
       controls.enabled = event.pointerType === "touch" || event.altKey;
       transform.enabled =
+        gizmosVisible && (!skeleton.selectedId || jointsVisible) &&
         !event.altKey &&
         (selected.size === 1 || !!skeleton.selectedId) &&
         currentMode !== "select" &&
@@ -186,7 +262,7 @@ async function start() {
     },
     true,
   );
-  const controls = new OrbitControls(camera, webgl.domElement);
+  let controls = new OrbitControls(camera, webgl.domElement);
   controls.mouseButtons = {
     LEFT: THREE.MOUSE.ROTATE,
     MIDDLE: THREE.MOUSE.PAN,
@@ -214,6 +290,8 @@ async function start() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
+    if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
+    if (selected.size && skeleton.selectedIds.size) { transform.detach(); transform.enabled = false; return; }
     if (skeleton.selectedBone) {
       if ((currentMode === "translate" || currentMode === "rotate") && !loading) {
         transform.attach(skeleton.selectedBone);
@@ -275,8 +353,7 @@ async function start() {
   viewport.append(selectionLabel);
   riggingPanel.addEventListener("joint-selection-change", () => {
     if (skeleton.selectedIds.size) {
-      selected.clear();
-      for (const object of runtime.values()) object.box.visible = false;
+      for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
       selectionLabel.textContent = skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : `${skeleton.selectedIds.size} joints selected`;
       updatePanel();
     }
@@ -284,6 +361,7 @@ async function start() {
       selectionLabel.textContent = selected.size ? `${selected.size} objects selected` : "Nothing selected";
       updatePanel();
     }
+    if (selected.size && skeleton.selectedIds.size) selectionLabel.textContent = `${selected.size} objects · ${skeleton.selectedIds.size} joints selected`;
     refreshGizmo();
   });
   function readChannels(object: THREE.Object3D): TransformChannels {
@@ -304,7 +382,10 @@ async function start() {
     },
     select(id, additive) {
       if (dragId || loading) return;
-      if (store.getState().document.joints?.some(j => j.id === id)) skeleton.selectMany([id], additive);
+      if (store.getState().document.joints?.some(j => j.id === id)) {
+        if (!additive) selected.clear();
+        skeleton.selectMany([id], additive);
+      }
       else selectObjects([id], additive);
     },
     rename(id, name) {
@@ -344,6 +425,13 @@ async function start() {
   panelHost.addEventListener("focusout", () =>
     queueMicrotask(() => updatePanel()),
   );
+  const elasticityPanel = createElasticityPanel(panelHost, (id,value) => {
+    if (loading || dragId) return;
+    const doc=store.getState().document, shape=doc.nodes[id];
+    if(shape?.type!=="splatShape" || !shape.binding)return;
+    if(value)validateElasticity(value);
+    store.setState({document:{...doc,nodes:{...doc.nodes,[id]:{...shape,elasticity:value}}},editLabel:value?"Edit Elasticity":"Remove Elasticity"});
+  });
   function updatePanel(preview?: TransformChannels) {
     const doc = store.getState().document,
       id = singleId();
@@ -352,11 +440,12 @@ async function start() {
     );
     const jointNodes = (doc.joints ?? []).map(j => ({...j, type: "transform" as const, joint: true,
       rotationOrder: "XYZ" as const, rotation: j.rotation ?? [0,0,0] as Vec3, scale: [1,1,1] as Vec3 }));
-    panel.update([...transformNodes(doc), ...jointNodes], skeleton.selectedIds.size ? skeleton.selectedIds : selected, shape?.name, preview);
+    panel.update([...transformNodes(doc), ...jointNodes], new Set([...selected, ...skeleton.selectedIds]), shape?.name, preview);
+    elasticityPanel.update(shape?.type === "splatShape" ? shape : undefined, new Map((doc.joints??[]).map(j=>[j.id,j.name])));
   }
   function selectObjects(ids: string[], additive = false) {
     if (dragId) return;
-    if (skeleton.selectedIds.size) skeleton.select("");
+    if (!additive && skeleton.selectedIds.size) skeleton.select("");
     const doc = store.getState().document;
     const next = additive ? new Set(selected) : new Set<string>();
     for (const id of ids)
@@ -372,7 +461,7 @@ async function start() {
     selected = new Set(
       [...selected].filter((id) => doc.nodes[id]?.type === "transform"),
     );
-    for (const [id, object] of runtime) object.box.visible = selected.has(id);
+    for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
     selectionLabel.textContent = skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
       ? `${selected.size} object${selected.size === 1 ? "" : "s"} selected`
       : "Nothing selected";
@@ -410,9 +499,10 @@ async function start() {
       }
     }
     const nodes = transformNodes(doc);
+    updateBindings();
     updateFileState();
     const count = nodes.reduce(
-      (sum, node) => sum + (runtime.get(node.id)?.count ?? 0),
+      (sum, node) => sum + (runtime.get(node.id)?.mesh.extSplats?.numSplats ?? runtime.get(node.id)?.count ?? 0),
       0,
     );
     element("asset-detail").textContent =
@@ -462,7 +552,8 @@ async function start() {
     for (const id of assetFiles.keys())
       if (!retainedAssets.has(id)) assetFiles.delete(id);
   }
-  store.subscribe(() => {
+  store.subscribe((state, previous) => {
+    if (state.document !== previous.document) terminal.log(`${state.editLabel} · ${transformNodes(state.document).length} objects · ${state.document.joints?.length ?? 0} joints`);
     syncScene();
     queueMicrotask(collectUnusedResources);
   });
@@ -476,6 +567,7 @@ async function start() {
     const history = store.temporal.getState();
     if (redo) history.redo();
     else history.undo();
+    terminal.log(redo ? "Redo requested." : "Undo requested.");
     updateHistoryButtons();
   }
   element("edit-menu").addEventListener("wa-select", (event) => {
@@ -513,7 +605,7 @@ async function start() {
     updateHistoryButtons();
   });
   transform.addEventListener("objectChange", () => {
-    if (skeleton.selectedId) { skeleton.preview(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
+    if (skeleton.selectedId) { skeleton.preview(); updateBindings(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
     if (!object) return;
@@ -548,6 +640,45 @@ async function start() {
     grid.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color })));
   }
   applyTheme();
+  const viewDirections:Record<ViewName,THREE.Vector3>={
+    perspective:new THREE.Vector3(.35,.2,1).normalize(),front:new THREE.Vector3(0,0,1),back:new THREE.Vector3(0,0,-1),
+    left:new THREE.Vector3(-1,0,0),right:new THREE.Vector3(1,0,0),top:new THREE.Vector3(0,1,0),bottom:new THREE.Vector3(0,-1,0),
+  };
+  function reconnectControls(target:THREE.Vector3) {
+    controls.dispose();controls=new OrbitControls(camera,webgl.domElement);
+    controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.PAN,RIGHT:THREE.MOUSE.DOLLY};
+    controls.enableDamping=true;controls.enableRotate=camera===perspective;
+    controls.target.copy(target);controls.update();transform.camera=camera;
+  }
+  function resizeProjection() {
+    perspective.aspect=viewport.clientWidth/Math.max(1,viewport.clientHeight);
+    const half=(orthographic.top-orthographic.bottom)/2;
+    orthographic.left=-half*perspective.aspect;orthographic.right=half*perspective.aspect;
+    perspective.updateProjectionMatrix();orthographic.updateProjectionMatrix();
+  }
+  function switchView(name:ViewName) {
+    if(dragId)return;
+    const target=controls.target.clone(),distance=Math.max(camera.position.distanceTo(target),.01);
+    const visibleHeight=camera===perspective ? 2*distance*Math.tan(THREE.MathUtils.degToRad(perspective.fov/2)) : (orthographic.top-orthographic.bottom)/orthographic.zoom;
+    const near=camera.near,far=camera.far;
+    activeView=name;camera=name==="perspective"?perspective:orthographic;
+    camera.near=near;camera.far=far;
+    camera.up.set(0,1,0);
+    if(name==="top")camera.up.set(0,0,-1);
+    if(name==="bottom")camera.up.set(0,0,1);
+    const newDistance=name==="perspective"?visibleHeight/(2*Math.tan(THREE.MathUtils.degToRad(perspective.fov/2))):distance;
+    camera.position.copy(target).addScaledVector(viewDirections[name],newDistance);
+    orthographic.top=visibleHeight/2;orthographic.bottom=-visibleHeight/2;orthographic.zoom=1;
+    resizeProjection();reconnectControls(target);viewportTools.setView(name);
+  }
+  const viewportTools=mountViewportTools(viewport,(kind,visible)=>{
+    if(kind==="grid")grid!.visible=visible;
+    if(kind==="joints"){jointsVisible=visible;skeleton.setVisible(visible);}
+    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);}
+    refreshGizmo();
+  },switchView,()=>{switchView("perspective");fitView();});
+  viewportTools.setView(activeView);
+  element("reset").parentElement!.hidden=true;
   function fitView() {
     world.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
@@ -558,25 +689,26 @@ async function start() {
       const object = runtime.get(id);
       if (object)
         bounds.union(
-          object.bounds.clone().applyMatrix4(object.mesh.matrixWorld),
+          (boundSelection(object)?.bounds??object.bounds).clone().applyMatrix4(object.mesh.matrixWorld),
         );
     }
     if (bounds.isEmpty()) return;
     const sphere = bounds.getBoundingSphere(new THREE.Sphere()),
       radius = Math.max(sphere.radius, 0.01);
-    const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+    const halfFov = THREE.MathUtils.degToRad(perspective.fov / 2);
     const limitingFov = Math.min(
       halfFov,
-      Math.atan(Math.tan(halfFov) * camera.aspect),
+      Math.atan(Math.tan(halfFov) * perspective.aspect),
     );
     const distance = (radius / Math.sin(limitingFov)) * 1.15;
     camera.position
-      .set(0.35, 0.2, 1)
+      .copy(viewDirections[activeView])
       .normalize()
       .multiplyScalar(distance)
       .add(sphere.center);
     camera.near = Math.max(radius / 1000, 0.0001);
     camera.far = Math.max(distance * 50, 100);
+    if(camera===orthographic){orthographic.zoom=1;orthographic.top=radius*1.15/Math.min(1,perspective.aspect);orthographic.bottom=-orthographic.top;resizeProjection();}
     camera.updateProjectionMatrix();
     controls.target.copy(sphere.center);
     controls.minDistance = radius * 0.15;
@@ -587,10 +719,9 @@ async function start() {
     const { width, height } = viewport.getBoundingClientRect();
     if (width <= 0 || height <= 0) return;
     webgl.setSize(width, height);
-    camera.aspect = width / Math.max(1, height);
-    camera.updateProjectionMatrix();
+    resizeProjection();
   }).observe(viewport);
-  camera.aspect = viewport.clientWidth / Math.max(1, viewport.clientHeight);
+  resizeProjection();
   const marquee = document.createElement("div");
   marquee.className = "selection-marquee";
   marquee.hidden = true;
@@ -666,24 +797,19 @@ async function start() {
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) {
       raycaster.setFromCamera(end, camera);
       const jointHit = skeleton.pick(raycaster);
-      if (jointHit) { skeleton.selectMany([jointHit], start.additive); return; }
-      const hits = raycaster.intersectObjects(
-        objects.map(({ object }) => object.mesh),
-        false,
-      );
-      const hit = hits.length
-        ? objects.find(({ object }) => object.mesh === hits[0].object)
-        : undefined;
+      if (jointHit) { if (!start.additive) selected.clear(); skeleton.selectMany([jointHit], start.additive); return; }
+      const hits=objects.map(({id,object})=>({id,distance:boundSelection(object)?.pick(raycaster)??raycaster.intersectObject(object.mesh,false)[0]?.distance??Infinity})).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
+      const hit=hits[0];
       selectObjects(hit ? [hit.id] : [], start.additive);
     } else {
       const begin = ndc(start.x, start.y),
         hits: string[] = [];
       const jointHits = skeleton.marquee(begin, end, camera);
-      if (jointHits.length) { skeleton.selectMany(jointHits, start.additive); return; }
-      for (const { id, object } of objects)
-        for (let i = 0; i < object.centers.length; i += 3) {
+      for (const { id, object } of objects) {
+        const centers=boundSelection(object)?.centers??object.centers;
+        for (let i = 0; i < centers.length; i += 3) {
           projected
-            .fromArray(object.centers, i)
+            .fromArray(centers, i)
             .applyMatrix4(object.mesh.matrixWorld)
             .project(camera);
           if (
@@ -698,7 +824,10 @@ async function start() {
             break;
           }
         }
-      selectObjects(hits, start.additive);
+      }
+      if (!start.additive) { selected.clear(); skeleton.select(""); }
+      selectObjects(hits, true);
+      skeleton.selectMany(jointHits, true);
     }
   });
   webgl.domElement.addEventListener("pointercancel", () => {
@@ -748,7 +877,7 @@ async function start() {
     if (key === "delete") {
       if (loading || dragId) return;
       event.preventDefault();
-      const ids = skeleton.selectedIds.size ? skeleton.selectedIds : selected;
+      const ids = new Set([...selected, ...skeleton.selectedIds]);
       if (!ids.size) return;
       setPlaying(false);
       store.setState({ document: deleteSceneItems(store.getState().document, ids), editLabel: "Delete selection" });
@@ -845,7 +974,9 @@ async function start() {
       camera: {
         position: camera.position.toArray() as Vec3,
         target: controls.target.toArray() as Vec3,
-        fov: camera.fov,
+        fov: perspective.fov,
+        view:activeView,
+        height:(orthographic.top-orthographic.bottom)/orthographic.zoom,
         near: camera.near,
         far: camera.far,
       },
@@ -853,18 +984,23 @@ async function start() {
     };
   }
   function restoreEditor(editor: EditorSnapshot) {
+    activeView=editor.camera.view??"perspective";
+    camera=activeView==="perspective"?perspective:orthographic;
+    camera.up.set(0,1,0);
+    if(activeView==="top")camera.up.set(0,0,-1);
+    if(activeView==="bottom")camera.up.set(0,0,1);
     // Flush residual orbit damping before applying the saved view.
     controls.enableDamping = false;
     controls.update();
     camera.position.fromArray(editor.camera.position);
     controls.target.fromArray(editor.camera.target);
-    camera.fov = editor.camera.fov;
+    perspective.fov = editor.camera.fov;
+    orthographic.top=(editor.camera.height??8)/2;orthographic.bottom=-orthographic.top;orthographic.zoom=1;
     camera.near = editor.camera.near;
     camera.far = editor.camera.far;
     controls.minDistance = 0.00001;
     controls.maxDistance = Infinity;
-    camera.updateProjectionMatrix();
-    controls.update();
+    resizeProjection();reconnectControls(new THREE.Vector3(...editor.camera.target));viewportTools.setView(activeView);
     controls.enableDamping = true;
     time = editor.time;
     updateTime();
@@ -1145,7 +1281,7 @@ async function start() {
       if (object) {
         object.mesh.updateWorldMatrix(true, false);
         object.box.box
-          .copy(object.bounds)
+          .copy(boundSelection(object)?.bounds??object.bounds)
           .applyMatrix4(object.mesh.matrixWorld);
       }
     }
