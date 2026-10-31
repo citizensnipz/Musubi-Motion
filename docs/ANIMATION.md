@@ -208,9 +208,33 @@ IK controls select a **Root joint** and descendant **End joint**, then click
 **Create IK handle**. **Use selected joints** loads a root/end pair from the scene.
 Its target is a world-space XYZ position. Change the target to solve the chain;
 use the FK/IK blend to retain FK at zero or apply the solution at one. The
-**Match target to FK** places the IK target at the current FK endpoint.
+**Match target to FK** places the IK target at the current FK endpoint. It only
+moves the target; it does not key joints or change the blend.
 Enable/disable, target, blend, solver iteration count, and handle removal are
 document edits with undo and serialization.
+
+To keep the current solved pose as FK, select an enabled handle with blend above
+zero and click **Match FK to IK and key**. The command captures XYZ local rotation
+keys for every joint from root through end at the current frame, then sets the
+handle's blend to zero. Both changes form one undo command. It samples the IK
+result before constraints and chooses equivalent Euler angles near the current
+FK values to preserve rotation continuity. Existing keys at that frame retain
+their interpolation and tangent settings; new keys use auto Bezier tangents.
+Position and scale keys are unchanged.
+
+Matching rejects chains with SDK-owned rotation channels or enabled Orient,
+Aim, or Parent constraints on their joints. Disable or remove those competing
+rotation controls before matching. A disabled handle or zero blend has no active
+IK pose to capture. This command matches one frame: the blend setting is not
+animated, so it changes how the handle evaluates at every frame. It neither
+bakes a frame range nor guarantees a seamless switch elsewhere in the animation.
+
+Before committing, matching checks that the chain keeps its world positions and
+orientations, both before and after constraints. Unkeyed position previews or
+rotation-driven dependencies can make a rotation-only match change the pose;
+the command then rejects the entire edit. Key those position previews or resolve
+the dependencies first. Point constraints are allowed when the resulting pose
+remains unchanged.
 
 Click **Move target in viewport** to select the handle's target marker and attach
 the translation gizmo. Target markers can also be selected by clicking them in
@@ -226,7 +250,7 @@ control ancestors of another chain. This prevents order-dependent results.
 
 Current IK limitations are significant: no pole vector, joint orientation/axis
 editing, angular limits, analytic two-bone solution, target transform node,
-target keyframing, or complete IK-to-FK pose baking. Matching a target position
+target/blend keyframing, or range-based IK-to-FK pose baking. Matching a target position
 does not reproduce every possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
 
@@ -320,7 +344,7 @@ small-scene playback results.
 ## Remaining work, in priority order
 
 1. Pole vectors, analytic two-bone IK, local joint axes/orientation, rotation
-   limits, target animation, and complete IK/FK matching/baking.
+   limits, target/blend animation, and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and curve-based controller shapes.
 3. Editable normalized skin weights, influence management, weight painting,
@@ -340,6 +364,12 @@ The aim workflow follows Autodesk's [Aim constraint options](https://help.autode
 the local aim direction points toward a target, and a world-up direction controls
 roll. Musubi uses +Z as its default aim axis, while Maya documents +X, and exposes
 only signed-axis vector-up settings rather than Maya's full set of up modes.
+Autodesk's [IK/FK Keys menu](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-Animation/files/GUID-C5ACDDBC-9E30-443C-8419-F07FC41E9A86.htm)
+distinguishes moving an IK target to an FK endpoint from keying the handle and
+joint chain. Its [IK/FK blending workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-8B0B343A-B00A-427C-8C79-E2B9008C4A88.htm)
+also animates blend values across frames. Musubi's matching commands cover target
+alignment and a current-frame rotation capture; animated blend transitions remain
+future work.
 The interface adapts these concepts without using Autodesk code, branding,
 proprietary artwork, or file formats.
 

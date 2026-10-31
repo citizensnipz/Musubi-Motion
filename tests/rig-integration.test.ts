@@ -5,7 +5,7 @@ import { addSplat, deleteSceneItems, emptyScene, type SceneDocument } from "../s
 import { createSceneStore } from "../src/scene-store.ts";
 import { decodeProject, encodeProject, validateScene } from "../src/project-archive.ts";
 import { evaluateSceneAnimation, setKeys, validateAnimation } from "../src/animation.ts";
-import { createIKHandle, evaluateIK, validateIKHandles } from "../src/ik.ts";
+import { createIKHandle, evaluateIK, jointWorldMatrices, matchFKToIK, validateIKHandles } from "../src/ik.ts";
 import { createConstraint, evaluateConstraints, validateConstraints } from "../src/constraints.ts";
 import { setDrivenKey, evaluateDrivenKeys } from "../src/driven-keys.ts";
 import { reparentJoint } from "../src/skeleton.ts";
@@ -43,6 +43,20 @@ function evaluate(doc: SceneDocument, frame: number) {
 }
 
 describe("complete rig persistence and deletion", () => {
+  it("saves and reopens a matched FK pose with rotation keys and zero IK blend", async () => {
+    const store = createSceneStore(fixture()), before = store.getState().document;
+    const expected = jointWorldMatrices(before, evaluate(before, 10));
+    matchFKToIK(store, before.ikHandles![0].id, 10);
+    const matched = store.getState().document;
+    const opened = await decodeProject(await encodeProject(matched, new Map(), { ...editor, time: 10 / 24 }));
+    expect(opened.scene).toEqual(matched);
+    expect(opened.scene.ikHandles![0].blend).toBe(0);
+    expect(opened.scene.animation!.tracks.filter(track => ["root", "middle", "end"].includes(track.targetId))).toHaveLength(9);
+    const actual = jointWorldMatrices(opened.scene, evaluate(opened.scene, 10));
+    for (const id of ["root", "middle", "end"]) actual.get(id)!.elements.forEach((value, index) => expect(value).toBeCloseTo(expected.get(id)!.elements[index], 7));
+    store.temporal.getState().undo(); expect(store.getState().document).toBe(before);
+    store.temporal.getState().redo(); expect(store.getState().document).toBe(matched);
+  });
   it("round-trips aim axes and rejects malformed aim metadata in packed archives", async () => {
     const store = createSceneStore(fixture());
     createConstraint(store, "aim", "independent", "source", false, evaluate(store.getState().document, 10), { aimAxis: "-X", worldUpAxis: "+Z" });

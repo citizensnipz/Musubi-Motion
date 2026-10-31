@@ -12,6 +12,7 @@ service was introduced by this work.
 | Development checkpoint recorded at 16:56 | 118 tests passed across 15 files |
 | Curve-insertion checkpoint at 17:12 | 126 tests passed across 15 files |
 | Aim-constraint checkpoint at 17:19 | 137 tests passed across 15 files |
+| IK/FK matching checkpoint at 17:28 | 148 tests passed across 15 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -39,6 +40,7 @@ latest checked session had no browser console errors.
 | Save shortcut in a rigging field | Ctrl+Shift+S from the Set Driven Key driver-value field opened Save As; cancel returned to editing |
 | Set Driven Key | The example mapped driver value 1.5 to 90° rotation; an additional Scale X relationship mapped 0.5→1 |
 | IK | Editing a target changed the solved pose; blend 0 restored the FK value 7.5°; target matching was exercised |
+| Match FK to IK and key | At frame 24, the shoulder's displayed −0.00064° rotation stayed unchanged while blend changed 1→0 and all XYZ rotation diamonds became keyed. Undo restored blend 1 in one step; redo restored 0; seeking away and back retained the keyed pose |
 | IK viewport target selection | Move target in viewport selected the target and attached the translation gizmo; pointer selection was checked |
 | IK viewport target drag/history | An actual canvas X-gizmo drag moved target X from −2 to approximately −0.775372 and produced one Edit IK handle entry; undo restored −2 and redo restored the edited value |
 | IK viewport target cancellation | After undo, another drag followed by Escape restored −2 without adding history; redo still replayed the prior −0.775372 edit |
@@ -95,6 +97,7 @@ were not benchmarked.
 - `962a2f3` — Integrate animation editors and rigging workspaces with scene playback.
 - `1ba021a` — Add viewport IK target manipulation and enforce exact constraint poses.
 - `c7f422e` — Preserve animation curve shape when inserting keys.
+- `1a15714` — Add aim constraints with configurable local and world-up axes.
 
 The curve-insertion commit adds verified shape-preserving key insertion,
 preserves the animation frame during import, and restores Save/Open shortcuts
@@ -106,5 +109,9 @@ offsets, source-position tracking, and serialization validation. Ten focused
 constraint tests and one packed-archive integration test cover it. The browser
 checks above passed with no console errors. The build's existing large-chunk
 warning remains.
+The accompanying IK/FK matching commit adds rotation keys and a static blend
+switch in one history entry. Ten new command tests and one packed-archive
+integration test cover pose preservation, Euler continuity, partial blends,
+ownership conflicts, staged dependency checks, undo/redo and reopening.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.

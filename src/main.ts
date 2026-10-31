@@ -192,6 +192,7 @@ async function start() {
   const poseDrafts = new PoseDrafts();
   let evaluated = new Map<string, AnimationPose>();
   let fkPoses = new Map<string, AnimationPose>();
+  let solvedPoses = new Map<string, AnimationPose>();
   let timelinePanel: ReturnType<typeof mountTimeline> | undefined;
   let animationEditors: ReturnType<typeof mountAnimationEditors> | undefined;
   let drivenPanel: ReturnType<typeof createDrivenKeyPanel> | undefined;
@@ -642,7 +643,7 @@ async function start() {
   });
   animationEditors = mountAnimationEditors(store, { getFrame, setFrame, getSelection: allSelection, available: () => !loading && !dragId && !playing });
   drivenPanel = createDrivenKeyPanel(store, { getFrame, getSelection: allSelection, getPoses: () => evaluated, available: () => !loading && !dragId && !playing });
-  ikPanel = createIKPanel(store, { getPoses: () => evaluated, getFKPoses: () => fkPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  ikPanel = createIKPanel(store, { getFrame, canKey: () => !timelinePanel?.turntable, getPoses: () => evaluated, getFKPoses: () => fkPoses, getSolvedPoses: () => solvedPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
   constraintsPanel = createConstraintsPanel(store, { getPoses: () => evaluated, getSelection: allSelection, available: () => !loading && !dragId && !playing });
   channelKeys = mountChannelKeyControls(panelHost, store, { getFrame, getPose: currentPose, getSelection: allSelection, available: () => !loading && !dragId && !playing && !timelinePanel?.turntable });
   workspace.registerPanel("graph", "Graph Editor", animationEditors.graph);
@@ -1078,6 +1079,7 @@ async function start() {
     evaluateDrivenKeys(doc, evaluated);
     fkPoses = new Map(evaluated);
     evaluateIK(doc, evaluated);
+    solvedPoses = new Map(evaluated);
     try {
       evaluateConstraints(doc, evaluated);
       evaluationError = "";

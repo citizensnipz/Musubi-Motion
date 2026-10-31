@@ -28,7 +28,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Channel key controls:** key individual Properties channels with their diamonds and author stepped visibility with the Visible checkbox. Indicators distinguish unanimated channels, animated channels, and keys at the current frame.
 - **Graph Editor and Dope Sheet:** dockable curve/channel editing, key multiselection and box selection, Bezier tangent handles, linear/stepped interpolation, tangent presets, shape-preserving key insertion, copy/paste, retiming, and time scaling.
 - **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
-- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, and matching a target to the current FK endpoint.
+- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture the current solved joint rotations and switch to FK in one undoable edit. Blend is not animated; matching captures one frame.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Undo/redo:** editing operations use shared document commands. History retains up to 100 edits without copying splat buffers; playback and scrubbing create no history entries.
 - **Turntable preview:** the Timeline's separate playback mode retains the original 12-second rotation preview.
@@ -116,7 +116,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 ## Remaining priorities
 
-1. Pole vectors, analytic two-bone IK, joint orientation/limits, and complete IK/FK matching and baking.
+1. Pole vectors, analytic two-bone IK, joint orientation/limits, target/blend animation, and range-based IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and curve-based rig controls.
 3. Influence management, editable normalized skin weights, weight painting, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.

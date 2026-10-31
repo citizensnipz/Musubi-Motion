@@ -83,6 +83,23 @@ Handles have independent world-space targets and an FK/IK blend. Overlapping or
 ancestor-dependent chains are rejected so array ordering cannot change the result.
 Two-bone chains use the same CCD solver; there is no analytic solver or pole vector.
 
+`matchFKToIK` captures post-IK, pre-constraint local rotations for every joint
+from root through end, unwraps them against the evaluated pre-IK FK pose, keys
+the current frame, and sets the handle blend to zero in one document command.
+It retains existing key settings and leaves position/scale channels untouched.
+SDK-owned joint rotations and enabled rotation constraints reject the command
+atomically. The target-to-FK command only aligns the endpoint target. Matching
+does not add a blend animation channel or bake a frame range; the stored blend
+change applies at every frame. Both matching operations use existing animation
+tracks and handle fields, with no additional archive schema.
+
+Matching stages the new keys and handle settings before touching live history,
+reevaluates time curves, SDK, and IK, and compares every chain joint's world
+position and orientation with the captured pose. It repeats that comparison
+after constraints. Unkeyed translation previews or rotation-driven feedback
+that would move the chain therefore reject the whole operation; benign point
+constraints remain supported. Only a verified document enters the live store.
+
 `src/constraints.ts` provides point, orient, aim, scale, and parent constraints across
 objects and joints. It computes source world poses in dependency order, converts
 results into the driven node's parent space, and overrides the corresponding

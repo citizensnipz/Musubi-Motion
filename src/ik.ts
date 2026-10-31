@@ -1,8 +1,11 @@
 import { Bone, BufferGeometry, Euler, MathUtils, Matrix4, MeshBasicMaterial, Quaternion, Skeleton, SkinnedMesh, Vector3 } from "three";
 import { CCDIKSolver, type IK } from "three/addons/animation/CCDIKSolver.js";
-import { baseChannels, type AnimationPose } from "./animation.ts";
+import { baseChannels, evaluateSceneAnimation, setKeys, type AnimationPose } from "./animation.ts";
+import { unwrapEuler } from "./animation-edit.ts";
+import { evaluateDrivenKeys } from "./driven-keys.ts";
+import { evaluateConstraints } from "./constraints.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
-import type { SceneStore } from "./scene-store.ts";
+import { createSceneStore, type SceneStore } from "./scene-store.ts";
 import type { Joint } from "./skeleton.ts";
 
 export type IKHandle = {
@@ -201,4 +204,70 @@ export function matchIKToFK(store: SceneStore, id: string, poses?: ReadonlyMap<s
   if (!handle) throw Error("IK handle does not exist.");
   const target = new Vector3().setFromMatrixPosition(jointWorldMatrices(doc, poses).get(handle.endId)!).toArray() as Vec3;
   updateIKHandle(store, id, { target });
+}
+
+/** Key the solved local chain rotations at one frame, then switch this handle
+ * to FK. Supply the pose immediately after IK and before constraints; an
+ * optional pre-IK pose preserves Euler revolutions in uncommitted previews. */
+export function matchFKToIK(
+  store: SceneStore, id: string, frame: number,
+  poses?: ReadonlyMap<string, AnimationPose>, fkPoses?: ReadonlyMap<string, AnimationPose>,
+): void {
+  if (!Number.isFinite(frame) || Math.abs(frame) > 1e6) throw Error("The match frame must be finite and between -1000000 and 1000000.");
+  const doc = store.getState().document, handle = doc.ikHandles?.find(handle => handle.id === id);
+  if (!handle) throw Error("IK handle does not exist.");
+  if (!handle.enabled || handle.blend <= 0) throw Error("Enable the IK handle and set its blend above zero before matching FK.");
+  const chain = ikChain(doc, handle.rootId, handle.endId), ids = new Set(chain);
+  if (doc.drivenKeys?.some(relation => ids.has(relation.driven.targetId) && relation.driven.channel.startsWith("rotation."))) {
+    throw Error("A joint in this chain has driven-key rotation channels. Remove those relationships before matching FK to IK.");
+  }
+  if (doc.constraints?.some(constraint => constraint.enabled && ids.has(constraint.targetId) && ["orient", "aim", "parent"].includes(constraint.type))) {
+    throw Error("A joint in this chain has an active rotation constraint. Disable its orient, aim or parent constraint before matching FK to IK.");
+  }
+  const base = evaluateSceneAnimation(doc, frame); evaluateDrivenKeys(doc, base);
+  const reference = new Map(base);
+  for (const [jointId, pose] of fkPoses ?? []) reference.set(jointId, pose);
+  let solved: ReadonlyMap<string, AnimationPose>;
+  if (poses) solved = poses;
+  else { const evaluated = new Map(reference); evaluateIK(doc, evaluated); solved = evaluated; }
+  const keyed = new Map<string, AnimationPose>();
+  for (const jointId of chain) {
+    const current = solved.get(jointId), previous = reference.get(jointId);
+    if (!current || !previous) throw Error("The solved IK pose is incomplete. Evaluate the full chain before matching.");
+    for (const pose of [current, previous]) for (const values of [pose.position, pose.rotation, pose.scale]) {
+      if (!Array.isArray(values) || values.length !== 3 || !values.every(Number.isFinite)) throw Error("The solved IK pose must contain finite transforms.");
+    }
+    keyed.set(jointId, { ...current, rotation: unwrapEuler(current.rotation, previous.rotation) });
+  }
+  // Reuse normal key validation and replacement semantics on a temporary store.
+  // Only the final document reaches the live store and its undo history.
+  const staging = createSceneStore(doc);
+  setKeys(staging, chain, frame, keyed, ["rotation.x", "rotation.y", "rotation.z"]);
+  const next: SceneDocument = { ...staging.getState().document,
+    ikHandles: doc.ikHandles!.map(candidate => candidate.id === id ? { ...candidate, blend: 0 } : candidate) };
+  validateIKHandles(next.ikHandles, next);
+  const check = evaluateSceneAnimation(next, frame); evaluateDrivenKeys(next, check); evaluateIK(next, check);
+  const expected = new Map(reference); for (const [jointId, pose] of solved) expected.set(jointId, pose);
+  function verifyPose(expected: ReadonlyMap<string, AnimationPose>, actual: ReadonlyMap<string, AnimationPose>) {
+    const expectedWorld = jointWorldMatrices(doc, expected), matchedWorld = jointWorldMatrices(next, actual);
+    for (const jointId of chain) {
+      const before = expectedWorld.get(jointId)!, after = matchedWorld.get(jointId)!;
+      const expectedPosition = new Vector3(), actualPosition = new Vector3(), expectedRotation = new Quaternion(), actualRotation = new Quaternion();
+      before.decompose(expectedPosition, expectedRotation, new Vector3()); after.decompose(actualPosition, actualRotation, new Vector3());
+      const tolerance = 1e-6 + expectedPosition.length() * 1e-10;
+      if (!before.elements.every(Number.isFinite) || !after.elements.every(Number.isFinite)
+        || expectedPosition.distanceTo(actualPosition) > tolerance || expectedRotation.angleTo(actualRotation) > 1e-6) {
+        throw Error("Matching rotation keys would change the chain pose. Key any position previews and resolve driven or constraint dependencies before matching FK to IK.");
+      }
+    }
+  }
+  verifyPose(expected, check);
+  // A chain rotation can also drive an external control whose point constraint
+  // moves this chain later. Verify the final constrained result, not just IK.
+  if (doc.constraints?.some(constraint => constraint.enabled)) {
+    const constrainedExpected = new Map(expected), constrainedActual = new Map(check);
+    evaluateConstraints(doc, constrainedExpected); evaluateConstraints(next, constrainedActual);
+    verifyPose(constrainedExpected, constrainedActual);
+  }
+  store.setState({ document: next, editLabel: "Match FK to IK and key" });
 }

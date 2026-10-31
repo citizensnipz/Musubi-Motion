@@ -1,12 +1,16 @@
 import { Vector3 } from "three";
 import type { AnimationPose } from "./animation.ts";
-import { createIKHandle, deleteIKHandle, ikChain, jointWorldMatrices, matchIKToFK, updateIKHandle, type IKHandle } from "./ik.ts";
+import { createIKHandle, deleteIKHandle, ikChain, jointWorldMatrices, matchIKToFK, matchFKToIK, updateIKHandle, type IKHandle } from "./ik.ts";
 import type { Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
 type Options = {
   available: () => boolean;
   getPoses: () => Map<string, AnimationPose>;
+  getFrame: () => number;
+  canKey?: () => boolean;
+  /** Solved joint poses after IK and before the constraint pass. */
+  getSolvedPoses: () => Map<string, AnimationPose>;
   getSelection: () => string[];
   /** Time/driven/preview poses before the IK pass; optional for older hosts. */
   getFKPoses?: () => Map<string, AnimationPose>;
@@ -99,6 +103,15 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (!selectedHandleId) return;
     matchIKToFK(store, selectedHandleId, options.getFKPoses?.());
   }, "Target matched to the FK end joint."));
+  const matchFK = button("Match FK to IK and key", () => run(() => {
+    if (options.canKey && !options.canKey()) throw Error("Switch the timeline to Animation mode before matching and keying FK.");
+    const handle = current();
+    if(!handle?.enabled || handle.blend <= 0)throw Error("Enable the selected IK handle and set its blend above zero before matching FK to IK.");
+    matchFKToIK(store, handle.id, Math.round(options.getFrame()), options.getSolvedPoses(), options.getFKPoses?.());
+  }, `Joint rotation keys set at frame ${Math.round(options.getFrame())}; the handle now uses FK.`));
+  matchFK.title = "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
+  const matchHelp = document.createElement("p");
+  matchHelp.textContent = "Match FK to IK and key writes rotation keys for every joint in this handle's chain at the current frame, then sets its static blend to 0 (FK). Remove Set Driven Key relationships on chain rotations; disable or delete constraints that drive those rotations.";
   const remove = button("Delete IK handle", () => run(() => {
     if (!selectedHandleId) return;
     deleteIKHandle(store, selectedHandleId);
@@ -106,8 +119,8 @@ export function createIKPanel(store: SceneStore, options: Options) {
   const move = button("Move target in viewport", () => {
     if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-target-select", { detail: selectedHandleId }));
   });
-  const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, remove);
-  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, targetHeading, targetRow, blendLabel, blendRow, label("Solver iterations", iterations), actions);
+  const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, matchFK, remove);
+  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, targetHeading, targetRow, blendLabel, blendRow, label("Solver iterations", iterations), actions, matchHelp);
   const empty = document.createElement("p"); empty.className = "ik-empty"; empty.textContent = "No IK handles. Create a joint chain, then choose its root and end above.";
   const note = document.createElement("p"); note.textContent = "CCD solves position with fixed bone lengths. Unreachable targets extend toward the target. This version has no pole vectors or joint limits; overlapping chains are rejected. Targets are saved but are not yet keyframe channels.";
   element.append(details, empty, status, note);
@@ -165,6 +178,10 @@ export function createIKPanel(store: SceneStore, options: Options) {
     for (const control of Array.from(element.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button"))) control.disabled = !available;
     create.disabled = !available || !root.value || !end.value;
     handles.disabled = !available || !doc.ikHandles?.length;
+    matchFK.disabled = !available || !selected?.enabled || selected.blend <= 0 || (options.canKey !== undefined && !options.canKey());
+    matchFK.title = options.canKey && !options.canKey()
+      ? "Switch the timeline to Animation mode to match and key FK."
+      : "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
     if (!selected) return;
     setValue(name, selected.name, force);
     targets.forEach((input, index) => setValue(input, String(Number(selected.target[index].toFixed(6))), force));
