@@ -230,6 +230,20 @@ the keyed result reject the whole edit. Matching does not bake a frame range.
 When no blend track exists, the literal blend change still applies at every
 frame. Matching keys reuse the existing animation track schema.
 
+`src/ik-bake-plan.ts` validates range settings, rotation ownership, sample/key
+limits, and estimated scene work. `src/ik-bake.ts` implements asynchronous
+`bakeIKToFK`: sample the immutable original document, build all rotation tracks
+as one candidate, and disable the selected handle. A second pass compares every
+object/joint world matrix and visibility against fresh original samples. This
+also catches SDK dependencies that would change when solved rotations become
+authored inputs. Source evaluation uses the same time/SDK/rig stages as playback.
+Periodic yields support cancellation; document identity checks prevent stale
+results from overwriting newer edits. Only a verified candidate reaches one
+store/history commit. The dockable `ik-bake-panel.ts` provides range controls,
+progress, cancellation, and access to the resulting joint curves. It has no
+renderer dependencies. Between-sample interpolation and outside-range motion
+are not verified or preserved by the operation.
+
 Blend keys must lie within 0–1. The Graph Editor shows the authored curve,
 including spline/weighted-tangent overshoot, while playback uses clamped output.
 Shape-preserving insertion rejects a sample outside the key range atomically;

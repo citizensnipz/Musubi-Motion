@@ -15,7 +15,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   );
   contents.set("rigging", riggingContent);
   contents.set("terminal", terminalContent);
-  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools", particles: "Particle Emitters" };
+  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", "ik-bake": "Bake IK to FK", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools", particles: "Particle Emitters" };
   for (const id of Object.keys(animationPanels)) {
     const wrapper = document.createElement("div"); wrapper.className = "animation-dock-host";
     contents.set(id, wrapper);
@@ -172,7 +172,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     customized = true;
     const existing = api.getPanel(id);
     if (existing) { existing.api.setActive(); return; }
-    const attributeIds = ["driven-keys", "ik-handles", "constraints", "controllers", "skin-weights", "paint-skin-weights", "modeling", "particles"];
+    const attributeIds = ["driven-keys", "ik-handles", "ik-bake", "constraints", "controllers", "skin-weights", "paint-skin-weights", "modeling", "particles"];
     const attribute = attributeIds.includes(id);
     const sidePanel = attribute ? ["properties", "outliner", "rigging", ...attributeIds].find(candidate => api.getPanel(candidate)) : undefined;
     const reference = sidePanel ?? (api.getPanel("viewport") ? "viewport" : api.panels[0]?.id);

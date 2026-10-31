@@ -32,6 +32,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Two-bone IK:** select the analytic solver for a root/middle/end chain and move its pole target to control the bend plane. Target and pole markers support viewport dragging, numeric editing, undo, and saving. Unreachable targets preserve bone lengths; existing handles keep their CCD behavior.
 - **Animated IK controls:** link existing transforms or create editable curve controls for targets and poles, preserving their world positions with optional offsets. Animate the controls with ordinary position keys, the Graph Editor, or Set Driven Key; supported upstream constraints run before IK. Linked markers select their controls, and viewport drags preview the chain live. **Match controls to FK and key** captures control positions at the current frame in one undo step.
 - **Animated FK/IK blend:** **Key blend** creates an ordinary `ik.blend` time track on the handle; **Edit blend curve** opens it in the Graph Editor. Keys stay within 0–1, and playback clamps tangent overshoot. Once keyed, panel blend edits key the current frame even with auto-key off; an unkeyed handle keeps its static fallback. The Graph Editor, Dope Sheet, timeline, undo, and native scenes share the same track.
+- **Bake IK to FK:** a dedicated Animation panel samples a frame range into editable joint rotation curves and disables the handle globally. Choose the sample interval, retain outside keys, and minimize Euler jumps. Progress and cancellation keep longer bakes responsive; sampled world poses are verified before one undoable commit. Between-sample motion is interpolated, and outside-range motion may change.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
 - **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, add/subtract selections, inspect weights, restore automatic weights, and view sampled colors. Edits support undo and persistence; the elasticity pipeline inherits them.
@@ -96,6 +97,8 @@ Open [examples/animated-ik-controls.msb](examples/animated-ik-controls.msb) for 
 
 [examples/animated-ik-blend.msb](examples/animated-ik-blend.msb) adds keyed FK poses and a 0 → 1 → 0 blend over frames 0–120. Rebuild it with `node scripts/create-ik-blend-example.mjs`. Intermediate blend mixes local joint rotations; the end joint need not reach the target until full IK.
 
+[examples/baked-ik-motion.msb](examples/baked-ik-motion.msb) converts that motion to joint keys at half-frame intervals, retaining the controls and disabling the handle. Rebuild and verify sampled poses, undo/redo, archive readback, and historical evaluation with `node scripts/create-ik-bake-example.mjs`.
+
 Drag a **panel title tab** toward another panel's edge to split the space, or toward its center to combine them as tabs. The floating tool panel is separate: click its lock icon to unlock it, then drag the grip. An unlocked grip also supports arrow-key nudging, with Shift for larger steps.
 
 ## Scene files
@@ -131,7 +134,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 ## Remaining priorities
 
-1. Joint orientation/limits, twist controls, blend driven by SDK, and range-based IK/FK baking.
+1. Joint orientation/limits, twist controls, blend driven by SDK, and multi-chain or adaptive IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
 3. Influence management, weight smoothing and locks, surface-only component selection, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.

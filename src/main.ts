@@ -55,6 +55,7 @@ import { prepareJointAnimationEdit, unwrapEuler } from "./animation-edit.ts";
 import { evaluateRigStages, getIKTargetPoints, validateIKHandles, updateIKHandle, deleteIKHandle } from "./ik.ts";
 import { ikInputConstraintTargets } from "./ik-control-plan.ts";
 import { createIKPanel } from "./ik-panel.ts";
+import { createIKBakePanel } from "./ik-bake-panel.ts";
 import { validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
@@ -253,6 +254,7 @@ async function start() {
   let animationEditors: ReturnType<typeof mountAnimationEditors> | undefined;
   let drivenPanel: ReturnType<typeof createDrivenKeyPanel> | undefined;
   let ikPanel: ReturnType<typeof createIKPanel> | undefined;
+  let ikBakePanel: ReturnType<typeof createIKBakePanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
   let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
@@ -795,6 +797,7 @@ async function start() {
     element("outliner-panel").inert = loading;
     timelinePanel?.refresh();
     const history = store.temporal.getState();
+    ikBakePanel?.refresh();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
     redoButton.disabled =
@@ -850,6 +853,24 @@ async function start() {
   workspace.registerPanel("dope-sheet", "Dope Sheet", animationEditors.dopeSheet);
   workspace.registerPanel("driven-keys", "Set Driven Key", drivenPanel.element);
   workspace.registerPanel("ik-handles", "IK Handles", ikPanel.element);
+  ikBakePanel = createIKBakePanel(store, {
+    available: () => !loading && !dragId && !playing,
+    onBusyChange: value => busy(value, value ? "Baking IK animation…" : ""),
+    onStatus: message => { notice.textContent = message; },
+    onViewCurves: id => {
+      const doc = store.getState().document, handle = doc.ikHandles?.find(handle => handle.id === id);
+      if (!handle || loading || dragId || playing) return;
+      selectAnimationTarget(handle.rootId);
+      const track = doc.animation?.tracks.find(track => track.targetId === handle.rootId && track.channel.startsWith("rotation."));
+      if (track) animationEditors?.focusTrack(track.id);
+      element("view-graph").click();
+    },
+  });
+  workspace.registerPanel("ik-bake", "Bake IK to FK", ikBakePanel.element);
+  ikPanel.element.addEventListener("ik-range-bake", event => {
+    ikBakePanel?.selectHandle((event as CustomEvent<string>).detail);
+    element("view-ik-bake").click();
+  });
   function selectIKTarget(id: string, kind: IKControlKind = "target") {
     if (loading || dragId || !ikTargets.getObject(id, kind)) return;
     selectedIKBlendId = "";
@@ -1532,6 +1553,7 @@ async function start() {
     ikPanel?.refresh();
     constraintsPanel?.refresh();
     controllerPanel?.refresh();
+    ikBakePanel?.refresh();
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
@@ -1666,6 +1688,7 @@ async function start() {
     savedDocument = JSON.stringify(doc);
     store.temporal.getState().pause();
     store.setState({ document: doc, editLabel: "Open scene" });
+    ikBakePanel?.resetScene();
     store.temporal.getState().resume();
     store.temporal.getState().clear();
     previousObjects.forEach(disposeObject);

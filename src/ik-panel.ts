@@ -186,7 +186,11 @@ export function createIKPanel(store: SceneStore, options: Options) {
   const move = button("Move target in viewport", () => {
     if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-target-select", { detail: selectedHandleId }));
   });
-  const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, matchFK, remove);
+  const rangeBake = button("Bake frame range…", () => {
+    if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-range-bake", { detail: selectedHandleId }));
+  });
+  rangeBake.title = "Sample saved animation into joint rotation keys and disable this handle, in one undo step.";
+  const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, matchFK, rangeBake, remove);
   details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, label("Solver", solver), offsetLabel, targetHeading, label("Target control", targetControl), createTarget, targetRow, poleControls, blendLabel, blendRow, blendActions, blendHelp, iterationsLabel, actions, matchHelp);
   const empty = document.createElement("p"); empty.className = "ik-empty"; empty.textContent = "No IK handles. Create a joint chain, then choose its root and end above.";
   const note = document.createElement("p"); note.textContent = "Animate targets and poles through linked controls, and blend through its IK blend curve. Solver settings remain static. Both solvers preserve bone lengths; unreachable targets stop at the chain's reach. Joint limits are not supported.";

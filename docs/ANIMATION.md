@@ -388,10 +388,57 @@ of another chain, preventing order-dependent results.
 Solver choice and literal target/pole points remain static saved settings. Linked
 target and pole transforms and the handle's blend use animation curves. Both solvers share
 the current-frame **Match FK to IK and key** workflow above. Joint orientation/axis
-editing, angular limits, stretch, SDK-driven blend, and range-based IK-to-FK pose baking
+editing, angular limits, stretch, and SDK-driven blend
 remain unavailable. Matching a target position alone does not reproduce every
 possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
+
+## Bake IK to FK
+
+Open **Animation → Bake IK to FK**, or **Bake frame range…** in IK Handles.
+Choose a handle, start/end frames, and a positive sample interval. **Use playback
+range** copies the current timeline bounds. Both endpoints are sampled, including
+an end frame that falls between interval steps. Fractional frames are supported.
+
+**Bake IK to FK** evaluates the saved time curves, driven relationships, linked
+controls, constraints, and IK blend. It replaces the chain's rotation X/Y/Z curves
+inside the range with linear keys, then disables that handle for the whole scene.
+The control objects, target/pole links, and blend curves remain available. Unkeyed
+viewport previews are excluded. **View joint curves** selects the root joint and
+opens its rotation curves in the Graph Editor.
+
+**Keep keys outside range** retains those key records exactly; turning it off
+removes outside keys on the baked rotation channels. Other channels are unchanged.
+Disabling IK globally and changing adjacent curve interpolation can change motion
+outside the chosen range. **Minimize rotation** chooses equivalent Euler angles
+near the previous sample to reduce jumps. Sample more densely for rapid spins:
+rotation minimization cannot reconstruct intentional turns between sparse samples.
+
+Before committing, the command evaluates the candidate and original scenes at
+every sample, checking all object/joint world matrices and visibility. Conflicting
+driven rotation channels, rotation constraints, downstream changes caused by
+SDK feedback, or an evaluation failure reject the whole bake. Cancellation and
+concurrent document changes also leave the candidate uncommitted. Sampling and
+verification yield periodically to keep cancellation responsive. A successful bake
+is one undo step, including the handle's enabled state.
+
+The limit is 10,001 samples, 100,000 resulting time keys, and 2,000,000 estimated
+scene-node samples per operation. Linear Euler interpolation approximates motion
+between samples; use smaller intervals when subframe motion matters, including
+historical particle paths. This tool bakes one chain's rotations. Multi-chain
+baking, adaptive key reduction, arbitrary constraint baking, and animation-layer
+baking remain future work.
+
+The [baked example](../examples/baked-ik-motion.msb) samples the animated blend
+study every half frame. Run `node scripts/create-ik-bake-example.mjs` to regenerate
+it and verify sampled poses, between-sample error, undo/redo, historical evaluation,
+and archive readback.
+
+The example's mixed-blend source already changes pose abruptly near frames 51
+and 71. Its half-frame bake matches sampled matrices within 1.3e-15, but the
+largest measured quarter-frame endpoint difference is 1.63 scene units around
+those changes. A denser sample interval narrows the affected intervals; it does
+not repair a discontinuity in the source rig.
 
 ## Skin weights
 
@@ -673,7 +720,7 @@ small-scene playback results.
 ## Remaining work, in priority order
 
 1. Local joint axes/orientation, rotation limits, stretch, SDK-driven blend,
-   and range-based IK/FK baking.
+   and multi-chain/adaptive IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
 3. Influence management, weight smoothing/locks and mirrored transfer,
@@ -698,7 +745,11 @@ distinguishes moving an IK target to an FK endpoint from keying the handle and
 joint chain. Its [IK/FK blending workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-8B0B343A-B00A-427C-8C79-E2B9008C4A88.htm)
 also animates blend values across frames. Musubi supports time-keyed blend,
 target alignment with linked-control position keys, and current-frame rotation
-capture. Range baking and Maya's full IK/FK workflow are not implemented.
+capture and sampled range baking. The bake workflow follows Autodesk's
+[Bake Simulation options](https://help.autodesk.com/cloudhelp/2024/ENU/Maya-Animation/files/GUID-A11424B4-8384-4832-B18D-01264E1A19D1.htm)
+and [`bakeResults`](https://help.autodesk.com/cloudhelp/2025/ENU/Maya-Tech-Docs/Commands/bakeResults.html):
+sample intervals, outside-key retention, rotation minimization, and disabling
+implicit IK control. Musubi implements a focused one-chain subset of these tools.
 Curve terminology follows Autodesk's [NURBS curve components](https://help.autodesk.com/cloudhelp/ENU/MayaCRE-Modeling/files/GUID-3C709643-E723-4518-84B7-45EB07778AD2.htm)
 and [curve degree overview](https://help.autodesk.com/cloudhelp/2023/ENU/Maya-Modeling/files/GUID-0C6DD36E-E336-4DE2-ADA1-86665998EF77.htm).
 Musubi supports degrees 1–3 and stores the full Three.js knot vector; it does not

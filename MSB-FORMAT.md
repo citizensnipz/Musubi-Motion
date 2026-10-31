@@ -274,3 +274,10 @@ tracks and FK rotation curves. Its [generator](scripts/create-ik-blend-example.m
 checks 241 half-frame samples against quaternion interpolation and historical
 sampling before and after archive readback; intermediate blend is not expected
 to place the endpoint exactly at the IK target.
+
+[examples/baked-ik-motion.msb](examples/baked-ik-motion.msb) stores the same rig
+with sampled linear joint rotation keys and `enabled: false` on its IK handle.
+Target/pole links and the original blend curve remain saved. Baking introduces
+no new archive fields or version change. Its
+[generator](scripts/create-ik-bake-example.mjs) compares world poses at sampled
+frames before and after readback and measures approximation between samples.

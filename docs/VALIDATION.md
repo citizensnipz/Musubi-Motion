@@ -4,6 +4,67 @@ This records the local development checkpoint, not a production rollout or a
 cross-browser certification. No deployment, push, or paid service was introduced.
 The particle checkpoint adds one pinned package, described below.
 
+## Sampled IK-to-FK bake checkpoint
+
+The full suite passed **547 tests across 52 files**, TypeScript, and the Vite
+production build. Browser checks used `index-NNbune82.js`. The existing chunk-size
+warning remains; this checkpoint adds no dependencies.
+
+The shared asynchronous command plans bounded samples, builds all joint rotation
+tracks from the immutable original, disables the selected handle, and verifies
+all object/joint world matrices and visibility before one undoable commit.
+The 41 new tests cover exact/fractional endpoints, precision and work budgets,
+outside-key record retention, Euler continuity, SDK feedback rejection,
+cancellation, concurrent edits, archive readback, and sample-only fidelity.
+
+Local Chromium checks at 1600 × 1000 confirmed:
+
+- **Animation → Bake IK to FK** opens a separate docked panel. Interval zero
+  disables the bake and reports a finite-positive-step error without dirtying
+  the scene.
+- Baking frames 0–120 at interval 0.5 produced 241 samples and 2,169 rotation
+  keys. The handle became disabled. **View joint curves** selected Shoulder and
+  showed three Graph Editor rotation tracks with 723 keys.
+- One undo restored the clean original and enabled handle; redo restored the
+  complete bake. Native download/reopen retained nine linear rotation tracks
+  with 241 keys each, the disabled handle, and the original three blend keys.
+- A 2,401-sample bake reported progress, accepted Cancel, and returned to the
+  unchanged clean scene with no undo entry and the original enabled handle.
+- Frames 0–0.9 at interval 0.3 produced exactly four planned samples. Baking
+  10.25–12 at interval 0.6 with outside-key retention off produced four samples
+  and 36 rotation keys; one undo restored the clean original. The IK Handles
+  **Bake frame range…** shortcut reopened the dedicated bake panel.
+- The saved baked example reopened at frame 30 with its joint curves visible.
+  The browser reported zero console errors.
+
+`node scripts/create-ik-bake-example.mjs` generated the 276,193-byte
+`examples/baked-ik-motion.msb`. Its two 481-point verification passes include
+241 baked samples and 240 quarter-frame intermediate samples, before and after
+archive readback. Sampled world-matrix error was at most **1.23e-15** and the
+historical sampler matched exactly. Undo and redo each restored the expected
+document in one step.
+
+Intermediate accuracy is materially weaker around abrupt changes already in the
+mixed-blend source near frames 51 and 71: the largest measured endpoint difference
+was **1.63 scene units**. The command deliberately verifies sampled frames;
+linear Euler interpolation does not preserve discontinuous subframe motion.
+Tests explicitly cover this boundary. Outside-range motion may also change
+because the handle is disabled globally and adjacent curve shapes can change.
+
+`node scripts/benchmark-ik-bake.mjs` used Node 22.16.0, two warmups and five
+measured commands on fresh stores:
+
+| Sample interval | Samples / rotation keys | Median | Maximum |
+| --- | --- | --- | --- |
+| 0.5 frames | 241 / 2,169 | 216.844 ms | 234.732 ms |
+| 0.05 frames | 2,401 / 21,609 | 2,100.173 ms | 2,201.194 ms |
+
+These local CPU timings include sampling, candidate validation, full-scene sample
+verification, timer yields, and one history commit. They exclude browser rendering,
+progress DOM updates, editor subscriptions, and archive I/O. The runs yielded 15
+and 151 times respectively. Multi-chain/adaptive baking, general constraint
+baking, animation layers, and the source rig's discontinuities remain unresolved.
+
 ## Animated IK/FK blend checkpoint
 
 The final suite passed **506 tests across 50 files**, TypeScript, and the Vite
