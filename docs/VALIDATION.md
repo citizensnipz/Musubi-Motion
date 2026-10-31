@@ -4,6 +4,67 @@ This records the local development checkpoint, not a production rollout or a
 cross-browser certification. No deployment, push, or paid service was introduced.
 The particle checkpoint adds one pinned package, described below.
 
+## Animated IK/FK blend checkpoint
+
+The final suite passed **506 tests across 50 files**, TypeScript, and the Vite
+production build. The final browser build was `index-Bng-1mD9.js` with zero console
+errors. The existing bundle-size warning remains; no dependency was added.
+
+IK handles now use ordinary `animation.tracks` records with channel `ik.blend`.
+Validation keeps authored values within 0–1 and separates scalar handle channels
+from transform poses and SDK properties. Solver, marker, matching, and historical
+particle evaluation use the requested frame. Tests cover interpolation, tangent
+overshoot clamping, generic key operations, persistence, deletion, matching,
+fractional historical sampling, and preview/history isolation.
+
+Browser checks in the local Chromium preview included:
+
+- **Rigging → IK Handles → Key blend** authored zero at frame 0, then editing the
+  animated blend authored one at frame 30. Frame 15 evaluated to 0.5. **Edit blend
+  curve** selected, isolated, and framed the named handle track in the Graph Editor.
+- **S** on the logical blend selection added the frame-15 blend key without
+  transform channels. Timeline key markers showed 0, 15, and 30. The native
+  downloaded archive stored those three values and reopened at frame 15.
+- Graph numeric editing changed the midpoint to 0.25; undo restored 0.5. Value 2
+  was rejected without dirtying the clean scene. Copy/paste added a value-0.5 key
+  at frame 45, and undo restored the previous held value of one.
+- Timeline key deletion removed only the selected handle's key at frame 15.
+  Dope Sheet shifting moved it to frame 20. Each command restored the clean
+  original scene with one undo.
+- Dragging the blend slider previewed 0.86 while the scene stayed clean. Escape
+  restored 0.5. Repeating the drag and releasing committed one edit; undo restored
+  the clean scene and 0.5.
+- Focusing, tabbing away from, and pressing Enter on an unchanged sampled value
+  of 0.233333 at frame 7 created no key or dirty state. This fixes an early blur
+  path that inserted a sampled key and could round its value to six decimals.
+- A controller's unkeyed world-X preview stayed at -0.0375 through an invalid
+  blend edit, a valid edit to 0.6, undo, explicit blend keying, and **S**. Initially,
+  unconditional frame seeking and broad rig invalidation dropped this preview.
+  Validation now precedes seeking, unchanged frames are not sought, and only
+  blend-only edits receive a narrow draft-retention exception. Other animation
+  and rig input changes still invalidate drafts; 24 new tests cover that boundary.
+- **Match FK to IK and key** inserted blend zero and joint rotation keys at
+  frame 45. Deleting the handle removed its curve from the Dope Sheet; undo
+  restored both. These actions each returned to the saved scene with one undo.
+
+The 12,136-byte `examples/animated-ik-blend.msb` combines animated FK rotations,
+target/pole controls, and a 0 → 1 → 0 blend over frames 0–120 at 24 fps. Its
+generator checks 241 half-frame samples before and after archive readback against
+independent local quaternion interpolation between FK and a full-IK reference.
+Maximum quaternion error was approximately **5.2e-8 radians**; the full-IK
+reference endpoint error was below **1.1e-14 world units**. Historical matrices
+matched exactly. Intermediate blends intentionally need not reach the target.
+
+`scripts/benchmark-ik-blend.mjs` used Node 22.16.0, 50 warmups and 300 samples.
+Full evaluation measured 0.04625 ms median / 0.1226 ms p95 for one chain and
+0.28335 ms median / 0.4566 ms p95 for 16 chains. Historical misses for 16 chains
+measured 0.30215 ms median / 0.6643 ms p95. These are CPU measurements excluding
+browser drawing, GPU work, skinning, and editor refresh.
+
+Blend SDK, solver-setting animation, range-based matching/baking, joint
+orientation/limits, and broader animation layers remain incomplete. The browser
+was left on the clean example at frame 30, displaying blend 0.5 and its curve.
+
 ## Animated IK control checkpoint
 
 The final local check passed **439 tests across 46 files**, TypeScript, and the

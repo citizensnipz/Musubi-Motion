@@ -1,11 +1,11 @@
 import {
-  ANIMATION_CHANNELS, evaluateCurve, readChannel, validateCurveKeys, writeChannel,
-  type AnimationChannel, type CurveKey,
+  POSE_ANIMATION_CHANNELS, evaluateCurve, readChannel, validateCurveKeys, writeChannel,
+  type PoseAnimationChannel, type CurveKey,
 } from "./animation.ts";
 import type { SceneDocument, TransformChannels } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
-export type DrivenProperty = { targetId: string; channel: AnimationChannel };
+export type DrivenProperty = { targetId: string; channel: PoseAnimationChannel };
 export type DrivenKeyRelationship = {
   id: string;
   driver: DrivenProperty;
@@ -15,18 +15,18 @@ export type DrivenKeyRelationship = {
 };
 export type EvaluatedPose = TransformChannels & { visibility: number };
 
-const propertyKey = (property: DrivenProperty) => JSON.stringify([property.targetId, property.channel]);
+const propertyKey = (property: { targetId: string; channel: string }) => JSON.stringify([property.targetId, property.channel]);
 const sameProperty = (a: DrivenProperty, b: DrivenProperty) => a.targetId === b.targetId && a.channel === b.channel;
 const orderedCache = new WeakMap<DrivenKeyRelationship[], DrivenKeyRelationship[]>();
 
 function validateProperty(value: unknown, doc: SceneDocument): asserts value is DrivenProperty {
   if (!value || typeof value !== "object") throw Error("Invalid driven-key property.");
   const property = value as DrivenProperty;
-  if (typeof property.targetId !== "string" || !ANIMATION_CHANNELS.includes(property.channel))
-    throw Error("Invalid driven-key property.");
+  if (typeof property.targetId !== "string" || !POSE_ANIMATION_CHANNELS.includes(property.channel))
+    throw Error("Set Driven Key supports transform and joint pose channels only. IK blend uses time keys.");
   const node = doc.nodes[property.targetId];
   const joint = doc.joints?.find(j => j.id === property.targetId);
-  if (node?.type !== "transform" && !joint) throw Error("Driven-key target does not exist.");
+  if (node?.type !== "transform" && !joint) throw Error("Set Driven Key requires an existing transform or joint; IK handle properties are not supported.");
   if (joint && property.channel.startsWith("scale.")) throw Error("Joint scale is not supported.");
 }
 

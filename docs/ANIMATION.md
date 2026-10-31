@@ -39,6 +39,19 @@ half-frame samples both before and after native archive readback, with maximum
 endpoint error below 1.7 × 10⁻⁸ scene units, and checks the historical pose sampler.
 These are reproducible model checks, not a browser playback measurement.
 
+[examples/animated-ik-blend.msb](../examples/animated-ik-blend.msb) extends that rig
+with keyed FK shoulder/elbow rotations and a linear blend of 0 at frame 0, 1 at
+frame 60, and 0 at frame 120. Rebuild it with
+`node scripts/create-ik-blend-example.mjs`. Its verifier checks 241 half-frame
+samples before and after archive readback against an independent local-quaternion
+blend expectation and the historical pose sampler. Partial blend mixes joint
+rotations; the end joint intentionally need not reach the target until full IK.
+The generated archive measured a maximum quaternion angle error of about
+5.2 × 10⁻⁸ radians; the constant-one IK reference reached its target within
+1.1 × 10⁻¹⁴ scene units. Historical world matrices matched exactly at the sampled
+frames, including after archive readback. These are model checks, not browser
+verification or a guarantee for every rig.
+
 ## Workspaces and panels
 
 The workspace selector offers **General**, **Animation**, and **Rigging**. A
@@ -83,7 +96,7 @@ frame. Joint scale and SDK-driven outputs cannot be keyed there. The **Visible
 (key at current frame)** checkbox directly authors a stepped visibility key;
 its diamond keys the existing visible/hidden value without toggling it.
 
-An edit to an already animated channel without auto-key is a temporary pose
+An edit to an already animated transform/joint channel without auto-key is a temporary pose
 override until it is keyed. Scrubbing or starting playback resumes the curve.
 Authored base channels still participate in ordinary document edits, but saving
 does not turn that temporary pose into animation keys. Set the key before leaving
@@ -96,9 +109,11 @@ a keyframe curve and is not saved as animation.
 
 ## Graph Editor
 
-Select a channel in the list to make its curve active. **Selected objects**
-filters the list to the scene selection. Curves use local transform units or
-degrees, with labelled frame and value axes.
+Select a channel in the list to make its curve active. **Selected targets**
+filters the list to selected objects, joints, and IK handles. Curves use local
+transform units, degrees, or unitless IK blend, with labelled frame and value axes.
+Handle rows show the handle name and **IK blend**; channel rows and Dope Sheet
+labels can select that handle without selecting a draggable target marker.
 
 | Action | Control |
 | --- | --- |
@@ -122,6 +137,13 @@ Paste offsets copied keys so the earliest copied time lands on the current
 frame. It preserves their original object/channel destinations; this is not
 animation retargeting. Moves and time scaling that create conflicting key times
 are rejected atomically. A completed key or tangent drag is one undoable edit.
+
+IK blend supports the same key selection, retiming, copy/paste, interpolation,
+and tangent tools. Its keys must remain within 0–1. The graph shows raw tangent
+overshoot while playback clamps effective blend. **Insert key** rejects an
+overshoot sample that would require an out-of-range key to preserve the curve;
+adjust the tangent or author a valid value instead. With no active curve, a
+selected IK handle can start its blend curve using **Insert key**.
 
 **Insert key** samples the active curve at the current frame and preserves its
 shape. Linear and stepped intervals retain their existing interpolation; Bezier
@@ -201,7 +223,9 @@ scale remains positive. These records and edits support project saving and undo.
 
 SDK uses the same curve representation/evaluator as time animation, but its
 curves currently have their own table and preview. They are not selectable in
-the time Graph Editor. Multiple-driver blending and driving from post-IK solved
+the time Graph Editor. IK blend is time-keyed only: SDK accepts transform/joint
+pose properties, not handle properties, as either driver or output.
+Multiple-driver blending and driving from post-IK solved
 values are not implemented; SDK evaluates before IK and constraints.
 
 ## FK, IK, binding, and elasticity
@@ -288,24 +312,54 @@ cross-chain feedback. SDK continues to read pre-IK authored/time/preview channel
 and earlier SDK outputs. With no links, the original time → SDK → IK → constraints
 order remains unchanged.
 
+### Animate FK/IK blend
+
+In **Rigging → IK Handles**, set **FK / IK blend** to 0 for FK or 1 for IK; values
+between them blend the joint rotations. In Animation mode, **Key blend** keys the
+current value at the current rounded frame. **Edit blend curve** opens and frames
+the handle's existing curve in the Graph Editor; it is disabled until a curve
+exists. A logically selected IK handle also supports **S** and timeline key
+commands, without creating transform channels for the handle.
+
+Before the first key, the blend field edits the static saved fallback. Once blend
+keys exist, editing the field or slider explicitly sets a key at the current
+rounded frame, even with auto-key off; the panel displays this behavior in its
+help text. Slider movement previews the pose, release commits one undo step,
+and **Escape** cancels the slider preview. Changed numeric values commit on Enter
+or blur; inspecting an unchanged value does not insert a key. Blend edits at the
+same frame preserve unkeyed controller and joint pose previews. Scrubbing to a
+different frame still clears those previews.
+Graph and Dope Sheet tools edit the same track. Deleting all its keys restores
+the saved static fallback. Solver evaluation, markers, matching, and historical
+particle sampling all use the blend at their requested frame. Disabling a handle
+still bypasses IK regardless of its keyed blend.
+
+Blend tracks and keys persist in `.msb` scenes. Deleting the handle or a chain
+that removes it also removes its blend curves; undo restores them together.
+Old files with only static blend continue to work. Blend cannot be driven by
+Set Driven Key in this implementation.
+
 ### Capture IK as FK
 
 To keep the current solved pose as FK, select an enabled handle with blend above
 zero and click **Match FK to IK and key**. The command captures XYZ local rotation
 keys for every joint from root through end at the current frame, then sets the
-handle's blend to zero. Both changes form one undo command. It samples the IK
+handle's blend to zero. If a blend track exists, this writes a zero key at the
+captured frame; otherwise it changes the static fallback. Both changes form one
+undo command. It samples the IK
 result after prerequisite constraints and IK, but before remaining constraints,
-and chooses equivalent Euler angles near the current
-FK values to preserve rotation continuity. Existing keys at that frame retain
+and chooses equivalent Euler angles near the current FK values to preserve
+rotation continuity. Existing keys at that frame retain
 their interpolation and tangent settings; new keys use auto Bezier tangents.
 Position and scale keys are unchanged.
 
 Matching rejects chains with SDK-owned rotation channels or enabled Orient,
 Aim, or Parent constraints on their joints. Disable or remove those competing
 rotation controls before matching. A disabled handle or zero blend has no active
-IK pose to capture. This command matches one frame: the blend setting is not
-animated, so it changes how the handle evaluates at every frame. It neither
-bakes a frame range nor guarantees a seamless switch elsewhere in the animation.
+IK pose to capture. This command matches one frame; it neither bakes a frame
+range nor guarantees a seamless switch elsewhere. Without a blend curve, its
+static fallback change still affects every frame. With a curve, inspect nearby
+blend keys and tangents to control the transition around the captured frame.
 
 Before committing, matching checks that the chain keeps its world positions and
 orientations, both before and after constraints. Unkeyed position previews or
@@ -331,10 +385,10 @@ track bend continuity across frames. Position the pole clearly beside the target
 line to choose an unambiguous bend. Chains may not overlap or control ancestors
 of another chain, preventing order-dependent results.
 
-Solver choice, literal points, and blend remain static saved settings. Linked
-target and pole transforms use ordinary animation channels. Both solvers share
+Solver choice and literal target/pole points remain static saved settings. Linked
+target and pole transforms and the handle's blend use animation curves. Both solvers share
 the current-frame **Match FK to IK and key** workflow above. Joint orientation/axis
-editing, angular limits, stretch, blend animation, and range-based IK-to-FK pose baking
+editing, angular limits, stretch, SDK-driven blend, and range-based IK-to-FK pose baking
 remain unavailable. Matching a target position alone does not reproduce every
 possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
@@ -599,6 +653,14 @@ For 16 chains, historical sampling on uncached frames measured **0.281 ms median
 exclude browser scheduling, rendering, skinning, and editor callbacks, and are
 not an end-to-end playback frame-rate claim.
 
+The animated-blend run (`node scripts/benchmark-ik-blend.mjs`) used the same
+Node 22.16, 50-warmup/300-sample setup. Full stages measured **0.04625 ms median /
+0.1226 ms p95 for one chain** and **0.28335 ms median / 0.4566 ms p95 for 16 chains**.
+Historical sampling for 16 chains measured **0.30215 ms median / 0.6643 ms p95**
+on cache misses and about **0.0001 ms median / 0.0002 ms p95** on primed hits.
+The same CPU-only exclusions apply; this measures neither browser playback nor
+rendering, skinning, overlays, or editor callbacks.
+
 Run `npm test` for focused model, command, archive, and regression tests. Run
 `npm run build` for TypeScript checking and the production bundle. No separate
 lint script is configured. Tests cover weighted curves, full-turn rotations,
@@ -610,7 +672,7 @@ small-scene playback results.
 
 ## Remaining work, in priority order
 
-1. Local joint axes/orientation, rotation limits, stretch, blend animation,
+1. Local joint axes/orientation, rotation limits, stretch, SDK-driven blend,
    and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
@@ -634,10 +696,9 @@ only signed-axis vector-up settings rather than Maya's full set of up modes.
 Autodesk's [IK/FK Keys menu](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-Animation/files/GUID-C5ACDDBC-9E30-443C-8419-F07FC41E9A86.htm)
 distinguishes moving an IK target to an FK endpoint from keying the handle and
 joint chain. Its [IK/FK blending workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-8B0B343A-B00A-427C-8C79-E2B9008C4A88.htm)
-also animates blend values across frames. Musubi's matching commands cover target
-alignment with linked-control position keys and a current-frame rotation capture;
-animated blend transitions remain
-future work.
+also animates blend values across frames. Musubi supports time-keyed blend,
+target alignment with linked-control position keys, and current-frame rotation
+capture. Range baking and Maya's full IK/FK workflow are not implemented.
 Curve terminology follows Autodesk's [NURBS curve components](https://help.autodesk.com/cloudhelp/ENU/MayaCRE-Modeling/files/GUID-3C709643-E723-4518-84B7-45EB07778AD2.htm)
 and [curve degree overview](https://help.autodesk.com/cloudhelp/2023/ENU/Maya-Modeling/files/GUID-0C6DD36E-E336-4DE2-ADA1-86665998EF77.htm).
 Musubi supports degrees 1–3 and stores the full Three.js knot vector; it does not

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { getIKTargetPoints, ikChain, jointWorldMatrices, type IKHandle, type IKTargetPoints } from "./ik.ts";
-import type { AnimationPose } from "./animation.ts";
+import { evaluateIKBlend, type AnimationPose } from "./animation.ts";
 import type { SceneDocument } from "./scene-document.ts";
 
 type TargetView = {
@@ -68,8 +68,10 @@ export function createIKTargets(world: THREE.Scene) {
     target.link.geometry.dispose(); target.glyphMaterial.dispose(); target.linkMaterial.dispose();
   }
 
-  function sync(doc: SceneDocument, poses: ReadonlyMap<string, AnimationPose>) {
+  function sync(doc: SceneDocument, poses: ReadonlyMap<string, AnimationPose>, frame = 0) {
     if(disposed)return;
+    if (!Number.isFinite(frame)) throw Error("The IK marker frame must be finite.");
+    const blends = new Map((doc.ikHandles ?? []).map(handle => [handle.id, evaluateIKBlend(doc, handle.id, frame)]));
     const handles = doc.ikHandles ?? [], retained = new Set(handles.flatMap(handle=>[key(handle.id,"target"),
       ...(handle.solver === "two-bone" && handle.poleTarget ? [key(handle.id,"pole")] : [])]));
     for(const [id,target]of targets)if(!retained.has(id)){remove(target);targets.delete(id);}
@@ -85,9 +87,10 @@ export function createIKTargets(world: THREE.Scene) {
       const controlKey = key(handle.id,kind), point = kind === "pole" ? resolved?.poleTarget ?? handle.poleTarget! : resolved?.target ?? handle.target;
       const target = targets.get(controlKey) ?? create(handle,kind);
       target.object.position.fromArray(point);
-      target.object.name = `${handle.name} · ${kind} · ${handle.enabled ? `IK ${Math.round(handle.blend*100)}%` : "disabled"}`;
-      target.object.userData.enabled = handle.enabled; target.object.userData.blend = handle.blend;
-      target.enabled = handle.enabled; target.blend = handle.blend; appearance(controlKey,target);
+      const blend = blends.get(handle.id)!;
+      target.object.name = `${handle.name} · ${kind} · ${handle.enabled ? `IK ${Math.round(blend*100)}%` : "disabled"}`;
+      target.object.userData.enabled = handle.enabled; target.object.userData.blend = blend;
+      target.enabled = handle.enabled; target.blend = blend; appearance(controlKey,target);
       const endpoint = matrices?.get(kind === "pole" ? ikChain(doc,handle.rootId,handle.endId)[1] : handle.endId);
       target.link.visible = !!endpoint;
       if(!endpoint)continue;

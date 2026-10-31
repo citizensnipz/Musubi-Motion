@@ -1,5 +1,5 @@
 import { Vector3 } from "three";
-import type { AnimationPose } from "./animation.ts";
+import { evaluateIKBlend, setIKBlendKey, type AnimationPose } from "./animation.ts";
 import { createIKHandle, defaultPoleTarget, deleteIKHandle, getIKTargetPoints, ikChain, jointWorldMatrices, matchIKToFK, matchFKToIK, updateIKHandle, type IKHandle } from "./ik.ts";
 import { createIKControl, matchIKControlsToFKAndKey, setIKControl } from "./ik-controls.ts";
 import { transformNodes, type Vec3 } from "./scene-document.ts";
@@ -9,6 +9,8 @@ type Options = {
   available: () => boolean;
   getPoses: () => Map<string, AnimationPose>;
   getFrame: () => number;
+  setFrame?: (frame: number) => void;
+  previewBlend?: (id: string, value?: number) => void;
   canKey?: () => boolean;
   /** Solved joint poses after IK and before remaining output constraints. */
   getSolvedPoses: () => Map<string, AnimationPose>;
@@ -50,9 +52,14 @@ export function createIKPanel(store: SceneStore, options: Options) {
   function number(name: string, step = "any") {
     const node = document.createElement("input"); node.type = "number"; node.step = step; node.setAttribute("aria-label", name); return node;
   }
-  function commitField(input: HTMLInputElement, action: () => void) {
-    let cancel = false;
-    input.addEventListener("blur", () => { if (!cancel && !input.readOnly) run(action); cancel = false; });
+  function commitField(input: HTMLInputElement, action: () => void, onlyChanged = false) {
+    let cancel = false, original = input.value;
+    input.addEventListener("focus", () => { original = input.value; });
+    input.addEventListener("blur", () => {
+      const changed = input.value !== original && input.valueAsNumber !== Number(original);
+      if (!cancel && !input.readOnly && (!onlyChanged || changed)) run(action);
+      cancel = false;
+    });
     input.addEventListener("keydown", event => {
       if (event.key === "Enter") { event.preventDefault(); input.blur(); }
       if (event.key === "Escape") { event.preventDefault(); cancel = true; input.blur(); status.textContent = ""; refresh(); }
@@ -137,6 +144,23 @@ export function createIKPanel(store: SceneStore, options: Options) {
   const blendSlider = document.createElement("input"); blendSlider.type = "range"; blendSlider.min = "0"; blendSlider.max = "1"; blendSlider.step = "0.01"; blendSlider.setAttribute("aria-label", "IK FK blend slider");
   const blend = number("IK FK blend", "0.01"); blend.min = "0"; blend.max = "1"; blendRow.append(blendSlider, blend);
   const blendLabel = document.createElement("div"); blendLabel.textContent = "FK / IK blend · 0 = FK, 1 = IK";
+  const blendHelp = document.createElement("p");
+  const blendActions = document.createElement("div"); blendActions.className = "ik-actions";
+  function keyFrame() {
+    if (options.canKey && !options.canKey()) throw Error("Switch the timeline to Animation mode before keying IK blend.");
+    const currentFrame = options.getFrame(), frame = Math.round(currentFrame);
+    if (Math.abs(frame - currentFrame) > 1e-9) options.setFrame?.(frame);
+    return frame;
+  }
+  const keyBlend = button("Key blend", () => run(() => {
+    const frame = keyFrame();
+    setIKBlendKey(store, selectedHandleId, frame, evaluateIKBlend(store.getState().document, selectedHandleId, frame));
+    element.dispatchEvent(new CustomEvent<string>("ik-blend-select", { detail: selectedHandleId }));
+  }, "IK blend keyed at the current frame."));
+  const editBlendCurve = button("Edit blend curve", () => {
+    if (options.available()) element.dispatchEvent(new CustomEvent<string>("ik-blend-curve", { detail: selectedHandleId }));
+  });
+  blendActions.append(keyBlend, editBlendCurve);
   const iterations = number("IK solver iterations", "1"); iterations.min = "1"; iterations.max = "128";
   const iterationsLabel = label("Solver iterations", iterations);
   const match = button(options.getFKPoses ? "Match target to FK" : "Match target to authored FK", () => run(() => {
@@ -149,12 +173,12 @@ export function createIKPanel(store: SceneStore, options: Options) {
   const matchFK = button("Match FK to IK and key", () => run(() => {
     if (options.canKey && !options.canKey()) throw Error("Switch the timeline to Animation mode before matching and keying FK.");
     const handle = current();
-    if(!handle?.enabled || handle.blend <= 0)throw Error("Enable the selected IK handle and set its blend above zero before matching FK to IK.");
+    if(!handle?.enabled || evaluateIKBlend(store.getState().document, handle.id, options.getFrame()) <= 0)throw Error("Enable the selected IK handle and set its blend above zero before matching FK to IK.");
     matchFKToIK(store, handle.id, options.getFrame(), options.getSolvedPoses(), options.getFKPoses?.());
   }, `Joint rotation keys set at frame ${Number(options.getFrame().toFixed(3))}; the handle now uses FK.`));
   matchFK.title = "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
   const matchHelp = document.createElement("p");
-  matchHelp.textContent = "Match FK to IK and key writes rotation keys for every joint in this handle's chain at the current frame, then sets its static blend to 0 (FK). Remove Set Driven Key relationships on chain rotations; disable or delete constraints that drive those rotations.";
+  matchHelp.textContent = "Match FK to IK and key captures joint rotations and switches to FK. An animated blend receives a zero key at this frame; an unanimated blend becomes a static zero. Remove Set Driven Key or rotation constraints on the chain before matching.";
   const remove = button("Delete IK handle", () => run(() => {
     if (!selectedHandleId) return;
     deleteIKHandle(store, selectedHandleId);
@@ -163,9 +187,9 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-target-select", { detail: selectedHandleId }));
   });
   const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, matchFK, remove);
-  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, label("Solver", solver), offsetLabel, targetHeading, label("Target control", targetControl), createTarget, targetRow, poleControls, blendLabel, blendRow, iterationsLabel, actions, matchHelp);
+  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, label("Solver", solver), offsetLabel, targetHeading, label("Target control", targetControl), createTarget, targetRow, poleControls, blendLabel, blendRow, blendActions, blendHelp, iterationsLabel, actions, matchHelp);
   const empty = document.createElement("p"); empty.className = "ik-empty"; empty.textContent = "No IK handles. Create a joint chain, then choose its root and end above.";
-  const note = document.createElement("p"); note.textContent = "Animate targets and poles by linking ordinary transforms or creating curve controls. Controls can use keyframes, Set Driven Key, and constraints. Feedback through an IK chain is rejected. Blend and solver settings remain static. Both solvers preserve bone lengths; unreachable targets stop at the chain's reach. Joint limits are not supported.";
+  const note = document.createElement("p"); note.textContent = "Animate targets and poles through linked controls, and blend through its IK blend curve. Solver settings remain static. Both solvers preserve bone lengths; unreachable targets stop at the chain's reach. Joint limits are not supported.";
   element.append(details, empty, status, note);
 
   function current(): IKHandle | undefined { return store.getState().document.ikHandles?.find(handle => handle.id === selectedHandleId); }
@@ -179,11 +203,38 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (current()?.solver !== "two-bone") throw Error("Choose Analytic two-bone before editing a pole target.");
     patch({ poleTarget: poles.map(finiteInput) as Vec3 });
   }));
-  commitField(blend, () => patch({ blend: finiteInput(blend) }));
+  const hasBlendKeys = () => store.getState().document.animation?.tracks.some(track => track.targetId === selectedHandleId && track.channel === "ik.blend" && track.keys.length) ?? false;
+  function editBlend(value: number) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) throw Error("IK blend must be between zero and one.");
+    options.previewBlend?.(selectedHandleId);
+    if (hasBlendKeys()) setIKBlendKey(store, selectedHandleId, keyFrame(), value);
+    else patch({ blend: value });
+  }
+  commitField(blend, () => editBlend(finiteInput(blend)), true);
   commitField(iterations, () => patch({ iterations: finiteInput(iterations) }));
   enabled.onchange = () => run(() => patch({ enabled: enabled.checked }));
-  blendSlider.oninput = () => { blend.value = blendSlider.value; };
-  blendSlider.onchange = () => run(() => patch({ blend: blendSlider.valueAsNumber }));
+  let cancelBlend = false, previewingBlend = false;
+  const cancelBlendPreview = () => {
+    previewingBlend = false; options.previewBlend?.(selectedHandleId);
+    const value = current() ? String(evaluateIKBlend(store.getState().document, selectedHandleId, options.getFrame())) : "0";
+    blend.value = value; blendSlider.value = value;
+  };
+  function cancelPreview() { if (previewingBlend) { cancelBlend = true; cancelBlendPreview(); } }
+  blendSlider.onpointerdown = () => { cancelBlend = false; };
+  blendSlider.oninput = () => {
+    if (cancelBlend || !options.available()) return;
+    previewingBlend = true; blend.value = blendSlider.value; options.previewBlend?.(selectedHandleId, blendSlider.valueAsNumber);
+  };
+  blendSlider.onchange = () => {
+    previewingBlend = false;
+    if (cancelBlend) { cancelBlend = false; cancelBlendPreview(); return; }
+    run(() => editBlend(blendSlider.valueAsNumber));
+  };
+  blendSlider.onkeydown = event => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelBlend = true; cancelBlendPreview(); blendSlider.blur(); }
+    else cancelBlend = false;
+  };
+  blendSlider.onblur = cancelPreview;
   handles.onchange = () => { selectedHandleId = handles.value; status.textContent = ""; refresh(); };
   root.onchange = () => { updateEnds(); status.textContent = ""; refresh(); };
   end.onchange = () => { status.textContent = ""; refresh(); };
@@ -250,11 +301,18 @@ export function createIKPanel(store: SceneStore, options: Options) {
     create.disabled = !available || !root.value || !end.value || (analyticCreation && creationChainLength !== 3);
     create.title = analyticCreation && creationChainLength !== 3 ? "Choose a chain containing exactly three joints for analytic two-bone IK." : "Create an IK handle at the displayed end joint.";
     handles.disabled = !available || !doc.ikHandles?.length;
-    matchFK.disabled = !available || !selected?.enabled || selected.blend <= 0 || (options.canKey !== undefined && !options.canKey());
+    const effectiveBlend = selected ? evaluateIKBlend(doc, selected.id, options.getFrame()) : 0;
+    matchFK.disabled = !available || !selected?.enabled || effectiveBlend <= 0 || (options.canKey !== undefined && !options.canKey());
     matchFK.title = options.canKey && !options.canKey()
       ? "Switch the timeline to Animation mode to match and key FK."
-      : "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
+      : "Key the solved joint rotations and switch to FK at this frame in one undo step.";
     if (!selected) return;
+    keyBlend.disabled = !available || (options.canKey !== undefined && !options.canKey());
+    editBlendCurve.disabled = !available || !hasBlendKeys();
+    blend.disabled = blendSlider.disabled = !available || (hasBlendKeys() && options.canKey !== undefined && !options.canKey());
+    blendHelp.textContent = hasBlendKeys()
+      ? "Animated blend: edits set a key at the current frame. Use the Graph Editor or Dope Sheet to edit or delete keys. Playback clamps blend to 0–1."
+      : "Static blend. Set the first blend key to animate a switch or gradual transition between FK and IK.";
     targetControl.value = selected.targetControl?.objectId ?? ""; poleControl.value = selected.poleControl?.objectId ?? "";
     const linked = !!(selected.targetControl || selected.poleControl);
     match.textContent = linked ? "Match controls to FK and key" : options.getFKPoses ? "Match target to FK" : "Match target to authored FK";
@@ -271,12 +329,12 @@ export function createIKPanel(store: SceneStore, options: Options) {
     try { points = getIKTargetPoints(doc, options.getPoses()).get(selected.id)!; } catch { /* The viewport reports evaluation errors. */ }
     targets.forEach((input, index) => { input.readOnly = !!selected.targetControl; setValue(input, String(Number(points.target[index].toFixed(6))), force); });
     poles.forEach((input, index) => { input.readOnly = !!selected.poleControl; setValue(input, points.poleTarget ? String(Number(points.poleTarget[index].toFixed(6))) : "", force); });
-    if (force || (document.activeElement !== blend && document.activeElement !== blendSlider)) { blend.value = String(selected.blend); blendSlider.value = String(selected.blend); }
+    if (force || (document.activeElement !== blend && document.activeElement !== blendSlider)) { blend.value = String(Number(effectiveBlend.toFixed(6))); blendSlider.value = String(effectiveBlend); }
     setValue(iterations, String(selected.iterations), force); enabled.checked = selected.enabled;
     const names = new Map((doc.joints ?? []).map(joint => [joint.id, joint.name]));
     const chain = ikChain(doc, selected.rootId, selected.endId);
     chainDescription.textContent = `${names.get(selected.rootId)} → ${names.get(selected.endId)} · ${chain.length - 1} bones`;
   }
   store.subscribe(refresh); refresh();
-  return { element, refresh, select(id: string) { selectedHandleId = id; refresh(); } };
+  return { element, refresh, cancelPreview, select(id: string) { selectedHandleId = id; refresh(); } };
 }

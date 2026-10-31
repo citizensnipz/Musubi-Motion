@@ -28,7 +28,7 @@ function checkedWorld(matrix: Matrix4 | undefined): Matrix4 {
 }
 function evaluated(doc: SceneDocument, frame: number, fk: boolean): Map<string, AnimationPose> {
   const poses = evaluateSceneAnimation(doc, frame); evaluateDrivenKeys(doc, poses);
-  const stages = evaluateRigStages(doc, poses, fk);
+  const stages = evaluateRigStages(doc, poses, fk, frame);
   return fk ? stages.fkPoses! : poses;
 }
 function resolved(doc: SceneDocument, handle: IKHandle, kind: IKControlKind, poses: ReadonlyMap<string, AnimationPose>): Vec3 {

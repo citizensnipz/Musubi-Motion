@@ -215,6 +215,8 @@ async function start() {
   const assetFiles = new Map<string, File>();
   let selected = new Set<string>();
   let selectedIKId = "";
+  let selectedIKBlendId = "";
+  let blendPreview: { id: string; value: number } | undefined;
   let selectedIKKind: IKControlKind = "target";
   const ikTargets = createIKTargets(world);
   let sceneName = "Untitled.msb";
@@ -291,6 +293,10 @@ async function start() {
     return [...selected, ...skeleton.selectedIds].filter(id => doc.nodes[id]?.type === "transform" || joints.has(id));
   };
   const currentPose = (id: string): AnimationPose => evaluated.get(id) ?? poseOverrides.get(id) ?? evaluateChannels(store.getState().document, id, getFrame());
+  const animationSelection = () => {
+    const id = selectedIKBlendId || selectedIKId;
+    return id && store.getState().document.ikHandles?.some(handle => handle.id === id) ? [id] : allSelection();
+  };
   function prepareJointEdit(next: import("./skeleton.ts").Joint[], label: string): SceneDocument {
     const result = prepareJointAnimationEdit(store.getState().document, next, label, Math.round(getFrame()), timelinePanel?.autoKey ?? false, currentPose);
     if (result.document.ikHandles) validateIKHandles(result.document.ikHandles, result.document);
@@ -327,13 +333,15 @@ async function start() {
   function keySelection() {
     if (loading || dragId || timelinePanel?.turntable) return;
     setPlaying(false);
-    const ids = allSelection();
-    if (!ids.length) { notice.textContent = "Select objects or joints to set keys."; return; }
-    setKeys(store, ids, Math.round(getFrame()), new Map(ids.map(id => [id, currentPose(id)])));
-    clearPoseDraft(); updateTime();
+    const ids = animationSelection();
+    if (!ids.length) { notice.textContent = "Select objects, joints, or an IK blend channel to set keys."; return; }
+    setKeys(store, ids, Math.round(getFrame()), new Map(allSelection().map(id => [id, currentPose(id)])));
+    if (allSelection().length) clearPoseDraft();
+    updateTime();
     notice.textContent = `Set keys for ${ids.length} selected item(s) at frame ${Math.round(getFrame())}.`;
   }
   function clearPoseDraft() {
+    blendPreview = undefined;
     poseOverrides.clear();
     poseDrafts.clear();
   }
@@ -574,7 +582,7 @@ async function start() {
   riggingPanel.addEventListener("joint-selection-change", () => {
     const doc = store.getState().document;
     selected = new Set([...selected].filter(id => doc.nodes[id]?.type === "transform"));
-    if (skeleton.selectedIds.size) { selectedIKId = ""; ikTargets.setSelected(); }
+    if (skeleton.selectedIds.size) { selectedIKId = ""; selectedIKBlendId = ""; ikTargets.setSelected(); }
     if (!dragId) { applyAnimationPose(); updateBindings(); }
     if (skeleton.selectedIds.size) {
       for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
@@ -669,7 +677,7 @@ async function start() {
   }
   function selectObjects(ids: string[], additive = false) {
     if (dragId) return;
-    selectedIKId = ""; ikTargets.setSelected();
+    selectedIKId = ""; selectedIKBlendId = ""; ikTargets.setSelected();
     if (!additive && skeleton.selectedIds.size) skeleton.select("");
     const doc = store.getState().document;
     const next = additive ? new Set(selected) : new Set<string>();
@@ -684,13 +692,14 @@ async function start() {
   function refreshSelection() {
     const doc = store.getState().document;
     if (!doc.ikHandles?.some(h => h.id === selectedIKId)) selectedIKId = "";
+    if (!doc.ikHandles?.some(h => h.id === selectedIKBlendId)) selectedIKBlendId = "";
     if (selectedIKKind === "pole" && doc.ikHandles?.find(h => h.id === selectedIKId)?.solver !== "two-bone") selectedIKKind = "target";
     ikTargets.setSelected(selectedIKId || undefined, selectedIKKind);
     selected = new Set(
       [...selected].filter((id) => doc.nodes[id]?.type === "transform"),
     );
     for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
-    selectionLabel.textContent = selectedIKId ? `IK ${selectedIKKind === "pole" ? "pole" : "target"}: ${doc.ikHandles?.find(h => h.id === selectedIKId)?.name}` : selected.size && skeleton.selectedIds.size ? `${selected.size} objects · ${skeleton.selectedIds.size} joints selected` : skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
+    selectionLabel.textContent = selectedIKBlendId ? `IK blend: ${doc.ikHandles?.find(h => h.id === selectedIKBlendId)?.name}` : selectedIKId ? `IK ${selectedIKKind === "pole" ? "pole" : "target"}: ${doc.ikHandles?.find(h => h.id === selectedIKId)?.name}` : selected.size && skeleton.selectedIds.size ? `${selected.size} objects · ${skeleton.selectedIds.size} joints selected` : skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
       ? `${selected.size} object${selected.size === 1 ? "" : "s"} selected`
       : "Nothing selected";
     refreshGizmo();
@@ -815,13 +824,15 @@ async function start() {
     for (const id of assetFiles.keys())
       if (!retainedAssets.has(id)) assetFiles.delete(id);
   }
-  timelinePanel = mountTimeline(store, { getFrame, setFrame, setKey: keySelection, getSelection: allSelection,
+  timelinePanel = mountTimeline(store, { getFrame, setFrame, setKey: keySelection, getSelection: animationSelection,
     available: () => !loading && !dragId,
     onModeChange() { setPlaying(false); clearPoseDraft(); time = timelinePanel?.turntable ? 0 : animationSettings().start / animationSettings().fps; updateTime(); },
   });
-  animationEditors = mountAnimationEditors(store, { getFrame, setFrame, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  animationEditors = mountAnimationEditors(store, { getFrame, setFrame, getSelection: animationSelection, onSelectTarget: selectAnimationTarget, available: () => !loading && !dragId && !playing });
   drivenPanel = createDrivenKeyPanel(store, { getFrame, getSelection: allSelection, getPoses: () => evaluated, available: () => !loading && !dragId && !playing });
-  ikPanel = createIKPanel(store, { getFrame, canKey: () => !timelinePanel?.turntable, getPoses: () => evaluated, getFKPoses: () => fkPoses, getSolvedPoses: () => solvedPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  ikPanel = createIKPanel(store, { getFrame, setFrame, previewBlend(id, value) {
+    blendPreview = value === undefined ? undefined : { id, value }; applyAnimationPose(); updateBindings();
+  }, canKey: () => !timelinePanel?.turntable, getPoses: () => evaluated, getFKPoses: () => fkPoses, getSolvedPoses: () => solvedPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
   constraintsPanel = createConstraintsPanel(store, { getPoses: () => evaluated, getSelection: allSelection, available: () => !loading && !dragId && !playing });
   controllerPanel = createControllerPanel(store, {
     available: () => !loading && !dragId && !playing,
@@ -841,6 +852,7 @@ async function start() {
   workspace.registerPanel("ik-handles", "IK Handles", ikPanel.element);
   function selectIKTarget(id: string, kind: IKControlKind = "target") {
     if (loading || dragId || !ikTargets.getObject(id, kind)) return;
+    selectedIKBlendId = "";
     setPlaying(false);
     skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting();
     modelingPanel?.stopEditing();
@@ -857,6 +869,23 @@ async function start() {
   }
   ikPanel.element.addEventListener("ik-target-select", event => selectIKTarget((event as CustomEvent<string>).detail));
   ikPanel.element.addEventListener("ik-pole-select", event => selectIKTarget((event as CustomEvent<string>).detail, "pole"));
+  function selectAnimationTarget(id: string) {
+    if (loading || dragId) return;
+    const doc = store.getState().document;
+    if (doc.ikHandles?.some(handle => handle.id === id)) {
+      setPlaying(false); modelingPanel?.stopEditing(); selected.clear(); skeleton.select("");
+      selectedIKId = ""; selectedIKBlendId = id; ikPanel?.select(id); choose("select"); refreshSelection();
+    } else if (doc.joints?.some(joint => joint.id === id)) {
+      selected.clear(); skeleton.select(id);
+    } else selectObjects([id]);
+  }
+  ikPanel.element.addEventListener("ik-blend-select", event => selectAnimationTarget((event as CustomEvent<string>).detail));
+  ikPanel.element.addEventListener("ik-blend-curve", event => {
+    const id = (event as CustomEvent<string>).detail;
+    const track = store.getState().document.animation?.tracks.find(track => track.targetId === id && track.channel === "ik.blend");
+    if (!track) return;
+    selectAnimationTarget(id); animationEditors?.focusTrack(track.id); element("view-graph").click();
+  });
   ikPanel.element.addEventListener("ik-control-created", event => {
     modelingPanel?.stopEditing(); selectObjects([(event as CustomEvent<string>).detail]); choose("translate");
   });
@@ -936,7 +965,7 @@ async function start() {
     getSelection: allSelection,
     onSelectObject: id => selectObjects([id]),
     onComponentMode: request => {
-      if (request) { skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting(); selectedIKId = ""; ikTargets.setSelected(); }
+      if (request) { skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting(); selectedIKId = ""; selectedIKBlendId = ""; ikTargets.setSelected(); }
       meshComponentRequest = request;
       webgl.domElement.style.cursor = request ? "crosshair" : "";
       if (request) choose("select"); else refreshGizmo();
@@ -1391,6 +1420,7 @@ async function start() {
   });
   webgl.domElement.addEventListener("lostpointercapture", () => { if (gesture?.component) cancelComponentScan(); cancelSelection(); });
   window.addEventListener("blur", () => {
+    ikPanel?.cancelPreview();
     cancelComponentScan();
     abortDrag();
     cancelSelection();
@@ -1457,7 +1487,7 @@ async function start() {
     if (key === "delete") {
       if (loading || dragId) return;
       event.preventDefault();
-      if (selectedIKId) { deleteIKHandle(store, selectedIKId); return; }
+      if (selectedIKId || selectedIKBlendId) { deleteIKHandle(store, selectedIKId || selectedIKBlendId); return; }
       const ids = new Set([...selected, ...skeleton.selectedIds]);
       if (!ids.size) return;
       setPlaying(false);
@@ -1513,6 +1543,8 @@ async function start() {
     const draggingTarget = !!selectedIKId && dragId === `ik:${selectedIKId}`;
     if (dragId && !draggingTarget && !dragControlPose) return;
     let doc = store.getState().document;
+    if (blendPreview && doc.ikHandles?.some(handle => handle.id === blendPreview!.id))
+      doc = keyChannels(doc, blendPreview.id, blendPreview.value, getFrame(), false);
     if (draggingTarget) {
       const target = ikTargets.getObject(selectedIKId, selectedIKKind)!.position.toArray() as Vec3;
       const patch = selectedIKKind === "pole" ? { poleTarget: target } : { target };
@@ -1525,7 +1557,7 @@ async function start() {
     fkPoses = new Map(evaluated);
     solvedPoses = new Map(evaluated);
     try {
-      const stages = evaluateRigStages(doc, evaluated, true);
+      const stages = evaluateRigStages(doc, evaluated, true, getFrame());
       fkPoses = stages.fkPoses!; solvedPoses = stages.solvedPoses!;
       evaluationError = "";
     } catch (error) {
@@ -1544,7 +1576,7 @@ async function start() {
       object.preview.rotation.y = timelinePanel?.turntable ? (time / duration) * Math.PI * 2 : 0;
     }
     skeleton.applyPose(evaluated);
-    ikTargets.sync(doc, evaluated);
+    ikTargets.sync(doc, evaluated, getFrame());
   }
   function updateTime(apply = true) {
     if (apply) { applyAnimationPose(); updateBindings(); }
@@ -1582,6 +1614,7 @@ async function start() {
     return !isDirty() || (await askDiscard());
   }
   function busy(value: boolean, message = "") {
+    if (value) ikPanel?.cancelPreview();
     loading = value;
     if (value) {
       skinPaintPanel?.stopPainting();
@@ -1615,6 +1648,7 @@ async function start() {
     clearPoseDraft();
     selectedIKId = "";
     selected.clear();
+    selectedIKBlendId = "";
     skinWeightsPanel?.resetScene();
     skinPaintPanel?.resetScene();
     modelingPanel?.resetScene(); meshComponentPreview.clear(); meshComponentIds = [];

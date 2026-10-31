@@ -23,7 +23,7 @@ export function createParticlePoseSampler(doc: SceneDocument): { worldAt(frame: 
       }
       const poses = evaluateSceneAnimation(doc, frame);
       evaluateDrivenKeys(doc, poses);
-      evaluateRigStages(doc, poses);
+      evaluateRigStages(doc, poses, false, frame);
       const world = constraintWorldMatrices(doc, poses);
       // Failed historical evaluations never enter or evict entries from the cache.
       cache.set(frame, world);

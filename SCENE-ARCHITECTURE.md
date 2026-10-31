@@ -131,6 +131,14 @@ a pose map without changing the document, so scrubbing and repeated evaluation
 of a frame are deterministic and do not fill history. The viewport, Properties,
 timeline, Graph Editor, and Dope Sheet refer to the same scene and frame.
 
+IK handles additionally accept an `ik.blend` track whose `targetId` is the handle
+ID. These scalar tracks are evaluated separately from transform poses; no fake
+pose is created for a handle. Handle IDs are distinct from node/joint IDs.
+`evaluateIKBlend` samples the requested frame and clamps effective output to 0–1,
+using the saved literal `blend` when no keys exist. The solver, markers, matching,
+and historical pose sampler use the same frame-aware result. Blend slider drafts
+preview at runtime; release commits one edit and Escape discards the preview.
+
 `src/animation.ts` owns channels, curve evaluation/validation, and key commands.
 It reuses Three.js cubic Bezier primitives, with time-parameter inversion for
 weighted handles. Curves hold their endpoint values outside the keyed interval.
@@ -160,6 +168,8 @@ also have a time curve. Driven values use the same cubic evaluator as animation;
 their horizontal coordinate is the driver value rather than a frame.
 SDK still reads authored/time/preview channels and earlier SDK outputs, before
 IK or constraints; a solved IK rotation is not a feedback driver.
+Its validator and UI use `POSE_ANIMATION_CHANNELS`: handle properties and
+`ik.blend` are explicitly excluded from both SDK drivers and outputs.
 
 `src/ik.ts` adapts Three.js's MIT-licensed `CCDIKSolver` to the shared joint pose.
 IK affects the pose map before binding, leaving authored FK values intact.
@@ -204,8 +214,10 @@ or prerequisite result leaks through. Optional snapshots capture prepared FK and
 post-IK poses for matching. SDK is not reevaluated after either constraint phase.
 
 `matchFKToIK` captures local rotations after IK and before remaining constraints
-for every joint from root through end, unwraps them against the prepared FK pose, keys
-the current frame, and sets the handle blend to zero in one document command.
+for every joint from root through end, unwraps them against the prepared FK pose,
+and keys the current frame. An existing `ik.blend` track receives a zero key at
+that frame; without a blend track, the literal fallback becomes zero. These
+changes form one document command.
 It retains existing key settings and leaves position/scale channels untouched.
 SDK-owned joint rotations and enabled rotation constraints reject the command
 atomically. The target-to-FK command aligns the endpoint target and, for analytic
@@ -214,9 +226,17 @@ handles, the pole with the displayed FK bend plane. With linked controls,
 through evaluated parent inverses before keying local position XYZ. Unlinked
 points are updated in the same transaction. Position SDK/Point/Parent ownership,
 incompatible target/pole requests on one object, or dependencies that would shift
-the keyed result reject the whole edit. Matching does not add a blend animation
-channel or bake a frame range; the stored blend change applies at every frame.
-Matching keys reuse the existing animation track schema.
+the keyed result reject the whole edit. Matching does not bake a frame range.
+When no blend track exists, the literal blend change still applies at every
+frame. Matching keys reuse the existing animation track schema.
+
+Blend keys must lie within 0–1. The Graph Editor shows the authored curve,
+including spline/weighted-tangent overshoot, while playback uses clamped output.
+Shape-preserving insertion rejects a sample outside the key range atomically;
+it cannot preserve that raw curve with an out-of-range key. Handle deletion,
+including removal caused by deleting its chain, removes its animation tracks in
+the same undoable document edit. Old files with only literal blend retain their
+previous behavior; no archive version change is required.
 
 FK rotation capture stages the new keys and handle settings before touching live history,
 reevaluates time curves, SDK, and the shared rig stages, and compares every chain joint's world
@@ -269,6 +289,9 @@ Editing an animated pose without setting keys previews that pose at the current
 frame; scrubbing or playback resumes evaluation from the saved curve. Authored
 base-channel edits are still document changes. The animation preview itself is
 not an animation key and is not stored as one in an archive.
+Changing only IK blend values or blend curves retains these input pose previews,
+including through undo/redo. Changes to other animation or rig inputs still
+invalidate them; scrubbing and playback end the preview session.
 
 Undoing an import detaches its runtime object; redo reattaches it. Resources are
 released when their IDs leave the current document and both history stacks.

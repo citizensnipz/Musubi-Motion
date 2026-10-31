@@ -15,6 +15,7 @@
 .animation-toolbar input[type=number], .animation-key-fields input { width: 66px; }
 .animation-toolbar input[type=checkbox], .animation-key-fields input[type=checkbox] { min-height: auto; width: auto; }
 .animation-key-fields { gap: 8px; color: var(--muted); }
+.animation-channel-help { padding: 5px 8px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
 .animation-graph-body { display: grid; grid-template-columns: 166px minmax(120px, 1fr); flex: 1; min-height: 100px; overflow: hidden; }
 .animation-channel-list { overflow: auto; border-right: 1px solid var(--line); padding: 5px; }
 .animation-channel-list button { display: block; width: 100%; text-align: left; margin-bottom: 3px; border-color: transparent; overflow: hidden; text-overflow: ellipsis; }
@@ -38,5 +39,6 @@
 .animation-dope-scroll { flex: 1; overflow: auto; min-height: 100px; }
 .animation-dope-scroll .dope-row { fill: var(--panel); }
 .animation-dope-scroll .dope-row:nth-child(2n) { fill: var(--bg); }
-.animation-dope-scroll .dope-name { fill: var(--text); font-size: 10px; pointer-events: none; }
+.animation-dope-scroll .dope-name { fill: var(--text); font-size: 10px; pointer-events: all; cursor: pointer; }
+.animation-dope-scroll [data-track-label] { pointer-events: all; cursor: pointer; }
 @media (max-width: 650px) { .animation-graph-body { grid-template-columns: 126px minmax(120px, 1fr); } }

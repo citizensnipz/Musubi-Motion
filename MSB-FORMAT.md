@@ -64,6 +64,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `ParticleShape` | `type: "particleShape"`, identity/parent, emission type/source, seed/timing, rate/lifetime, motion and fields, size/color/opacity endpoints |
 | `animation` | `fps`, `start`, `end`, `loop`, `tracks` |
 | Animation track | `id`, `targetId`, `channel`, ordered `keys` |
+| IK blend track | Existing animation-track schema, handle `targetId`, `channel: "ik.blend"`; key values within 0–1 |
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
 | `drivenKeys` | Relationship `id`, `driver` and `driven` property references, and curve `keys` |
 | `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend`, optional `solver`, `poleTarget`, `targetControl`, `poleControl` |
@@ -141,13 +142,16 @@ Animation validation requires valid targets/channels, finite bounded numbers,
 ordered unique key coordinates, unique track/key IDs, and one track per target
 channel. Frame rate is 1–240; start/end are within ±1,000,000 frames and end must
 be greater than start. Curve values and slopes are bounded by an absolute
-1,000,000,000,000; weights are within 0–1. There may be at most 100,000 animation
+1,000,000,000,000, except that authored `ik.blend` key values must be within 0–1;
+weights are within 0–1. There may be at most 100,000 animation
 keys in total and at most 100,000 driven keys in total.
 
 Driven graphs permit one driver per output, reject property cycles, and reject
 outputs that also have time curves. Relationship count is capped at 10,000.
 Stored driven scale keys must be positive (at least 0.001), and visibility keys
 must be within 0–1. The runtime also clamps interpolated scale/visibility outputs.
+SDK supports only transform/joint pose properties; neither driver nor output
+may reference `ik.blend` or an IK handle.
 
 IK validation requires a root-to-descendant joint chain with nonzero authored
 segment lengths, finite targets, blend within 0–1, and 1–128 iterations. It caps
@@ -173,8 +177,22 @@ The prerequisite closure follows linked controls, hierarchy ancestors, constrain
 sources, and linked-chain root ancestors. Feedback through any IK chain is
 rejected. Constraints in this closure run before IK; remaining constraints run
 after it. SDK reads its pre-IK channels. Scenes without links retain the legacy
-animation → SDK → IK → constraints order. Blend and solver properties are static;
-matching adds ordinary current-frame position or rotation keys, not blend curves.
+animation → SDK → IK → constraints order. Solver properties remain static.
+
+An optional animation track with `targetId` equal to a handle ID and channel
+`ik.blend` animates its FK/IK blend. Handle IDs must be distinct from node and
+joint IDs. Pose channels cannot target a handle, and `ik.blend` cannot target a
+node or joint. Evaluation samples this scalar separately from pose maps at the
+requested frame; missing or empty blend tracks use the handle's saved `blend`.
+Interpolated overshoot is clamped to 0–1 without rewriting the curve. The Graph
+Editor still displays the raw curve; shape-preserving insertion at an out-of-range
+sample rejects rather than authoring an invalid key. Existing files with literal
+blend only keep their behavior, and the format version remains 1.
+
+FK matching adds a zero key to an existing blend track at the captured frame;
+without that track it changes the literal fallback to zero. The joint rotation
+keys and blend change share one undo step. Deleting a handle or a joint chain
+that removes it also removes its blend tracks atomically; undo restores both.
 
 Constraint types are `point`, `orient`, `aim`, `scale`, and `parent`. Offsets contain
 position and scale XYZ tuples plus a normalized XYZW rotation quaternion.
@@ -250,3 +268,9 @@ linked target/pole transforms, their position curves, and constrained input pare
 Its [generator](scripts/create-ik-controls-example.mjs) verifies 241 half-frame
 samples before and after archive readback with endpoint error below 1.7 × 10⁻⁸
 scene units, and checks the shared historical pose sampler.
+
+[examples/animated-ik-blend.msb](examples/animated-ik-blend.msb) adds handle blend
+tracks and FK rotation curves. Its [generator](scripts/create-ik-blend-example.mjs)
+checks 241 half-frame samples against quaternion interpolation and historical
+sampling before and after archive readback; intermediate blend is not expected
+to place the endpoint exactly at the IK target.

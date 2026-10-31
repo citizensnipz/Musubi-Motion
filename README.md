@@ -28,9 +28,10 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Channel key controls:** key individual Properties channels with their diamonds and author stepped visibility with the Visible checkbox. Indicators distinguish unanimated channels, animated channels, and keys at the current frame.
 - **Graph Editor and Dope Sheet:** dockable curve/channel editing, key multiselection and box selection, Bezier tangent handles, linear/stepped interpolation, tangent presets, shape-preserving key insertion, copy/paste, retiming, and time scaling.
 - **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
-- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture the current solved joint rotations and switch to FK in one undoable edit. Blend is not animated; matching captures one frame.
+- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture solved joint rotations and switch to FK in one undoable edit. Matching captures one frame; an existing blend curve receives a zero key, otherwise the static blend becomes zero.
 - **Two-bone IK:** select the analytic solver for a root/middle/end chain and move its pole target to control the bend plane. Target and pole markers support viewport dragging, numeric editing, undo, and saving. Unreachable targets preserve bone lengths; existing handles keep their CCD behavior.
 - **Animated IK controls:** link existing transforms or create editable curve controls for targets and poles, preserving their world positions with optional offsets. Animate the controls with ordinary position keys, the Graph Editor, or Set Driven Key; supported upstream constraints run before IK. Linked markers select their controls, and viewport drags preview the chain live. **Match controls to FK and key** captures control positions at the current frame in one undo step.
+- **Animated FK/IK blend:** **Key blend** creates an ordinary `ik.blend` time track on the handle; **Edit blend curve** opens it in the Graph Editor. Keys stay within 0–1, and playback clamps tangent overshoot. Once keyed, panel blend edits key the current frame even with auto-key off; an unkeyed handle keeps its static fallback. The Graph Editor, Dope Sheet, timeline, undo, and native scenes share the same track.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
 - **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, add/subtract selections, inspect weights, restore automatic weights, and view sampled colors. Edits support undo and persistence; the elasticity pipeline inherits them.
@@ -93,6 +94,8 @@ Open [examples/animation-study.msb](examples/animation-study.msb) for a procedur
 
 Open [examples/animated-ik-controls.msb](examples/animated-ik-controls.msb) for an analytic chain with animated target/pole controls and a moving constrained root. Rebuild it with `node scripts/create-ik-controls-example.mjs`. The generator checks 241 half-frame samples before and after archive readback, with endpoint error below 1.7 × 10⁻⁸ scene units; this is model verification, not a browser performance result.
 
+[examples/animated-ik-blend.msb](examples/animated-ik-blend.msb) adds keyed FK poses and a 0 → 1 → 0 blend over frames 0–120. Rebuild it with `node scripts/create-ik-blend-example.mjs`. Intermediate blend mixes local joint rotations; the end joint need not reach the target until full IK.
+
 Drag a **panel title tab** toward another panel's edge to split the space, or toward its center to combine them as tabs. The floating tool panel is separate: click its lock icon to unlock it, then drag the grip. An unlocked grip also supports arrow-key nudging, with Shift for larger steps.
 
 ## Scene files
@@ -128,7 +131,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 ## Remaining priorities
 
-1. Joint orientation/limits, blend animation, twist controls, and range-based IK/FK baking.
+1. Joint orientation/limits, twist controls, blend driven by SDK, and range-based IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
 3. Influence management, weight smoothing and locks, surface-only component selection, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.

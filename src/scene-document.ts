@@ -170,6 +170,7 @@ export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>,
     }
   }
   const nodes = Object.fromEntries(Object.entries(doc.nodes).filter(([id]) => !removed.has(id)));
+  for (const handle of doc.ikHandles ?? []) if (removed.has(handle.rootId) || removed.has(handle.endId)) removed.add(handle.id);
   const retainedAssets = new Set(Object.values(nodes).filter(n => n.type === "splatShape").map(n => n.assetId));
   const freezePoint = (point: Vec3 | undefined, fallback: Vec3): Vec3 =>
     point?.length === 3 && [0, 1, 2].every(i => Number.isFinite(point[i]) && Math.abs(point[i]) <= 1e6)

@@ -1,4 +1,4 @@
-import { ANIMATION_CHANNELS, evaluateChannels, evaluateCurve, readChannel, type AnimationChannel, type CurveKey } from "./animation.ts";
+import { POSE_ANIMATION_CHANNELS, evaluateChannels, evaluateCurve, readChannel, type PoseAnimationChannel, type CurveKey } from "./animation.ts";
 import { deleteDrivenKeys, evaluateDrivenKeys, removeDrivenRelationship, setDrivenKey, upsertDrivenRelationship,
   type DrivenKeyRelationship, type DrivenProperty, type EvaluatedPose } from "./driven-keys.ts";
 import type { SceneStore } from "./scene-store.ts";
@@ -33,7 +33,7 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
     @media(max-width:600px){.driven-key-panel .sdk-pair{grid-template-columns:1fr}}`;
   element.append(style);
   const intro = document.createElement("p");
-  intro.textContent = "Map a driver attribute to one or more driven attributes. Set two or more value pairs to define a response. The horizontal curve axis is the driver value.";
+  intro.textContent = "Map a driver attribute to one or more driven attributes. Set two or more value pairs to define a response. The horizontal curve axis is the driver value. IK blend uses time keys in IK Handles, not Set Driven Key.";
   element.append(intro);
   const pair = document.createElement("div"); pair.className = "sdk-pair"; element.append(pair);
   const status = document.createElement("p"); status.className = "sdk-status"; status.setAttribute("role", "status");
@@ -70,7 +70,7 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
   }
   const driver = makeSide("Driver"), driven = makeSide("Driven");
   type Side = typeof driver;
-  function property(side: Side): DrivenProperty { return { targetId: side.target.value, channel: side.channel.value as AnimationChannel }; }
+  function property(side: Side): DrivenProperty { return { targetId: side.target.value, channel: side.channel.value as PoseAnimationChannel }; }
   function evaluated() {
     if (options.getPoses) return options.getPoses();
     const doc = store.getState().document;
@@ -80,13 +80,13 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
   }
   function sample(side: Side) {
     const poses = evaluated(), pose = poses.get(side.target.value);
-    side.value.value = pose ? String(readChannel(pose, side.channel.value as AnimationChannel)) : "";
+    side.value.value = pose ? String(readChannel(pose, side.channel.value as PoseAnimationChannel)) : "";
     updateCurrent(poses);
   }
   function updateChannels(side: Side) {
     const previous = side.channel.value;
     const isJoint = store.getState().document.joints?.some(joint => joint.id === side.target.value);
-    side.channel.replaceChildren(...ANIMATION_CHANNELS.filter(channel => !isJoint || !channel.startsWith("scale.")).map(channel => new Option(channel, channel)));
+    side.channel.replaceChildren(...POSE_ANIMATION_CHANNELS.filter(channel => !isJoint || !channel.startsWith("scale.")).map(channel => new Option(channel, channel)));
     if (Array.from(side.channel.options).some(option => option.value === previous)) side.channel.value = previous;
   }
   const actions = document.createElement("div"); actions.className = "sdk-actions";
@@ -110,7 +110,7 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
   function updateCurrent(poses: Map<string, EvaluatedPose>) {
     for (const side of [driver, driven]) {
       const pose = poses.get(side.target.value);
-      side.current.textContent = pose ? `At frame ${options.getFrame()}: ${Number(readChannel(pose, side.channel.value as AnimationChannel).toFixed(5))}` : "No object loaded";
+      side.current.textContent = pose ? `At frame ${options.getFrame()}: ${Number(readChannel(pose, side.channel.value as PoseAnimationChannel).toFixed(5))}` : "No object loaded";
     }
   }
   function drawCurve(relation: DrivenKeyRelationship) {

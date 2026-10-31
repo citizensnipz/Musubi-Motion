@@ -2,7 +2,7 @@ import type { SceneStore } from "./scene-store.ts";
 import {
   defaultAnimation, evaluateCurve, tangentSlope, upsertTrack, deleteKeys, moveKeys,
   patchKeys, replaceTracks, copyKeys, pasteKeys,
-  validateCurveKeys, scaleKeys, withTangent, insertKey,
+  validateCurveKeys, scaleKeys, withTangent, insertKey, setKeys, channelsForTarget,
 } from "./animation.ts";
 import type { AnimationTrack, CurveKey, KeyClipboard } from "./animation.ts";
 import "./graph-editor.css";
@@ -12,6 +12,7 @@ type EditorOptions = {
   setFrame: (frame: number) => void;
   getSelection: () => string[];
   available: () => boolean;
+  onSelectTarget?: (id: string) => void;
 };
 type View = { minTime: number; maxTime: number; minValue: number; maxValue: number };
 type Point = { x: number; y: number };
@@ -56,6 +57,8 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   dopeSheet.setAttribute("aria-label", "Animation Dope Sheet");
   const toolbar = document.createElement("div"); toolbar.className = "animation-toolbar"; graph.append(toolbar);
   const keyFields = document.createElement("div"); keyFields.className = "animation-key-fields"; graph.append(keyFields);
+  const blendHelp = document.createElement("div"); blendHelp.className = "animation-channel-help"; blendHelp.hidden = true;
+  blendHelp.textContent = "IK blend: 0 = FK, 1 = IK. Keys must be 0–1; tangent overshoot is shown here but clamped during playback."; graph.append(blendHelp);
   const body = document.createElement("div"); body.className = "animation-graph-body"; graph.append(body);
   const channelList = document.createElement("div"); channelList.className = "animation-channel-list";
   channelList.setAttribute("aria-label", "Animation channels"); body.append(channelList);
@@ -63,6 +66,7 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   const svg = svgElement("svg", { tabindex: 0, role: "application", "aria-label": "Animation curves. Drag keys or tangent handles; drag empty space to box select; wheel to zoom; Alt-drag to pan." }); surface.append(svg);
   const status = document.createElement("div"); status.className = "animation-status"; status.setAttribute("role", "status"); graph.append(status);
   const dopeToolbar = document.createElement("div"); dopeToolbar.className = "animation-toolbar"; dopeSheet.append(dopeToolbar);
+  const dopeBlendHelp = blendHelp.cloneNode(true) as HTMLDivElement; dopeSheet.append(dopeBlendHelp);
   const dopeScroll = document.createElement("div"); dopeScroll.className = "animation-dope-scroll"; dopeSheet.append(dopeScroll);
   const dopeSvg = svgElement("svg", { tabindex: 0, role: "application", "aria-label": "Dope Sheet keys. Shift-click or box select keys across channels; drag to retime." }); dopeScroll.append(dopeSvg);
   const dopeStatus = document.createElement("div"); dopeStatus.className = "animation-status"; dopeStatus.textContent = "Drag keys to retime · Shift-click to add · drag blank rows to box select"; dopeSheet.append(dopeStatus);
@@ -80,8 +84,10 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
     return tracks().filter(track => !selectedObjectsOnly || objectIds.has(track.targetId));
   };
   const objectName = (id: string) => {
-    const doc = store.getState().document; return doc.nodes[id]?.name ?? doc.joints?.find(j => j.id === id)?.name ?? id;
+    const doc = store.getState().document; return doc.nodes[id]?.name ?? doc.joints?.find(j => j.id === id)?.name ?? doc.ikHandles?.find(handle => handle.id === id)?.name ?? id;
   };
+  const channelName = (track: AnimationTrack) => track.channel === "ik.blend" ? "IK blend" : track.channel;
+  function selectTrack(track: AnimationTrack) { activeTrack = track.id; options.onSelectTarget?.(track.targetId); refresh(); }
   const keyEntries = () => tracks().flatMap(track => track.keys.filter(key => selected.has(key.id)).map(key => ({ track, key })));
   const colorFor = (track: AnimationTrack) => colors[Math.max(0, animation().tracks.findIndex(t => t.id === track.id)) % colors.length];
   const plot = (sheet = false) => ({ left: sheet ? 190 : 54, right: (sheet ? dopeWidth : graphWidth) - 16, top: 24, bottom: graphHeight - 30 });
@@ -123,7 +129,20 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   function remove() { edit(() => { deleteKeys(store, selected); selected.clear(); }); }
   function insert(time = Math.round(options.getFrame()), value?: number) {
     const track = animation().tracks.find(t => t.id === activeTrack);
-    if (!track) { announce("Set a key in the Timeline first, then select its channel.", true); return; }
+    if (!track) {
+      const doc = store.getState().document, ids = new Set(options.getSelection());
+      const handles = (doc.ikHandles ?? []).filter(handle => ids.has(handle.id));
+      if (value === undefined && handles.length === 1) {
+        edit(() => {
+          const id = handles[0].id;
+          if (!channelsForTarget(doc, id).includes("ik.blend")) throw Error("Select an IK handle to key its blend.");
+          setKeys(store, [id], time, undefined, ["ik.blend"]);
+          const created = animation().tracks.find(item => item.targetId === id && item.channel === "ik.blend")!;
+          activeTrack = created.id; selected = new Set(created.keys.filter(key => key.time === time).map(key => key.id));
+        });
+      } else announce("Set a key in the Timeline or IK Handles first, then select its channel. A selected IK handle can start its blend curve with Insert key.", true);
+      return;
+    }
     if(value===undefined){
       edit(()=>{selected=new Set([insertKey(store,track.id,time)]);});
       return;
@@ -137,7 +156,7 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   button(toolbar, "Copy", copy); button(toolbar, "Paste", paste);
   button(toolbar, "Frame all", () => fit()); button(toolbar, "Frame selected", () => fit(true));
   const selectionLabel = document.createElement("label"), selectionCheckbox = document.createElement("input");
-  selectionCheckbox.type = "checkbox"; selectionLabel.append(selectionCheckbox, "Selected objects"); toolbar.append(selectionLabel);
+  selectionCheckbox.type = "checkbox"; selectionLabel.append(selectionCheckbox, "Selected targets"); selectionCheckbox.title = "Show selected objects, joints, and IK handles"; toolbar.append(selectionLabel);
   selectionCheckbox.onchange = () => { selectedObjectsOnly = selectionCheckbox.checked; refresh(); };
   const interpolation = document.createElement("select"); interpolation.setAttribute("aria-label", "Key interpolation");
   for (const [value, label] of [["bezier", "Bezier"], ["linear", "Linear"], ["step", "Stepped"]]) interpolation.add(new Option(label, value));
@@ -181,19 +200,24 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
     if (!list.some(track => track.id === activeTrack)) activeTrack = list[0]?.id ?? "";
     const focusedTrack=channelList.contains(document.activeElement)?(document.activeElement as HTMLElement).dataset.trackId:undefined;
     channelList.replaceChildren();
-    if (!list.length) { const note = document.createElement("div"); note.className = "animation-empty"; note.textContent = "Set keys in the Timeline to create animation curves. Object and joint channels appear here."; channelList.append(note); }
+    if (!list.length) { const note = document.createElement("div"); note.className = "animation-empty"; note.textContent = "Set keys in the Timeline or IK Handles to create curves. Object, joint, and IK blend channels appear here. Select an IK handle and Insert key to start its blend curve."; channelList.append(note); }
     for (const track of list) {
-      const entry = button(channelList, "", () => { activeTrack = track.id; renderChannels(); draw(); }, `${objectName(track.targetId)} · ${track.channel}`);
-      entry.dataset.trackId=track.id;
+      const entry = button(channelList, "", () => selectTrack(track), `${objectName(track.targetId)} · ${channelName(track)} (${track.channel})`);
+      entry.dataset.trackId=track.id; entry.dataset.targetId = track.targetId;
       entry.setAttribute("aria-pressed", String(activeTrack === track.id));
       const name = document.createElement("span"); name.className = "channel-object"; name.textContent = objectName(track.targetId);
       const dot = document.createElement("span"); dot.className = "channel-color"; dot.style.background = colorFor(track);
-      entry.append(name, dot, track.channel);
+      entry.append(name, dot, channelName(track));
     }
     if(focusedTrack)Array.from(channelList.querySelectorAll<HTMLButtonElement>("button")).find(entry=>entry.dataset.trackId===focusedTrack)?.focus();
   }
   function updateFields() {
     const entries = keyEntries(), entry = entries[0], key = entry?.key;
+    const blendActive = animation().tracks.find(track => track.id === activeTrack)?.channel === "ik.blend";
+    blendHelp.hidden = !blendActive && !entries.some(item => item.track.channel === "ik.blend");
+    dopeBlendHelp.hidden = !visibleTracks().some(track => track.channel === "ik.blend");
+    if (entry?.track.channel === "ik.blend") { keyValue.min = "0"; keyValue.max = "1"; keyValue.step = ".01"; keyValue.title = "IK blend key: 0 = FK, 1 = IK. Playback clamps tangent overshoot."; }
+    else { keyValue.removeAttribute("min"); keyValue.removeAttribute("max"); keyValue.step = "any"; keyValue.title = "Selected key value"; }
     const hasVisibility=entries.some(item=>item.track.channel==="visibility");
     interpolation.disabled = tangents.disabled = !key||hasVisibility;
     for (const input of [keyTime, keyValue, inSlope, outSlope, inWeight, outWeight, broken]) input.disabled = entries.length !== 1;
@@ -283,13 +307,15 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
     timeGrid(dopeSvg,true,height);
     list.forEach((track,row)=>{
       const cy=37+row*26;
-      const name=textSvg(8,cy+3,`${objectName(track.targetId)} · ${track.channel}`,"dope-name");
-      const title=svgElement("title");title.textContent=`${objectName(track.targetId)} · ${track.channel}`;name.append(title);
+      const label = `${objectName(track.targetId)} · ${channelName(track)}`;
+      const name=textSvg(8,cy+3,label,"dope-name");
+      const title=svgElement("title");title.textContent=`${label} (${track.channel})`;name.append(title);
       // Clip long labels to preserve the time grid.
-      const labelSvg=svgElement("svg",{x:0,y:24+row*26,width:184,height:26});name.setAttribute("y","16");labelSvg.append(name);dopeSvg.append(labelSvg);
+      const labelSvg=svgElement("svg",{x:0,y:24+row*26,width:184,height:26,tabindex:0,role:"button","aria-label":`Select ${label}`,"data-track-label":track.id,"data-target-id":track.targetId});name.setAttribute("y","16");labelSvg.append(name);dopeSvg.append(labelSvg);
+      labelSvg.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); selectTrack(track); } });
       for(const key of track.keys)if(x(key.time,true)>=190&&x(key.time,true)<=dopeWidth-16)keyMark(dopeSvg,key,x(key.time,true),cy,colorFor(track));
     });
-    if(!list.length)dopeSvg.append(textSvg(12,55,"No animation tracks. Select an object or joint and set a key in the Timeline."));
+    if(!list.length)dopeSvg.append(textSvg(12,55,"No tracks. Set object/joint keys in the Timeline or blend keys in IK Handles."));
     const px=x(options.getFrame(),true);dopeSvg.append(svgElement("line",{x1:px,x2:px,y1:24,y2:height,class:"animation-playhead",visibility:px>=190&&px<=dopeWidth-16?"visible":"hidden"}));
     if(drag?.kind==="box"&&drag.sheet)drawBox(dopeSvg,drag);
   }
@@ -301,6 +327,8 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
       event.preventDefault();event.stopPropagation();target.focus();
       const start=point(event,sheet),node=event.target as Element,keyId=node.getAttribute("data-key") ?? node.getAttribute("data-tangent") ?? undefined;
       const isPan=event.altKey||event.button===1;
+      const labelTrack = node.closest("[data-track-label]")?.getAttribute("data-track-label");
+      if (sheet && labelTrack && !isPan) { const track = tracks().find(item => item.id === labelTrack); if (track) selectTrack(track); return; }
       if(keyId&&!isPan){
         const track=tracks().find(t=>t.keys.some(k=>k.id===keyId));if(track)activeTrack=track.id;
         if(event.shiftKey&&selected.has(keyId)&&!node.hasAttribute("data-tangent")){selected.delete(keyId);refresh();return;}
@@ -323,7 +351,7 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
       } else if(drag.kind==="key"){
         const dt=Math.round(atTime(drag.current.x,sheet)-atTime(drag.start.x,sheet)),dv=sheet?0:atValue(drag.current.y)-atValue(drag.start.y);
         const next=drag.tracks.map(track=>({...track,keys:track.keys.map(key=>selected.has(key.id)?{...key,time:key.time+dt,value:key.value+dv}:key).sort((a,b)=>a.time-b.time)}));
-        try { for(const track of next)validateCurveKeys(track.keys);previewTracks=next; }
+        try { for(const track of next) { validateCurveKeys(track.keys); if (track.channel === "ik.blend" && track.keys.some(key => key.value < 0 || key.value > 1)) throw Error("IK blend keys must be between 0 and 1."); } previewTracks=next; }
         catch { previewTracks=undefined;announce("This move would overlap key times or exceed the supported range.",true); }
       } else if(drag.kind==="tangent"){
         const track=drag.tracks.find(t=>t.keys.some(k=>k.id===drag!.keyId));
@@ -406,5 +434,10 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   new ResizeObserver(()=>draw()).observe(surface);new ResizeObserver(()=>drawDope()).observe(dopeScroll);
   announce("Set keys in the Timeline · select a channel · drag keys and tangent handles");
   fit();
-  return { graph, dopeSheet, refresh };
+  return { graph, dopeSheet, refresh, focusTrack(trackId: string) {
+    const track = animation().tracks.find(item => item.id === trackId); if (!track) return;
+    selectedObjectsOnly = options.getSelection().includes(track.targetId);
+    selectionCheckbox.checked = selectedObjectsOnly; activeTrack = track.id;
+    selected = new Set(track.keys.map(key => key.id)); fit(true);
+  } };
 }

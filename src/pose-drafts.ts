@@ -1,4 +1,4 @@
-import type { AnimationPose } from "./animation.ts";
+import { defaultAnimation, type AnimationPose, type AnimationTrack } from "./animation.ts";
 import type { SceneDocument } from "./scene-document.ts";
 
 type DraftSnapshot = { epoch: number; poses: Map<string, AnimationPose> };
@@ -15,13 +15,49 @@ function copyExistingPoses(document: SceneDocument, poses: ReadonlyMap<string, A
   return copy;
 }
 
+function sameTracks(a: AnimationTrack[], b: AnimationTrack[]): boolean {
+  return a.length === b.length && a.every((track, index) => track === b[index] || JSON.stringify(track) === JSON.stringify(b[index]));
+}
+
+function changesOnlyIKBlend(next: SceneDocument, previous: SceneDocument): boolean {
+  // A blend changes solved output, not the input poses being previewed. Keep
+  // this exception independent of command labels and closed to other rig edits.
+  const { animation: nextAnimation, ikHandles: nextHandles, ...nextInput } = next;
+  const { animation: previousAnimation, ikHandles: previousHandles, ...previousInput } = previous;
+  const keys = Object.keys(nextInput) as (keyof typeof nextInput)[];
+  if (keys.length !== Object.keys(previousInput).length || keys.some(key => nextInput[key] !== previousInput[key])) return false;
+
+  const handles = nextHandles ?? [], oldHandles = previousHandles ?? [];
+  if (handles.length !== oldHandles.length) return false;
+  let changed = false;
+  for (let index = 0; index < handles.length; index++) {
+    if (handles[index] === oldHandles[index]) continue;
+    const { blend, ...settings } = handles[index], { blend: oldBlend, ...oldSettings } = oldHandles[index];
+    if (JSON.stringify(settings) !== JSON.stringify(oldSettings)) return false;
+    changed ||= blend !== oldBlend;
+  }
+  if (nextAnimation === previousAnimation) return changed;
+
+  // The first blend key materializes default timeline metadata. That is not a
+  // timing change; changing FPS, range or loop still invalidates every draft.
+  const { tracks, ...settings } = nextAnimation ?? defaultAnimation();
+  const { tracks: oldTracks, ...oldSettings } = previousAnimation ?? defaultAnimation();
+  if (JSON.stringify(settings) !== JSON.stringify(oldSettings)) return false;
+  const isBlend = (track: AnimationTrack) => track.channel === "ik.blend";
+  if (!sameTracks(tracks.filter(track => !isBlend(track)), oldTracks.filter(track => !isBlend(track)))) return false;
+  changed ||= !sameTracks(tracks.filter(isBlend), oldTracks.filter(isBlend));
+  // An unrelated replacement with identical values must not widen the previous
+  // invalidation policy merely because this comparison found no differences.
+  return changed;
+}
+
 function retainsDraft(next: SceneDocument, previous: SceneDocument, label: string) {
   // Joint renames replace their array but do not change the evaluated pose.
   return label.startsWith("Rename") || (
     next.animation === previous.animation && next.joints === previous.joints &&
     next.drivenKeys === previous.drivenKeys && next.ikHandles === previous.ikHandles &&
     next.constraints === previous.constraints
-  );
+  ) || changesOnlyIKBlend(next, previous);
 }
 
 /**

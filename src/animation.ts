@@ -3,10 +3,12 @@ import { validateParticleEmitters } from "./particle-emitter.ts";
 import type { SceneDocument, TransformChannels } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
-export const ANIMATION_CHANNELS = [
+export const POSE_ANIMATION_CHANNELS = [
   "position.x", "position.y", "position.z", "rotation.x", "rotation.y", "rotation.z",
   "scale.x", "scale.y", "scale.z", "visibility",
 ] as const;
+export const ANIMATION_CHANNELS = [...POSE_ANIMATION_CHANNELS, "ik.blend"] as const;
+export type PoseAnimationChannel = typeof POSE_ANIMATION_CHANNELS[number];
 export type AnimationChannel = typeof ANIMATION_CHANNELS[number];
 export type CurveKey = {
   id: string;
@@ -57,6 +59,9 @@ export function validateCurveKeys(value: unknown): asserts value is CurveKey[] {
 
 export function validateAnimation(value: unknown, doc: SceneDocument): asserts value is AnimationData {
   if (doc.joints?.some(joint => Object.hasOwn(doc.nodes, joint.id))) throw Error("Joint and object IDs must be distinct.");
+  const joints = new Map((doc.joints ?? []).map(joint => [joint.id, joint]));
+  const handles = new Map((doc.ikHandles ?? []).map(handle => [handle.id, handle]));
+  if (handles.size !== (doc.ikHandles?.length ?? 0) || [...handles.keys()].some(id => Object.hasOwn(doc.nodes, id) || joints.has(id))) throw Error("IK handle, joint and object IDs must be distinct.");
   if (!record(value) || !finite(value.fps, 240) || value.fps < 1 || !finite(value.start, 1e6) || !finite(value.end, 1e6)
     || value.end <= value.start || typeof value.loop !== "boolean" || !Array.isArray(value.tracks) || value.tracks.length > 100000) throw Error("Invalid animation settings.");
   const trackIds = new Set<string>(), keyIds = new Set<string>(), channels = new Set<string>();
@@ -65,8 +70,9 @@ export function validateAnimation(value: unknown, doc: SceneDocument): asserts v
   for (const track of value.tracks) {
     if (!record(track) || !validId(track.id) || trackIds.has(track.id) || !validId(track.targetId)
       || !ANIMATION_CHANNELS.includes(track.channel as AnimationChannel)) throw Error("Invalid animation track.");
-    const node = doc.nodes[track.targetId], joint = doc.joints?.find(j => j.id === track.targetId);
-    if (node?.type !== "transform" && !joint) throw Error("Animation target is missing.");
+    const node = doc.nodes[track.targetId], joint = joints.get(track.targetId), handle = handles.get(track.targetId);
+    if (node?.type !== "transform" && !joint && !handle) throw Error("Animation target is missing.");
+    if ((track.channel === "ik.blend") !== !!handle) throw Error("IK blend tracks require an IK handle; pose channels require an object or joint.");
     if (joint && (track.channel as string).startsWith("scale.")) throw Error("Joint scale animation is not supported.");
     const channelKey = `${track.targetId}:${track.channel}`;
     if (channels.has(channelKey)) throw Error("Duplicate animated channel.");
@@ -75,6 +81,7 @@ export function validateAnimation(value: unknown, doc: SceneDocument): asserts v
     totalKeys += track.keys.length;
     if (totalKeys > 100000) throw Error("Too many animation keys.");
     for (const key of track.keys) {
+      if (track.channel === "ik.blend" && (key.value < 0 || key.value > 1)) throw Error("IK blend key values must be between zero and one.");
       if (keyIds.has(key.id)) throw Error("Duplicate animation key ID.");
       keyIds.add(key.id);
     }
@@ -166,6 +173,7 @@ export function evaluateCurve(keys: readonly CurveKey[], time: number): number |
 }
 
 export function readChannel(channels: TransformChannels & { visibility?: number }, channel: AnimationChannel): number {
+  if (channel === "ik.blend") throw Error("IK blend is not a transform pose channel.");
   if (!ANIMATION_CHANNELS.includes(channel)) throw Error("Unsupported animation channel.");
   if (channel === "visibility") return channels.visibility ?? 1;
   const [property, axis] = channel.split(".") as [keyof TransformChannels, string];
@@ -178,6 +186,7 @@ export function writeChannel(channels: TransformChannels & { visibility?: number
   return next;
 }
 function applyChannel(next: AnimationPose, channel: AnimationChannel, value: number) {
+  if (channel === "ik.blend") throw Error("IK blend is not a transform pose channel.");
   if (!ANIMATION_CHANNELS.includes(channel)) throw Error("Unsupported animation channel.");
   if (channel === "visibility") next.visibility = value;
   else {
@@ -209,6 +218,17 @@ function tracksFor(doc: SceneDocument, id: string): AnimationTrack[] {
     trackIndexes.set(doc.animation, index);
   }
   return index.get(id) ?? [];
+}
+/** Blend is an ordinary curve with bounded effective output, independent of
+ * the handle's enabled state. Empty tracks retain the literal fallback. */
+export function evaluateIKBlend(doc: SceneDocument, id: string, frame: number): number {
+  if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
+  const handle = doc.ikHandles?.find(handle => handle.id === id);
+  if (!handle) throw Error("IK animation target is missing.");
+  const track = tracksFor(doc, id).find(track => track.channel === "ik.blend");
+  const value = track ? evaluateCurve(track.keys, frame) ?? handle.blend : handle.blend;
+  if (!Number.isFinite(value)) throw Error("IK blend must be finite.");
+  return Math.max(0, Math.min(1, value));
 }
 export function evaluateChannels(doc: SceneDocument, id: string, frame: number): AnimationPose {
   if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
@@ -256,8 +276,16 @@ function saveAnimation(store: SceneStore, animation: AnimationData, editLabel: s
   if (JSON.stringify(doc.animation ?? defaultAnimation()) === JSON.stringify(animation)) return;
   store.setState({ document: { ...doc, animation }, editLabel });
 }
+export function channelsForTarget(doc: SceneDocument, id: string): AnimationChannel[] {
+  const node = doc.nodes[id], joint = doc.joints?.find(joint => joint.id === id), handle = doc.ikHandles?.find(handle => handle.id === id);
+  if (handle && (node || joint)) throw Error("IK handle, joint and object IDs must be distinct.");
+  if (handle) return ["ik.blend"];
+  if (node?.type === "transform") return [...POSE_ANIMATION_CHANNELS];
+  if (joint) return POSE_ANIMATION_CHANNELS.filter(channel => !channel.startsWith("scale."));
+  throw Error("Animation target is missing.");
+}
 function targetChannels(doc: SceneDocument, id: string): AnimationChannel[] {
-  return ANIMATION_CHANNELS.filter(channel => channel !== "visibility" && (!doc.joints?.some(j => j.id === id) || !channel.startsWith("scale."))
+  return channelsForTarget(doc, id).filter(channel => channel !== "visibility"
     && !doc.drivenKeys?.some(relation => relation.driven.targetId === id && relation.driven.channel === channel));
 }
 function newKey(time: number, value: number): CurveKey {
@@ -270,17 +298,22 @@ function withKey(track: AnimationTrack, frame: number, value: number): Animation
 }
 
 /** Pure document update so a transform edit and Auto Key share one undo step. */
-export function keyChannels(doc: SceneDocument, id: string, channels: TransformChannels & { visibility?: number }, frame: number, onlyExisting = true): SceneDocument {
+export function keyChannels(doc: SceneDocument, id: string, channels: (TransformChannels & { visibility?: number }) | number, frame: number, onlyExisting = true): SceneDocument {
   if (!finite(frame, 1e6)) throw Error("Invalid key frame.");
-  baseChannels(doc, id);
+  const supported = channelsForTarget(doc, id), isHandle = supported[0] === "ik.blend";
+  if (isHandle !== (typeof channels === "number")) throw Error("IK handles require a numeric blend; objects and joints require transform channels.");
+  if (isHandle && (!finite(channels) || channels < 0 || channels > 1)) throw Error("IK blend key values must be between zero and one.");
   const animation = doc.animation ?? defaultAnimation();
   let tracks = [...animation.tracks];
   for (const channel of targetChannels(doc, id)) {
     const index = tracks.findIndex(track => track.targetId === id && track.channel === channel);
     if (index < 0 && onlyExisting) continue;
     const track = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel, keys: [] } : tracks[index];
-    if (onlyExisting && Math.abs((evaluateCurve(track.keys, frame) ?? readChannel(channels, channel)) - readChannel(channels, channel)) < 1e-10) continue;
-    const next = withKey(track, frame, readChannel(channels, channel));
+    if (onlyExisting && !track.keys.length) continue;
+    const value = typeof channels === "number" ? channels : readChannel(channels, channel);
+    const evaluated = isHandle ? evaluateIKBlend(doc, id, frame) : evaluateCurve(track.keys, frame) ?? value;
+    if (onlyExisting && Math.abs(evaluated - value) < 1e-10) continue;
+    const next = withKey(track, frame, value);
     if (index < 0) tracks.push(next); else tracks[index] = next;
   }
   if (JSON.stringify(animation.tracks) === JSON.stringify(tracks)) return doc;
@@ -295,15 +328,32 @@ export function setKeys(store: SceneStore, targetIds: Iterable<string>, frame: n
   if (!finite(frame, 1e6)) throw Error("Invalid key frame.");
   let tracks = [...animation.tracks];
   for (const targetId of new Set(targetIds)) {
-    const pose = poses?.get(targetId) ?? evaluateChannels(doc, targetId, frame);
+    const supported = channelsForTarget(doc, targetId), isHandle = supported[0] === "ik.blend";
+    const pose = isHandle ? undefined : poses?.get(targetId) ?? evaluateChannels(doc, targetId, frame);
     for (const channel of channels ?? targetChannels(doc, targetId)) {
+      if (channel.startsWith("scale.") && doc.joints?.some(joint => joint.id === targetId)) throw Error("Joint scale animation is not supported.");
+      if (!supported.includes(channel)) throw Error("The selected animation channel is not supported by this target.");
       const index = tracks.findIndex(track => track.targetId === targetId && track.channel === channel);
       const track = index < 0 ? { id: crypto.randomUUID(), targetId, channel, keys: [] } : tracks[index];
-      const next = withKey(track, frame, readChannel(pose, channel));
+      const next = withKey(track, frame, channel === "ik.blend" ? evaluateIKBlend(doc, targetId, frame) : readChannel(pose!, channel));
       if (index < 0) tracks.push(next); else tracks[index] = next;
     }
   }
   saveAnimation(store, { ...animation, tracks }, "Set keyframe");
+}
+
+/** Key a scalar IK blend without constructing or modifying a transform pose. */
+export function setIKBlendKey(store: SceneStore, id: string, frame: number, value: number): void {
+  if (!finite(frame, 1e6)) throw Error("Invalid key frame.");
+  if (!finite(value) || value < 0 || value > 1) throw Error("IK blend key values must be between zero and one.");
+  const doc = store.getState().document;
+  if (channelsForTarget(doc, id)[0] !== "ik.blend") throw Error("Choose an IK handle to key its blend.");
+  const animation = doc.animation ?? defaultAnimation(), tracks = [...animation.tracks];
+  const index = tracks.findIndex(track => track.targetId === id && track.channel === "ik.blend");
+  const track: AnimationTrack = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel: "ik.blend", keys: [] } : tracks[index];
+  const next = withKey(track, frame, value);
+  if (index < 0) tracks.push(next); else tracks[index] = next;
+  saveAnimation(store, { ...animation, tracks }, "Key IK blend");
 }
 
 export function replaceTracks(store: SceneStore, replacements: AnimationTrack[], label = "Edit animation curves") {
