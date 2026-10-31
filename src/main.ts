@@ -9,6 +9,7 @@ import type {
   AssetRecord,
   SplatShapeNode,
   CurveShapeNode,
+  MeshShapeNode,
   TransformChannels,
   Vec3,
 } from "./scene-document.ts";
@@ -68,6 +69,10 @@ import { createSkinWeightPreview } from "./skin-weight-preview.ts";
 import { pickProjectedComponents } from "./component-picking.ts";
 import { createSkinWeightPaintPanel, type SkinWeightBrushSettings } from "./skin-weight-paint-panel.ts";
 import { createSkinWeightPaintTool } from "./skin-weight-paint-tool.ts";
+import { createMeshRenderable } from "./mesh-renderer.ts";
+import { createMeshComponentPreview, type MeshComponentMode } from "./mesh-component-preview.ts";
+import { createModelingPanel } from "./modeling-panel.ts";
+import { pickMeshComponents } from "./mesh-component-selection.ts";
 import { createTerminal } from "./terminal-panel.ts";
 import { elasticityDefaults, elasticEdges, validateElasticity } from "./elasticity";
 import { createElasticityPanel } from "./elasticity-panel";
@@ -143,7 +148,15 @@ type RuntimeBase = {
 type RuntimeObject = RuntimeBase & (
   | { kind: "splat"; mesh: SplatMesh; assetId: string }
   | { kind: "curve"; mesh: ReturnType<typeof createControllerRenderable>["mesh"]; controller: ReturnType<typeof createControllerRenderable>; shape: CurveShapeNode }
+  | { kind: "mesh"; mesh: ReturnType<typeof createMeshRenderable>["mesh"]; polygon: ReturnType<typeof createMeshRenderable>; shape: MeshShapeNode }
 );
+
+function meshRuntime(shape: MeshShapeNode): RuntimeObject {
+  const polygon = createMeshRenderable(shape), root = new THREE.Group(), preview = new THREE.Group();
+  preview.add(polygon.mesh); root.add(preview);
+  const box = new THREE.Box3Helper(new THREE.Box3(), 0x999999); box.visible = false;
+  return { kind: "mesh", root, preview, mesh: polygon.mesh, polygon, shape, box, bounds: polygon.bounds, centers: polygon.centers, count: 0 };
+}
 
 function controllerRuntime(shape: CurveShapeNode): RuntimeObject {
   const controller = createControllerRenderable(shape);
@@ -169,11 +182,13 @@ async function start() {
   webgl.setPixelRatio(Math.min(devicePixelRatio, 2));
   webgl.domElement.setAttribute(
     "aria-label",
-    "Interactive Gaussian splat scene",
+    "Interactive 3D scene",
   );
   viewport.prepend(webgl.domElement);
   scene = new THREE.Scene();
   const world = scene;
+  world.add(new THREE.HemisphereLight(0xffffff, 0x606878, 2));
+  const meshLight = new THREE.DirectionalLight(0xffffff, 2); meshLight.position.set(4, 6, 5); world.add(meshLight);
   const perspective = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
   const orthographic = new THREE.OrthographicCamera(-4,4,4,-4,.01,1000);
   let camera:THREE.PerspectiveCamera|THREE.OrthographicCamera=perspective;
@@ -225,6 +240,17 @@ async function start() {
   let skinPaintPanel: ReturnType<typeof createSkinWeightPaintPanel> | undefined;
   let skinPaintTool: ReturnType<typeof createSkinWeightPaintTool> | undefined;
   let paintSettings: SkinWeightBrushSettings | undefined;
+  let modelingPanel: ReturnType<typeof createModelingPanel> | undefined;
+  let meshComponentRequest: { shapeId: string; mode: MeshComponentMode } | undefined;
+  let meshComponentIds: string[] = [];
+  const meshComponentPreview = createMeshComponentPreview();
+  function updateMeshComponentPreview() {
+    const shape = meshComponentRequest && store.getState().document.nodes[meshComponentRequest.shapeId];
+    const object = shape?.type === "meshShape" ? runtime.get(shape.parentId) : undefined;
+    if (!meshComponentRequest || shape?.type !== "meshShape" || object?.kind !== "mesh") { meshComponentPreview.clear(); return; }
+    meshComponentPreview.update(shape, object.mesh, object.polygon.triangleFaceIds, meshComponentRequest.mode, meshComponentIds);
+    meshComponentPreview.setVisible(gizmosVisible && !playing && !loading);
+  }
   let weightPreview: { shapeId: string; indices: number[]; jointId: string } | undefined;
   const weightOverlay = createSkinWeightPreview();
   let componentPickShape: string | undefined, componentPickEpoch = 0, pendingComponentPick: number | undefined;
@@ -323,6 +349,7 @@ async function start() {
     }
     updateWeightPreview();
     skinPaintTool?.refresh();
+    updateMeshComponentPreview();
   }
   for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action]")), ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action]"))])) {
     const action = control.dataset.rigAction;
@@ -392,9 +419,10 @@ async function start() {
       }
       if (componentPickShape && !skinWeightsPanel?.element.checkVisibility()) skinWeightsPanel?.stopPicking();
       if (paintSettings && !skinPaintPanel?.element.checkVisibility()) skinPaintPanel?.stopPainting();
+      if (meshComponentRequest && !modelingPanel?.element.checkVisibility()) modelingPanel?.stopEditing();
       controls.enabled = event.pointerType === "touch" || event.altKey;
       transform.enabled =
-        !componentPickShape && !paintSettings &&
+        !componentPickShape && !paintSettings && !meshComponentRequest &&
         gizmosVisible && (!skeleton.selectedId || jointsVisible) &&
         !event.altKey &&
         (selectedIKId ? jointsVisible && currentMode === "translate" : (selected.size === 1 || !!skeleton.selectedId) && currentMode !== "select") &&
@@ -430,7 +458,7 @@ async function start() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
-    if (componentPickShape || paintSettings) { transform.detach(); transform.enabled = false; return; }
+    if (componentPickShape || paintSettings || meshComponentRequest) { transform.detach(); transform.enabled = false; return; }
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
     if (selectedIKId) {
       const target = ikTargets.getObject(selectedIKId, selectedIKKind);
@@ -463,7 +491,7 @@ async function start() {
   }
   function choose(mode: Mode) {
     if (dragId) return;
-    if ((componentPickShape || paintSettings) && mode !== "select") { notice.textContent = "Exit the skin editing tool before transforming an object."; return; }
+    if ((componentPickShape || paintSettings || meshComponentRequest) && mode !== "select") { notice.textContent = "Return to Object mode before transforming an object. Component positions can be edited in Mesh Tools."; return; }
     currentMode = mode;
     refreshGizmo();
     toolbar
@@ -515,6 +543,7 @@ async function start() {
     if (selected.size && skeleton.selectedIds.size) selectionLabel.textContent = `${selected.size} objects · ${skeleton.selectedIds.size} joints selected`;
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
+    modelingPanel?.refresh();
     refreshGizmo();
   });
   riggingPanel.addEventListener("rigging-error", event => { notice.textContent = (event as CustomEvent<string>).detail; });
@@ -586,7 +615,8 @@ async function start() {
       rotationOrder: "XYZ" as const, rotation: j.rotation ?? [0,0,0] as Vec3, scale: [1,1,1] as Vec3 }));
     const ids = [...selected, ...skeleton.selectedIds];
     const curves = new Set(Object.values(doc.nodes).filter(node => node.type === "curveShape").map(node => node.parentId));
-    panel.update([...transformNodes(doc).map(node => ({ ...node, curve: curves.has(node.id) })), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
+    const meshes = new Set(Object.values(doc.nodes).filter(node => node.type === "meshShape").map(node => node.parentId));
+    panel.update([...transformNodes(doc).map(node => ({ ...node, curve: curves.has(node.id), mesh: meshes.has(node.id) })), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
     elasticityPanel.update(shape?.type === "splatShape" ? shape : undefined, new Map((doc.joints??[]).map(j=>[j.id,j.name])));
     channelKeys?.refresh();
   }
@@ -623,9 +653,17 @@ async function start() {
     controllerPanel?.refresh();
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
+    modelingPanel?.refresh();
   }
   function syncScene() {
     const doc = store.getState().document;
+    for (const shape of Object.values(doc.nodes)) if (shape.type === "meshShape") {
+      let object = runtime.get(shape.parentId);
+      if (!object) { object = meshRuntime(shape); runtime.set(shape.parentId, object); world.add(object.box); }
+      if (object.kind === "mesh" && object.shape !== shape) {
+        object.polygon.update(shape); object.centers = object.polygon.centers; object.shape = shape;
+      }
+    }
     for (const shape of Object.values(doc.nodes)) if (shape.type === "curveShape") {
       let object = runtime.get(shape.parentId);
       if (!object) {
@@ -674,8 +712,10 @@ async function start() {
       },
       0,
     );
+    const meshes = Object.values(doc.nodes).filter(node => node.type === "meshShape");
     element("asset-detail").textContent =
-      `${nodes.length} object${nodes.length === 1 ? "" : "s"} · ${count.toLocaleString()} splats`;
+      `${nodes.length} object${nodes.length === 1 ? "" : "s"} · ${count.toLocaleString()} splats`
+      + (meshes.length ? ` · ${meshes.reduce((sum, mesh) => sum + mesh.faces.length, 0).toLocaleString()} polygon faces` : "");
     play.disabled =
       rewind.disabled =
       timeline.disabled =
@@ -747,6 +787,7 @@ async function start() {
     if (loading || dragId || !ikTargets.getObject(id, kind)) return;
     setPlaying(false);
     skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting();
+    modelingPanel?.stopEditing();
     selected.clear(); skeleton.select("");
     selectedIKId = id; selectedIKKind = kind; ikTargets.setSelected(id, kind); ikPanel?.select(id);
     choose("translate"); refreshSelection();
@@ -800,6 +841,7 @@ async function start() {
     onPickMode: shapeId => {
       if (componentPickShape === shapeId) return;
       if (shapeId) skinPaintPanel?.stopPainting();
+      if (shapeId) modelingPanel?.stopEditing();
       cancelComponentScan(); componentPickShape = shapeId;
       webgl.domElement.style.cursor = shapeId ? "crosshair" : "";
       if (shapeId) choose("select"); else refreshGizmo();
@@ -816,12 +858,30 @@ async function start() {
     onBrushMode: settings => {
       paintSettings = settings;
       if (settings) skinWeightsPanel?.stopPicking();
+      if (settings) modelingPanel?.stopEditing();
       skinPaintTool?.setBrush(settings);
       if (settings) choose("select"); else refreshGizmo();
       updateWeightPreview();
     },
   });
   workspace.registerPanel("paint-skin-weights", "Paint Skin Weights", skinPaintPanel.element);
+  modelingPanel = createModelingPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection,
+    onSelectObject: id => selectObjects([id]),
+    onComponentMode: request => {
+      if (request) { skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting(); selectedIKId = ""; ikTargets.setSelected(); }
+      meshComponentRequest = request;
+      webgl.domElement.style.cursor = request ? "crosshair" : "";
+      if (request) choose("select"); else refreshGizmo();
+      updateMeshComponentPreview();
+    },
+    onComponentSelection: (shapeId, mode, ids) => {
+      if (meshComponentRequest?.shapeId !== shapeId || meshComponentRequest.mode !== mode) return;
+      meshComponentIds = [...ids]; updateMeshComponentPreview();
+    },
+  });
+  workspace.registerPanel("modeling", "Mesh Tools", modelingPanel.element);
   for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action='Paint weights']")),
     ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action='Paint weights']"))])) {
     control.disabled = false; control.title = "Open Paint Skin Weights";
@@ -954,7 +1014,7 @@ async function start() {
   const viewportTools=mountViewportTools(viewport,(kind,visible)=>{
     if(kind==="grid")grid!.visible=visible;
     if(kind==="joints"){jointsVisible=visible;skeleton.setVisible(visible);ikTargets.setVisible(visible);}
-    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);updateWeightPreview();skinPaintTool?.refresh();}
+    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);updateWeightPreview();skinPaintTool?.refresh();updateMeshComponentPreview();}
     refreshGizmo();
   },switchView,()=>{switchView("perspective");fitView();});
   viewportTools.setView(activeView);
@@ -1009,11 +1069,39 @@ async function start() {
   const raycaster = new THREE.Raycaster(),
     projected = new THREE.Vector3();
   let gesture:
-    { x: number; y: number; id: number; additive: boolean; subtract: boolean; component?: string } | undefined;
+    { x: number; y: number; id: number; additive: boolean; subtract: boolean; component?: string;
+      mesh?: { request: NonNullable<typeof meshComponentRequest>; document: SceneDocument; poseVersion: number;
+        camera: THREE.Camera; world: THREE.Matrix4; projection: THREE.Matrix4; rect: DOMRect } } | undefined;
   function cancelSelection() {
     gesture = undefined;
     marquee.hidden = true;
     controls.enabled = !transform.dragging;
+  }
+  function pickPolygonComponents(start: NonNullable<typeof gesture>, event: PointerEvent) {
+    const snapshot = start.mesh!;
+    world.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+    const rect = webgl.domElement.getBoundingClientRect();
+    if (snapshot.request !== meshComponentRequest || snapshot.document !== store.getState().document
+      || snapshot.poseVersion !== skinPoseVersion || playing || loading || dragId || snapshot.camera !== camera
+      || !snapshot.world.equals(camera.matrixWorld) || !snapshot.projection.equals(camera.projectionMatrix)
+      || ["x", "y", "width", "height"].some(key => rect[key as keyof DOMRect] !== snapshot.rect[key as keyof DOMRect])) {
+      notice.textContent = "Component selection canceled because the scene or view changed."; return;
+    }
+    const { shapeId, mode } = snapshot.request, shape = store.getState().document.nodes[shapeId];
+    const object = shape?.type === "meshShape" ? runtime.get(shape.parentId) : undefined;
+    if (shape?.type !== "meshShape" || object?.kind !== "mesh") return;
+    for (let parent: THREE.Object3D | null = object.mesh; parent; parent = parent.parent) if (!parent.visible) return;
+    try {
+      const hit = pickMeshComponents({ shape, mesh: object.mesh, triangleFaceIds: object.polygon.triangleFaceIds,
+        camera, width: rect.width, height: rect.height, mode,
+        start: { x: start.x - rect.left, y: start.y - rect.top }, end: { x: event.clientX - rect.left, y: event.clientY - rect.top } });
+      const hits = new Set(hit);
+      const ids = start.subtract ? meshComponentIds.filter(id => !hits.has(id))
+        : start.additive ? [...new Set([...meshComponentIds, ...hit])] : hit;
+      if (ids.length > 20_000) throw Error("Select at most 20,000 mesh components.");
+      modelingPanel?.setComponentSelection(shapeId, mode, ids);
+      notice.textContent = `${ids.length.toLocaleString()} ${mode} components selected. Edit them in Mesh Tools.`;
+    } catch (error) { notice.textContent = error instanceof Error ? error.message : String(error); }
   }
   async function pickSkinComponents(start: NonNullable<typeof gesture>, event: PointerEvent) {
     const shapeId = start.component!, entry = bindings.get(shapeId);
@@ -1075,6 +1163,7 @@ async function start() {
     )
       return;
     cancelComponentScan();
+    camera.updateMatrixWorld(true);
     gesture = {
       x: event.clientX,
       y: event.clientY,
@@ -1082,6 +1171,9 @@ async function start() {
       additive: event.shiftKey,
       subtract: event.ctrlKey || event.metaKey,
       component: componentPickShape,
+      mesh: meshComponentRequest ? { request: meshComponentRequest, document: store.getState().document,
+        poseVersion: skinPoseVersion, camera, world: camera.matrixWorld.clone(), projection: camera.projectionMatrix.clone(),
+        rect: webgl.domElement.getBoundingClientRect() } : undefined,
     };
     webgl.domElement.setPointerCapture(event.pointerId);
   });
@@ -1108,6 +1200,7 @@ async function start() {
     const start = gesture;
     cancelSelection();
     if (event.altKey) return;
+    if (start.mesh) { pickPolygonComponents(start, event); return; }
     if (start.component) { void pickSkinComponents(start, event); return; }
     world.updateMatrixWorld(true);
     camera.updateMatrixWorld(true);
@@ -1206,14 +1299,15 @@ async function start() {
     )
       return;
     const key = event.key.toLowerCase();
+    if (key === "escape" && meshComponentRequest) { event.preventDefault(); cancelSelection(); modelingPanel?.stopEditing(); return; }
     if (key === "escape" && paintSettings) { event.preventDefault(); skinPaintPanel?.stopPainting(); return; }
     if (key === "escape" && (componentPickShape || pendingComponentPick !== undefined || gesture?.component)) {
       event.preventDefault(); cancelComponentScan(); cancelSelection(); skinWeightsPanel?.stopPicking(); return;
     }
     const editing = isEditing(event);
     if (editing) return; // Preserve native text editing undo inside fields.
-    if ((componentPickShape || paintSettings) && ["delete", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault(); notice.textContent = "Exit the skin editing tool before deleting or keying an object."; return;
+    if ((componentPickShape || paintSettings || meshComponentRequest) && ["delete", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault(); notice.textContent = "Exit component editing before deleting or keying an object."; return;
     }
     if (
       !event.altKey &&
@@ -1257,6 +1351,7 @@ async function start() {
   function setPlaying(value: boolean) {
     if (value) {
       skinPaintPanel?.stopPainting();
+      modelingPanel?.stopEditing();
       clearPoseDraft();
       const settings = animationSettings();
       if (!timelinePanel?.turntable && getFrame() >= settings.end) time = settings.start / settings.fps;
@@ -1274,6 +1369,7 @@ async function start() {
     controllerPanel?.refresh();
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
+    modelingPanel?.refresh();
     updateWeightPreview();
     channelKeys?.refresh();
   }
@@ -1337,6 +1433,7 @@ async function start() {
     loading = value;
     if (value) {
       skinPaintPanel?.stopPainting();
+      modelingPanel?.stopEditing();
       setPlaying(false);
       cancelSelection();
     }
@@ -1351,6 +1448,7 @@ async function start() {
     object.box.geometry.dispose();
     (object.box.material as THREE.Material).dispose();
     if (object.kind === "curve") object.controller.dispose();
+    else if (object.kind === "mesh") object.polygon.dispose();
     else object.mesh.dispose();
   }
   function replaceScene(
@@ -1366,6 +1464,7 @@ async function start() {
     selected.clear();
     skinWeightsPanel?.resetScene();
     skinPaintPanel?.resetScene();
+    modelingPanel?.resetScene(); meshComponentPreview.clear(); meshComponentIds = [];
     const previousObjects = [...runtime.values()];
     runtime.clear();
     assetFiles.clear();
@@ -1464,6 +1563,8 @@ async function start() {
         new Uint8Array(await file.arrayBuffer()),
       );
       for (const node of transformNodes(project.scene)) {
+        const polygon = Object.values(project.scene.nodes).find((shape): shape is MeshShapeNode => shape.type === "meshShape" && shape.parentId === node.id);
+        if (polygon) { staged.set(node.id, meshRuntime(polygon)); continue; }
         const curve = Object.values(project.scene.nodes).find((shape): shape is CurveShapeNode => shape.type === "curveShape" && shape.parentId === node.id);
         if (curve) { staged.set(node.id, controllerRuntime(curve)); continue; }
         const shape = Object.values(project.scene.nodes).find(
@@ -1697,6 +1798,7 @@ async function start() {
   });
   webgl.domElement.addEventListener("webglcontextlost", (event) => {
     skinPaintPanel?.stopPainting();
+    modelingPanel?.stopEditing();
     event.preventDefault();
     abortDrag();
     setPlaying(false);

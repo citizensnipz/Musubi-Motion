@@ -99,8 +99,12 @@
             <wa-dropdown-item id="view-dope-sheet">Dope Sheet</wa-dropdown-item>
             <wa-dropdown-item id="view-driven-keys">Set Driven Key</wa-dropdown-item>
           </wa-dropdown>
+          <wa-dropdown id="modeling-menu" size="s" placement="bottom-start">
+            <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Modeling</wa-button>
+            <wa-dropdown-item id="view-modeling">Mesh Tools</wa-dropdown-item>
+          </wa-dropdown>
           <select id="workspace-preset" aria-label="Workspace preset" title="Arrange panels for a workflow">
-            <option value="general">General</option><option value="animation">Animation</option><option value="rigging">Rigging</option>
+            <option value="general">General</option><option value="animation">Animation</option><option value="rigging">Rigging</option><option value="modeling">Modeling</option>
           </select>
           <span class="nav-spacer"></span>
           <wa-button

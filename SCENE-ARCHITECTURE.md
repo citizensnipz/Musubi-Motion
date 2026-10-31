@@ -2,7 +2,7 @@
 
 Musubi uses a Maya-inspired transform/shape model: named transforms own local
 position, rotation, and scale; child splat shapes reference assets and controller
-curve shapes store local NURBS data. The design
+curve shapes store local NURBS data, and mesh shapes store polygon topology. The design
 follows the principles of Maya's documented [DAG hierarchy](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Basics/files/GUID-5029CF89-D420-4236-A7CF-884610828B70.htm)
 and [parent-relative transforms](https://help.autodesk.com/cloudhelp/ENU/MayaCRE-Tech-Docs/Nodes/dagNode.html).
 It does not implement Maya's complete dependency graph or construction history.
@@ -16,6 +16,7 @@ SceneDocument v1
     Transform: name, parentId, position, rotation, scale, rotationOrder
     SplatShape: name, parentId, assetId, offset, optional binding/elasticity
     CurveShape: name, parentId, degree, weighted points, knots, closed, color
+    MeshShape: name, parentId, vertices[id, position], faces[id, vertex IDs], color, shading, wireframe
   assets[id]: procedural generator or original file metadata
   joints?: local position/rotation, name, ID, parentId
   animation?: fps, start, end, loop, tracks
@@ -34,7 +35,7 @@ SceneDocument v1
 - Joint hierarchy parenting preserves the authored world pose and rejects
   cycles. General transform grouping, interactive object parenting, and DAG
   instancing remain future work. Archive transforms require one shape, either a
-  splat shape or a controller curve shape.
+  splat shape, controller curve shape, or polygon mesh shape.
 - Binding records influence joint IDs, rest matrices and optional sparse component
   weight overrides. Shared skin-weight commands validate and normalize authored
   rows; unedited components retain nearest-four distance weights. Spark receives
@@ -61,6 +62,23 @@ SceneDocument v1
   and bounded splat allocation run after the rig pose; they are not a second rig.
 
 ## Evaluation pipeline
+
+Polygon commands in `mesh-modeling.ts` edit shared vertices and ordered face loops
+with stable IDs. Derived edge IDs are sorted vertex-ID pairs. All commands validate
+topology before replacing the immutable shape, producing one undo step. Extrusion
+duplicates an edge-connected region, builds walls only along its boundary, and
+prunes unused vertices. Face deletion also prunes unused vertices. Three.js supplies
+primitives and welding; ShapeUtils/Earcut triangulates render buffers while keeping
+triangle-to-authored-face mappings. Buffers, computed normals, bounds, and polygon
+wire overlays belong to `mesh-renderer.ts`, outside the document/history. Appearance
+changes reuse geometry; topology changes dispose replaced geometry.
+
+Mesh vertex/edge clicks use screen distance; face clicks raycast the selected mesh.
+Rectangles select component centers through the object. Selection and overlays
+are runtime state, limited to 20,000 selected components, and mutually exclusive
+with splat skin editing. Document, pose, camera, or layout changes cancel pending
+mesh selection gestures. Mesh transforms participate in shared animation, SDK,
+and constraints; mesh skinning and animated vertex positions are not implemented.
 
 ```text
 UI / keyboard → shared commands → immutable SceneDocument → undo history

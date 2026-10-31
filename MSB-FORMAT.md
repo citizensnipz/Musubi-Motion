@@ -60,6 +60,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `SplatShape.binding` | Influence joint IDs, matching rest matrices, optional sparse `weights` |
 | `SplatShape.elasticity` | Stretch/spacing/expansion, allocation budget, optional density/distribution, selected connection scope |
 | `CurveShape` | `type: "curveShape"`, ID/name/parent ID, `degree`, weighted `points`, `knots`, `closed`, `color` |
+| `MeshShape` | `type: "meshShape"`, ID/name/parent ID, `vertices` with stable IDs/local positions, `faces` with stable IDs/ordered vertex IDs, `color`, `shading`, `wireframe` |
 | `animation` | `fps`, `start`, `end`, `loop`, `tracks` |
 | Animation track | `id`, `targetId`, `channel`, ordered `keys` |
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
@@ -67,7 +68,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend` |
 | `constraints` | `id`, `name`, `type`, `sourceId`, `targetId`, `enabled`, `maintainOffset`, stored `offset`, optional `aimAxis`/`worldUpAxis` |
 
-Each transform owns exactly one splat or controller curve shape. Curve shapes
+Each transform owns exactly one splat, controller curve, or polygon mesh shape. Curve shapes
 need no asset record or binary entry; their parent transforms use the existing
 animation and constraint channels. Curve degree is 1, 2, or 3. Each control point
 is `[x, y, z, weight]`; there must be at least degree + 1 and at most 128 points.
@@ -80,6 +81,16 @@ values by at least 0.000000001. Interior continuity prevents false display bridg
 `color` is a six-digit `#rrggbb` string. Samples, line buffers, and selection
 bounds are rebuilt at load time rather than saved. Existing splat-only archives
 remain supported; older applications may reject the new shape type.
+
+Polygon mesh shapes need no asset entry. They support up to 100,000 vertices and
+100,000 faces, with 3–64 distinct existing vertex IDs per face. Positions are finite
+within ±1,000,000. Component IDs are unique within the shape. Validation rejects
+inconsistent winding, nonmanifold edges/vertex fans, zero-area faces, and polygons
+whose dominant-plane projection self-intersects or cannot be triangulated. Open
+surfaces and empty meshes are valid. Intersections between separate faces are not
+checked. `shading` is `flat` or `smooth`, `wireframe` is boolean, and `color` is a
+six-digit hex string. Derived edges, triangulation, normals, selections, and GPU
+buffers are rebuilt rather than stored. Older applications may reject mesh shapes.
 
 Optional `binding.weights` stores `{ count, overrides }`. `count` is the
 nonnegative safe-integer count of original splat components, excluding generated
@@ -166,7 +177,7 @@ The loader validates format versions, IDs, references, unique sibling names,
 hierarchy cycles, roots, transform values, shape counts, camera values, asset
 inventory, byte lengths, SHA-256 digests, and the optional animation/rigging
 records above. Unsupported generators and node
-types are rejected. Version 1 matches the current editor's one splat shape per
+types are rejected. Version 1 matches the current editor's one renderable shape per
 transform; group-only nodes and instancing of DAG nodes are not implemented.
 
 All meshes are prepared in a staging collection. The old scene and history stay

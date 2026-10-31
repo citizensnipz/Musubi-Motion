@@ -18,6 +18,7 @@ service was introduced by this work.
 | Viewport component-selection checkpoint | 202 tests passed across 22 files |
 | Skin-paint checkpoint | 224 tests passed across 24 files |
 | Analytic two-bone IK checkpoint | 236 tests passed across 26 files |
+| Polygon modeling checkpoint | 271 tests passed across 30 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -227,3 +228,52 @@ may still flip when crossing a singular configuration. The CPU comparison is
 not a production frame-rate guarantee.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.
+
+## Polygon modeling checkpoint
+
+The 35 added tests cover shared primitive topology, stable IDs, triangulation,
+nonplanar vertex editing, winding/manifold validation, connected region extrusion,
+interior-vertex pruning, deletion, atomic history, component picking with clipped
+edges and transformed cameras, renderer/overlay resource disposal, and mixed
+mesh/splat/curve archive roundtrips with animation, SDK and constraints. Invalid
+topology fails before replacing the active document or history.
+
+Browser checks created a cube, selected a visible face, and extruded it by 0.5.
+The mesh changed from six to ten faces; undo/redo restored those counts. Vertex
+clicks, Shift-add and Control-subtract selected the expected stable IDs. A local
+vertex edit and edge offset worked; the offset changed shared vertices once and
+created one undo entry. A box selected all ten faces through the object. Extruding
+the closed whole mesh was rejected without an edit. Deleting all faces left a
+valid empty mesh, and undo restored ten faces. Smooth shading and polygon wire
+display survived a real download/reopen; reopening started with empty history.
+
+The representative modeling scene loaded five objects with 365 polygon faces and
+11,629 splats, including its curve controller. Scrubbing to frame 24 showed the
+mesh's keyed Y rotation of 45 degrees without dirtying the scene. During playback,
+90 requestAnimationFrame intervals after ten warmups measured 16.7 ms median and
+16.8 ms p95 in this local browser. This is scheduling evidence for this small
+scene, not GPU timing or a large-scene guarantee. The browser had no console errors.
+Visual inspection found flickering polygon wires; offsetting the filled surface
+resolved it. Properties now correctly identifies polygon mesh shapes.
+The existing bound-splat analytic IK example also reopened after the mesh scene;
+editing a pole value and undoing it restored the original value and clean file.
+
+The CPU benchmark `node scripts/benchmark-mesh-modeling.mjs` uses five samples
+after two warmups. One local run measured these median times:
+
+| Grid | Validation | Triangulation | Renderer preparation | Region extrusion command |
+| --- | --- | --- | --- | --- |
+| 1,024 faces / 1,089 vertices | 10.22 ms | 3.99 ms | 16.24 ms | 17.17 ms |
+| 10,000 faces / 10,201 vertices | 57.23 ms | 14.09 ms | 91.14 ms | 149.49 ms |
+
+Renderer preparation includes validation, triangulation, normals and wire buffers;
+it excludes GPU upload/rendering. Extrusion includes validation and the immutable
+document command, but excludes browser scheduling and editor callbacks. These
+independent columns should not be interpreted as frame times. Large topology edits
+are synchronous and can interrupt interaction; the 100,000-component document caps
+are integrity guards, not a demonstrated interactive-performance target.
+
+Mesh skinning, component gizmos, inset/bevel/subdivision, merge/bridge, edge deletion,
+UVs and mesh import/export remain future work. Cross-face geometric intersections
+are not detected by the topology validator. No new package dependency was added;
+the reused/adapted Earcut ISC notice ships alongside the existing MIT notices.

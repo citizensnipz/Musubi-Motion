@@ -36,6 +36,19 @@ export type CurveShapeNode = {
   closed: boolean; // join the rendered endpoints; does not make the NURBS periodic
   color: string;
 };
+export type MeshVertex = { id: string; position: Vec3 };
+export type MeshFace = { id: string; vertices: string[] };
+export type MeshShapeNode = {
+  id: string;
+  type: "meshShape";
+  name: string;
+  parentId: string;
+  vertices: MeshVertex[];
+  faces: MeshFace[];
+  color: string;
+  shading: "flat" | "smooth";
+  wireframe: boolean;
+};
 export type AssetRecord = { id: string } & (
   | { kind: "procedural"; generator: "knot-v1" }
   | { kind: "file"; fileName: string; byteLength: number }
@@ -51,7 +64,7 @@ export type SceneDocument = {
   upAxis: "Y";
   units: "unitless";
   rootIds: string[];
-  nodes: Record<string, TransformNode | SplatShapeNode | CurveShapeNode>;
+  nodes: Record<string, TransformNode | SplatShapeNode | CurveShapeNode | MeshShapeNode>;
   assets: Record<string, AssetRecord>;
 };
 
