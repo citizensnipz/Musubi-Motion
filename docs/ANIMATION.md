@@ -2,8 +2,8 @@
 
 Musubi implements a practical subset of Maya-style animation workflows. The
 current editor has a frame timeline, editable transform/joint curves, driven
-keys, FK/CCD IK, editable skin weights, and point/orient/aim/scale/parent
-constraints. Animation layers, pole vectors, weight painting, polygon modeling,
+keys, FK/CCD IK, numeric and painted skin weights, and point/orient/aim/scale/parent
+constraints. Animation layers, pole vectors, polygon modeling,
 and particle FX remain future work.
 
 ## Start with the example
@@ -292,8 +292,9 @@ entry or saved archive data; weight edits still use normal undo and persistence.
 
 Picking scans original component centers in bounded chunks. Changes to the scene
 or view cancel an unfinished scan, so it cannot apply a selection from stale
-positions. This is X-ray center selection, without occlusion tests, a paint
-brush, or splat-footprint intersection. Hidden objects and components below the
+positions. This is X-ray center selection, without occlusion tests or
+splat-footprint intersection. For brush edits, use the separate Paint Skin Weights
+panel below. Hidden objects and components below the
 opacity picking threshold are excluded.
 
 Weight editing applies to original components of an already bound splat object.
@@ -326,14 +327,67 @@ every selected index. Preview hides during playback or manipulation and with
 Gizmos hidden. Reset, unbind, and scene-object selection changes clear the preview. Preview settings create
 no scene history entries.
 
-This is numeric weight editing, with no paint brush, smoothing, influence locks,
-mirrored transfer, or adding/removing joints from an existing binding. Bind and
+Neither weight editor supports smoothing, influence locks, mirrored transfer,
+or adding/removing joints from an existing binding. Bind and
 unbind remain available through the existing rigging controls.
 The workflow follows Autodesk's [numeric skin-weight editing](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-1E9D36A8-92D1-4D1A-A769-D4A05AE852FB.htm)
 and [interactive normalization](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Basics/files/GUID-F632811C-DE7C-4464-B025-9B6379FAA750.htm)
 concepts, with normalization always enabled in this subset.
 The rectangle-selection workflow follows Autodesk's [component marquee selection](https://help.autodesk.com/cloudhelp/2024/ENU/Maya-Basics/files/GUID-ABB00438-68A6-4108-8D79-C362F690E808.htm),
 adapted here to original splat centers rather than polygon vertices, edges, or faces.
+
+## Paint Skin Weights
+
+Open **Rigging → Paint Skin Weights**. Choose a **Bound splat object** and a
+bound **Joint influence**, then set **Mode**, **Value · 0 to 1**,
+**Strength · 0 to 1**, and **Radius · CSS pixels**. Radius ranges from 1 to 256
+screen pixels and stays the same screen size as the camera zooms. Defaults are
+Replace, Value 1, Strength 0.5, and Radius 32. Numeric fields commit on **Enter**
+or blur; **Escape** cancels an uncommitted field edit.
+
+Enable **Paint weights in viewport**, then drag with the left mouse button.
+The circular cursor shows the brush radius. Painting affects projected original
+component centers through the object, including centers behind visible surfaces;
+it does not test surface occlusion or the full splat footprint. Generated elastic
+fill is excluded. Painting and the Skin Weights component-selection tool are
+mutually exclusive; the component selection does not act as a paint mask.
+
+| Mode | Result |
+| --- | --- |
+| Replace | Moves the starting weight toward Value, scaled by Strength and falloff |
+| Add | Adds Value × Strength × falloff to the starting weight, clamped to 1 |
+| Subtract | Subtracts Value × Strength × falloff from the starting weight, clamped to 0 |
+
+Falloff is smooth from full strength at the center to zero at the edge:
+`1 − smoothstep(0, 1, distance / radius)`. Each component uses the maximum
+coverage reached anywhere along that stroke. Repeated passes within one stroke
+do not accumulate; separate strokes do. Other influences retain their relative
+proportions while the weights normalize to one. The same four-influence and
+sole-influence rules as numeric editing apply.
+
+Colored points preview the selected influence from blue at zero to orange at one.
+The display samples at most 5,000 centers; this display cap does not restrict the
+edit. During a stroke the colors change, while the geometry keeps its starting
+deformation. Release the mouse to apply the weights and update deformation in
+one undo step. A stroke may affect at most 20,000 original components; exceeding
+that cap or encountering invalid normalization rejects the whole stroke. A
+stroke that makes no changes creates no history entry. Committed weights use
+the same sparse overrides and `.msb` persistence as numeric edits.
+
+**Escape** during a stroke discards it and leaves painting enabled for another
+stroke. **Escape** while idle exits painting. Hold **Alt** to orbit; Alt navigation,
+mouse-wheel navigation, or another camera/view change cancels an unfinished
+stroke. Scene or pose changes also invalidate unfinished work. Starting playback
+stops painting. Changing the bound object or unbinding it clears the active
+brush. Brush settings and previews are temporary editor state.
+
+This brush has no smoothing, influence locks, mirrored painting/transfer,
+occlusion-aware mode, stylus-pressure response, or live deformation during a
+stroke. It is adapted from Autodesk's [Paint Skin Weights workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-99189E9D-237F-471E-A02C-BE6593B4828B.htm),
+which provides influence selection, paint operations, brush value, and opacity.
+Musubi exposes Strength and an explicit Subtract operation, with a fixed smooth
+falloff and maximum coverage per stroke; it does not reproduce Maya's full
+Artisan brush system.
 
 ## Curve controllers
 
@@ -464,7 +518,7 @@ small-scene playback results.
    limits, target/blend animation, and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
-3. Influence management, weight painting,
+3. Influence management, weight smoothing/locks and mirrored transfer,
    joint/pose mirroring, and conventional deformers.
 4. Animation layers, camera/custom-property animation, Euler filtering, richer
    clipboard/retargeting, and SDK Graph Editor integration.

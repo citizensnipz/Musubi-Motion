@@ -3,7 +3,7 @@ import { Matrix4, Vector3 } from "three";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { addSplat, emptyScene, type SkinBinding, type SkinInfluence, type SplatShapeNode, type Vec3 } from "../src/scene-document.ts";
 import { createSceneStore } from "../src/scene-store.ts";
-import { createSkinWeightLookup, editSkinWeight, resetSkinWeights, validateSkinWeightCount, validateSkinWeights } from "../src/skin-weights.ts";
+import { createSkinWeightLookup, editSkinWeight, editSkinWeightValues, resetSkinWeights, validateSkinWeightCount, validateSkinWeights } from "../src/skin-weights.ts";
 import { decodeProject, encodeProject, validateScene } from "../src/project-archive.ts";
 
 function binding(count = 5): SkinBinding {
@@ -124,6 +124,65 @@ describe("normalized skin weight commands", () => {
     editSkinWeight(store, "shape", [0], "j0", 0.5, { count: 200001, getWeights: () => row() });
     expect(Object.keys(stored(store).weights!.overrides)).toHaveLength(200000);
     expect(() => validateSkinWeights({ ...binding(), weights: { count: 200001, overrides: { ...overrides, "200000": row() } } })).toThrow(/200,000/);
+  });
+});
+
+describe("atomic painted skin weight values", () => {
+  it("applies mixed component targets with shared normalization and a single paint history entry", async () => {
+    const store = fixture(), before = store.getState().document;
+    const context = { count: 4, getWeights: () => [{ jointId: "j0", weight: 0.2 }, { jointId: "j1", weight: 0.3 }, { jointId: "j2", weight: 0.5 }] };
+    const values = [{ index: 0, weight: 0 }, { index: 1, weight: 0.4 }, { index: 2, weight: 1 }] as const;
+    editSkinWeightValues(store, "shape", values, "j0", context);
+    const weights = stored(store).weights!.overrides;
+    expect(weights["0"]).toEqual([{ jointId: "j1", weight: 0.3 / 0.8 }, { jointId: "j2", weight: 0.5 / 0.8 }]);
+    expect(weights["1"].find(entry => entry.jointId === "j0")!.weight).toBe(0.4);
+    expect(weights["1"].find(entry => entry.jointId === "j1")!.weight / weights["1"].find(entry => entry.jointId === "j2")!.weight).toBeCloseTo(0.3 / 0.5, 15);
+    expect(weights["2"]).toEqual([{ jointId: "j0", weight: 1 }]); expect(weights["3"]).toBeUndefined();
+    expect(store.getState().editLabel).toBe("Paint skin weights"); expect(store.temporal.getState().pastStates).toHaveLength(1);
+    const after = store.getState().document;
+    store.temporal.getState().undo(); expect(store.getState().document).toBe(before);
+    store.temporal.getState().redo(); expect(store.getState().document).toBe(after);
+    expect((await decodeProject(await encodeProject(after, new Map(), editor))).scene).toEqual(after);
+  });
+  it("rejects an entire stroke when one row cannot be normalized or exceeds four influences", () => {
+    for (const invalidRow of [[{ jointId: "j0", weight: 1 }], [{ jointId: "j0", weight: 0.8 }]]) {
+      const store = fixture(), before = store.getState().document;
+      expect(() => editSkinWeightValues(store, "shape", [{ index: 0, weight: 0.4 }, { index: 1, weight: 0.6 }], "j0", { count: 2, getWeights: index => index === 0 ? row() : invalidRow })).toThrow();
+      expect(store.getState().document).toBe(before); expect(store.temporal.getState().pastStates).toHaveLength(0);
+    }
+    const store = fixture(), before = store.getState().document;
+    expect(() => editSkinWeightValues(store, "shape", [{ index: 0, weight: 1 }, { index: 1, weight: 0.4 }], "j4", { count: 2, getWeights: () => binding(4).jointIds.map(jointId => ({ jointId, weight: 0.25 })) })).toThrow(/four active/);
+    expect(store.getState().document).toBe(before);
+  });
+  it("rejects duplicate indices, invalid values and oversized strokes before reading current rows", () => {
+    const store = fixture(), before = store.getState().document;
+    const context = { count: 30000, getWeights: () => { throw Error("Must validate input before reading rows"); } };
+    for (const secondWeight of [0.4, 0.5]) expect(() => editSkinWeightValues(store, "shape", [{ index: 0, weight: 0.4 }, { index: 0, weight: secondWeight }], "j0", context)).toThrow(/only once/);
+    for (const weight of [-0.1, 1.1, NaN, Infinity]) expect(() => editSkinWeightValues(store, "shape", [{ index: 0, weight: 0.4 }, { index: 1, weight }], "j0", context)).toThrow(/between zero and one/);
+    for (const index of [-1, 0.5, 30000, NaN]) expect(() => editSkinWeightValues(store, "shape", [{ index, weight: 0.4 }], "j0", context)).toThrow(/out of range/);
+    expect(() => editSkinWeightValues(store, "shape", Array.from({ length: 20001 }, (_, index) => ({ index, weight: 0.5 })), "j0", context)).toThrow(/20,000/);
+    expect(store.getState().document).toBe(before);
+  });
+  it("preserves no-op identity and only replaces authored rows that actually change", () => {
+    const original = { ...binding(), weights: { count: 4, overrides: { "0": row(), "1": row(0.5), "2": row(0.7) } } };
+    const store = fixture(original), before = store.getState().document;
+    const context = { count: 4, getWeights: () => row() };
+    editSkinWeightValues(store, "shape", [], "j0", context);
+    editSkinWeightValues(store, "shape", [{ index: 0, weight: 0.25 }, { index: 1, weight: 0.5 }, { index: 3, weight: 0.25 }], "j0", context);
+    expect(store.getState().document).toBe(before); expect(store.temporal.getState().pastStates).toHaveLength(0);
+    editSkinWeightValues(store, "shape", [{ index: 0, weight: 0.25 }, { index: 1, weight: 0.6 }], "j0", context);
+    const next = stored(store);
+    expect(next.weights!.overrides["0"]).toBe(original.weights.overrides["0"]);
+    expect(next.weights!.overrides["1"]).not.toBe(original.weights.overrides["1"]);
+    expect(next.weights!.overrides["2"]).toBe(original.weights.overrides["2"]);
+    expect(next.jointIds).toBe(original.jointIds); expect(next.restMatrices).toBe(original.restMatrices);
+  });
+  it("prefers precise authored values and retains the original uniform edit label and duplicate behavior", () => {
+    const store = fixture({ ...binding(), weights: { count: 2, overrides: { "0": row(0.123456789123) } } });
+    editSkinWeightValues(store, "shape", [{ index: 0, weight: 0.3 }], "j0", { count: 2, getWeights: () => { throw Error("Authored row must win"); } });
+    expect(stored(store).weights!.overrides["0"].find(entry => entry.jointId === "j0")!.weight).toBe(0.3);
+    editSkinWeight(store, "shape", [0, 0], "j0", 0.4, { count: 2, getWeights: () => row() });
+    expect(store.getState().editLabel).toBe("Edit skin weights"); expect(store.temporal.getState().pastStates).toHaveLength(2);
   });
 });
 

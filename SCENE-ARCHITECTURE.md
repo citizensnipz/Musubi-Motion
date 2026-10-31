@@ -39,8 +39,8 @@ SceneDocument v1
   weight overrides. Shared skin-weight commands validate and normalize authored
   rows; unedited components retain nearest-four distance weights. Spark receives
   the resulting weights before elasticity is initialized. Numeric ranges and
-  exact viewport component selections share the editing commands. Painting is
-  not yet implemented.
+  exact viewport component selections share uniform editing commands; brush
+  strokes use the same validation with a separate requested weight per component.
 - Binding runtimes cache document binding/elasticity references and joint topology.
   Playback does not serialize the authored weight map. Preview points use only
   requested original components and the same packed skin transforms as selection.
@@ -49,6 +49,14 @@ SceneDocument v1
   object. Async scans cancel on scene, pose, camera, layout, or binding changes.
   Runtime selections stay outside undo snapshots and archives; explicit scene
   replacement clears them without confusing undo-restored command labels with opens.
+- Skin painting reuses that projection scan to build a screen-space grid index.
+  Continuous brush segments query nearby centers and retain maximum falloff per
+  component for each stroke. A separate interaction adapter previews sampled
+  colors without changing geometry or history, then submits one atomic weight
+  command on release. Pending scans freeze input on release and cancel on scene,
+  camera, layout, or binding changes. Escape discards the stroke. Numeric drafts
+  commit before the adapter captures brush settings. Painting and component
+  selection are mutually exclusive, with independent panels and shared skin data.
 - Elasticity settings belong to bound shapes. Existing elasticity deformation
   and bounded splat allocation run after the rig pose; they are not a second rig.
 

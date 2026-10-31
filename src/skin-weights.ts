@@ -6,6 +6,7 @@ export type { SkinBinding, SkinInfluence, SkinWeights } from "./scene-document.t
 export const MAX_WEIGHT_EDIT_COMPONENTS = 20_000;
 export const MAX_WEIGHT_OVERRIDES = 200_000;
 export type SkinWeightContext = { count: number; getWeights: (index: number) => SkinInfluence[] };
+export type SkinWeightValue = { index: number; weight: number };
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const validCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -74,13 +75,30 @@ function componentIndices(components: number[], count?: number): number[] {
 }
 
 export function editSkinWeight(store: SceneStore, shapeId: string, components: number[], jointId: string, value: number, context: SkinWeightContext): void {
+  if (!Number.isFinite(value) || value < 0 || value > 1) throw Error("Skin weight must be between zero and one.");
+  const changes = componentIndices(components, context.count).map(index => ({ index, weight: value }));
+  applySkinWeightValues(store, shapeId, changes, jointId, context, "Edit skin weights");
+}
+
+/** Commits a completed paint stroke atomically; preview samples never modify the document. */
+export function editSkinWeightValues(store: SceneStore, shapeId: string, changes: readonly SkinWeightValue[], jointId: string, context: SkinWeightContext): void {
+  applySkinWeightValues(store, shapeId, changes, jointId, context, "Paint skin weights");
+}
+
+function applySkinWeightValues(store: SceneStore, shapeId: string, values: readonly SkinWeightValue[], jointId: string, context: SkinWeightContext, editLabel: string): void {
   const { doc, shape, binding } = shapeBinding(store, shapeId);
   validateSkinWeightCount(binding, context.count);
   if (!binding.jointIds.includes(jointId)) throw Error("The selected influence is not a bound joint.");
-  if (!Number.isFinite(value) || value < 0 || value > 1) throw Error("Skin weight must be between zero and one.");
-  const indices = componentIndices(components, context.count), jointIds = new Set(binding.jointIds);
+  if (!Array.isArray(values) || values.length > MAX_WEIGHT_EDIT_COMPONENTS) throw Error("Edit or paint at most 20,000 components per operation.");
+  const indices = new Set<number>(), jointIds = new Set(binding.jointIds);
+  for (const entry of values) {
+    if (!isRecord(entry) || typeof entry.index !== "number" || !Number.isSafeInteger(entry.index) || entry.index < 0 || entry.index >= context.count) throw Error("Skin component index is out of range.");
+    if (typeof entry.weight !== "number" || !Number.isFinite(entry.weight) || entry.weight < 0 || entry.weight > 1) throw Error("Skin weight must be between zero and one.");
+    if (indices.has(entry.index)) throw Error("A paint stroke must contain each component index only once.");
+    indices.add(entry.index);
+  }
   const changes = new Map<string, SkinInfluence[]>();
-  for (const index of indices) {
+  for (const { index, weight: value } of values) {
     const key = String(index), current = binding.weights && Object.hasOwn(binding.weights.overrides, key) ? binding.weights.overrides[key] : context.getWeights(index);
     validateRow(current, jointIds);
     if ((current.find(influence => influence.jointId === jointId)?.weight ?? 0) === value) continue;
@@ -98,7 +116,7 @@ export function editSkinWeight(store: SceneStore, shapeId: string, components: n
   for (const [key, row] of changes) overrides[key] = row;
   if (Object.keys(overrides).length > MAX_WEIGHT_OVERRIDES) throw Error("Skin weights support at most 200,000 stored component overrides per shape.");
   const weights: SkinWeights = { count: context.count, overrides };
-  store.setState({ document: { ...doc, nodes: { ...doc.nodes, [shapeId]: { ...shape, binding: { ...binding, weights } } } }, editLabel: "Edit skin weights" });
+  store.setState({ document: { ...doc, nodes: { ...doc.nodes, [shapeId]: { ...shape, binding: { ...binding, weights } } } }, editLabel });
 }
 
 export function resetSkinWeights(store: SceneStore, shapeId: string, components: number[] | null): void {

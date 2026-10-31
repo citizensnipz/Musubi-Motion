@@ -1,17 +1,19 @@
 import { Matrix4, Vector4, WebGPUCoordinateSystem, type Camera } from "three";
 
 export type ComponentPickPoint = { x: number; y: number };
-export type ComponentPickOptions = {
+export type ComponentProjectionOptions = {
   readPositions: (start: number, count: number) => Float32Array;
   componentCount: number;
   matrixWorld: Matrix4;
   camera: Camera;
   width: number;
   height: number;
-  start: ComponentPickPoint;
-  end: ComponentPickPoint;
   cancelled?: () => boolean;
   yieldTask?: () => Promise<void>;
+};
+export type ComponentPickOptions = ComponentProjectionOptions & {
+  start: ComponentPickPoint;
+  end: ComponentPickPoint;
   limit?: number;
 };
 
@@ -19,14 +21,14 @@ const CHUNK_SIZE = 4096;
 const MAX_SELECTED = 20_000;
 const yieldToUI = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
-/** Selects projected original component centers, through geometry without occlusion tests. */
-export async function pickProjectedComponents(options: ComponentPickOptions): Promise<number[]> {
-  const { componentCount, width, height, readPositions } = options, limit = options.limit ?? MAX_SELECTED;
+/** Shared clipped projection scan. Visits stable original indices in bounded chunks. */
+export async function scanProjectedComponents(
+  options: ComponentProjectionOptions,
+  visit: (index: number, x: number, y: number, depth: number) => void,
+): Promise<void> {
+  const { componentCount, width, height, readPositions } = options;
   if (!Number.isSafeInteger(componentCount) || componentCount < 0) throw Error("Component count must be a nonnegative safe integer.");
   if (![width, height].every(value => Number.isFinite(value) && value > 0)) throw Error("Component picking needs a finite, positive viewport width and height.");
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SELECTED) throw Error("Component selection limit must be between 1 and 20,000.");
-  const { x: startX, y: startY } = options.start, { x: endX, y: endY } = options.end;
-  if (![startX, startY, endX, endY].every(Number.isFinite)) throw Error("Component selection coordinates must be finite canvas pixels.");
   if (typeof readPositions !== "function" || !options.camera?.isCamera || !options.matrixWorld?.isMatrix4) throw Error("Component picking needs a camera, world matrix and position reader.");
   const checkCancelled = () => {
     if (options.cancelled?.()) throw new DOMException("Component selection cancelled; no selection was applied.", "AbortError");
@@ -39,10 +41,7 @@ export async function pickProjectedComponents(options: ComponentPickOptions): Pr
   // Snapshot once. Later camera/object changes cannot mix different projections in a scan.
   const view = new Matrix4().multiplyMatrices(options.camera.matrixWorldInverse, options.matrixWorld);
   const projection = options.camera.projectionMatrix.clone(), minimumDepth = options.camera.coordinateSystem === WebGPUCoordinateSystem ? 0 : -1;
-  const click = Math.hypot(endX - startX, endY - startY) < 4;
-  const left = Math.min(startX, endX), right = Math.max(startX, endX), top = Math.min(startY, endY), bottom = Math.max(startY, endY);
-  const result: number[] = [], clip = new Vector4();
-  let nearestIndex = -1, nearestDistance = Infinity, nearestDepth = Infinity;
+  const clip = new Vector4();
   const yieldTask = options.yieldTask ?? yieldToUI;
   for (let offset = 0; offset < componentCount; offset += CHUNK_SIZE) {
     checkCancelled();
@@ -59,20 +58,35 @@ export async function pickProjectedComponents(options: ComponentPickOptions): Pr
       const ndcX = clip.x / clip.w, ndcY = clip.y / clip.w, depth = clip.z / clip.w;
       if (ndcX < -1 || ndcX > 1 || ndcY < -1 || ndcY > 1 || depth < minimumDepth || depth > 1) continue;
       const screenX = (ndcX + 1) * width / 2, screenY = (1 - ndcY) * height / 2, index = offset + local;
-      if (click) {
-        const distance = (screenX - endX) ** 2 + (screenY - endY) ** 2;
-        if (distance <= 8 ** 2 && (distance < nearestDistance || (distance === nearestDistance && (depth < nearestDepth || (depth === nearestDepth && index < nearestIndex))))) {
-          nearestIndex = index; nearestDistance = distance; nearestDepth = depth;
-        }
-      } else if (screenX >= left && screenX <= right && screenY >= top && screenY <= bottom) {
-        if (result.length >= limit) throw Error(`Component selection exceeds the ${limit.toLocaleString("en-US")} component limit. Select a smaller region.`);
-        result.push(index);
-      }
+      visit(index, screenX, screenY, depth);
     }
     if (offset + count < componentCount) {
       checkCancelled(); await yieldTask(); checkCancelled();
     }
   }
   checkCancelled();
+}
+
+/** Selects projected original component centers, through geometry without occlusion tests. */
+export async function pickProjectedComponents(options: ComponentPickOptions): Promise<number[]> {
+  const limit = options.limit ?? MAX_SELECTED;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SELECTED) throw Error("Component selection limit must be between 1 and 20,000.");
+  const { x: startX, y: startY } = options.start, { x: endX, y: endY } = options.end;
+  if (![startX, startY, endX, endY].every(Number.isFinite)) throw Error("Component selection coordinates must be finite canvas pixels.");
+  const click = Math.hypot(endX - startX, endY - startY) < 4;
+  const left = Math.min(startX, endX), right = Math.max(startX, endX), top = Math.min(startY, endY), bottom = Math.max(startY, endY);
+  const result: number[] = [];
+  let nearestIndex = -1, nearestDistance = Infinity, nearestDepth = Infinity;
+  await scanProjectedComponents(options, (index, screenX, screenY, depth) => {
+    if (click) {
+      const distance = (screenX - endX) ** 2 + (screenY - endY) ** 2;
+      if (distance <= 8 ** 2 && (distance < nearestDistance || (distance === nearestDistance && (depth < nearestDepth || (depth === nearestDepth && index < nearestIndex))))) {
+        nearestIndex = index; nearestDistance = distance; nearestDepth = depth;
+      }
+    } else if (screenX >= left && screenX <= right && screenY >= top && screenY <= bottom) {
+      if (result.length >= limit) throw Error(`Component selection exceeds the ${limit.toLocaleString("en-US")} component limit. Select a smaller region.`);
+      result.push(index);
+    }
+  });
   return click ? nearestIndex < 0 ? [] : [nearestIndex] : result;
 }

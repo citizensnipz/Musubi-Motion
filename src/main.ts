@@ -62,10 +62,12 @@ import { createControllerPanel } from "./controller-panel.ts";
 import { controllerPlacement } from "./controller-placement.ts";
 import { mountSkeleton } from "./skeleton.ts";
 import { createBinding } from "./splat-binding.ts";
-import { validateSkinWeightCount } from "./skin-weights.ts";
+import { validateSkinWeightCount, editSkinWeightValues } from "./skin-weights.ts";
 import { createSkinWeightsPanel } from "./skin-weights-panel.ts";
 import { createSkinWeightPreview } from "./skin-weight-preview.ts";
 import { pickProjectedComponents } from "./component-picking.ts";
+import { createSkinWeightPaintPanel, type SkinWeightBrushSettings } from "./skin-weight-paint-panel.ts";
+import { createSkinWeightPaintTool } from "./skin-weight-paint-tool.ts";
 import { createTerminal } from "./terminal-panel.ts";
 import { elasticityDefaults, elasticEdges, validateElasticity } from "./elasticity";
 import { createElasticityPanel } from "./elasticity-panel";
@@ -219,6 +221,9 @@ async function start() {
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
   let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
+  let skinPaintPanel: ReturnType<typeof createSkinWeightPaintPanel> | undefined;
+  let skinPaintTool: ReturnType<typeof createSkinWeightPaintTool> | undefined;
+  let paintSettings: SkinWeightBrushSettings | undefined;
   let weightPreview: { shapeId: string; indices: number[]; jointId: string } | undefined;
   const weightOverlay = createSkinWeightPreview();
   let componentPickShape: string | undefined, componentPickEpoch = 0, pendingComponentPick: number | undefined;
@@ -282,7 +287,7 @@ async function start() {
   const bindings = new Map<string, { binding: SplatShapeNode["binding"]; elasticity: SplatShapeNode["elasticity"]; structure: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
   let cachedJoints: SceneDocument["joints"], jointStructure = "";
   function updateWeightPreview() {
-    if (!weightPreview || playing || loading || dragId || !gizmosVisible) { weightOverlay.setVisible(false); return; }
+    if (!weightPreview || playing || loading || dragId || !gizmosVisible || paintSettings) { weightOverlay.setVisible(false); return; }
     const entry = bindings.get(weightPreview.shapeId);
     const shape = store.getState().document.nodes[weightPreview.shapeId];
     if (!entry || shape?.type !== "splatShape" || !shape.binding?.jointIds.includes(weightPreview.jointId)
@@ -316,6 +321,7 @@ async function start() {
       bindings.get(shape.id)!.skin.update(id => skeleton.boneMatrix(id));
     }
     updateWeightPreview();
+    skinPaintTool?.refresh();
   }
   for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action]")), ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action]"))])) {
     const action = control.dataset.rigAction;
@@ -378,9 +384,10 @@ async function start() {
     "pointerdown",
     (event) => {
       if (componentPickShape && !skinWeightsPanel?.element.checkVisibility()) skinWeightsPanel?.stopPicking();
+      if (paintSettings && !skinPaintPanel?.element.checkVisibility()) skinPaintPanel?.stopPainting();
       controls.enabled = event.pointerType === "touch" || event.altKey;
       transform.enabled =
-        !componentPickShape &&
+        !componentPickShape && !paintSettings &&
         gizmosVisible && (!skeleton.selectedId || jointsVisible) &&
         !event.altKey &&
         (selectedIKId ? jointsVisible && currentMode === "translate" : (selected.size === 1 || !!skeleton.selectedId) && currentMode !== "select") &&
@@ -416,7 +423,7 @@ async function start() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
-    if (componentPickShape) { transform.detach(); transform.enabled = false; return; }
+    if (componentPickShape || paintSettings) { transform.detach(); transform.enabled = false; return; }
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
     if (selectedIKId) {
       const target = ikTargets.getObject(selectedIKId);
@@ -449,7 +456,7 @@ async function start() {
   }
   function choose(mode: Mode) {
     if (dragId) return;
-    if (componentPickShape && mode !== "select") { notice.textContent = "Exit viewport component selection before transforming an object."; return; }
+    if ((componentPickShape || paintSettings) && mode !== "select") { notice.textContent = "Exit the skin editing tool before transforming an object."; return; }
     currentMode = mode;
     refreshGizmo();
     toolbar
@@ -500,6 +507,7 @@ async function start() {
     }
     if (selected.size && skeleton.selectedIds.size) selectionLabel.textContent = `${selected.size} objects · ${skeleton.selectedIds.size} joints selected`;
     skinWeightsPanel?.refresh();
+    skinPaintPanel?.refresh();
     refreshGizmo();
   });
   riggingPanel.addEventListener("rigging-error", event => { notice.textContent = (event as CustomEvent<string>).detail; });
@@ -606,6 +614,7 @@ async function start() {
     animationEditors?.refresh();
     controllerPanel?.refresh();
     skinWeightsPanel?.refresh();
+    skinPaintPanel?.refresh();
   }
   function syncScene() {
     const doc = store.getState().document;
@@ -773,12 +782,34 @@ async function start() {
     onPreview: preview => { weightPreview = preview; if (!preview) weightOverlay.clear(); else updateWeightPreview(); },
     onPickMode: shapeId => {
       if (componentPickShape === shapeId) return;
+      if (shapeId) skinPaintPanel?.stopPainting();
       cancelComponentScan(); componentPickShape = shapeId;
       webgl.domElement.style.cursor = shapeId ? "crosshair" : "";
       if (shapeId) choose("select"); else refreshGizmo();
     },
   });
   workspace.registerPanel("skin-weights", "Skin Weights", skinWeightsPanel.element);
+  skinPaintPanel = createSkinWeightPaintPanel(store, {
+    available: () => !loading && !dragId && !playing && !skinPaintTool?.busy,
+    getSelection: allSelection,
+    getComponents: shapeId => {
+      const entry = bindings.get(shapeId);
+      return entry ? { count: entry.skin.componentCount, getWeights: entry.skin.getWeights } : undefined;
+    },
+    onBrushMode: settings => {
+      paintSettings = settings;
+      if (settings) skinWeightsPanel?.stopPicking();
+      skinPaintTool?.setBrush(settings);
+      if (settings) choose("select"); else refreshGizmo();
+      updateWeightPreview();
+    },
+  });
+  workspace.registerPanel("paint-skin-weights", "Paint Skin Weights", skinPaintPanel.element);
+  for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action='Paint weights']")),
+    ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action='Paint weights']"))])) {
+    control.disabled = false; control.title = "Open Paint Skin Weights";
+    control.addEventListener("click", () => element("view-paint-skin-weights").click());
+  }
   function historyAction(redo: boolean) {
     if (loading || dragId) return;
     setPlaying(false);
@@ -906,7 +937,7 @@ async function start() {
   const viewportTools=mountViewportTools(viewport,(kind,visible)=>{
     if(kind==="grid")grid!.visible=visible;
     if(kind==="joints"){jointsVisible=visible;skeleton.setVisible(visible);ikTargets.setVisible(visible);}
-    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);updateWeightPreview();}
+    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);updateWeightPreview();skinPaintTool?.refresh();}
     refreshGizmo();
   },switchView,()=>{switchView("perspective");fitView();});
   viewportTools.setView(activeView);
@@ -1158,13 +1189,14 @@ async function start() {
     )
       return;
     const key = event.key.toLowerCase();
+    if (key === "escape" && paintSettings) { event.preventDefault(); skinPaintPanel?.stopPainting(); return; }
     if (key === "escape" && (componentPickShape || pendingComponentPick !== undefined || gesture?.component)) {
       event.preventDefault(); cancelComponentScan(); cancelSelection(); skinWeightsPanel?.stopPicking(); return;
     }
     const editing = isEditing(event);
     if (editing) return; // Preserve native text editing undo inside fields.
-    if (componentPickShape && ["delete", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault(); notice.textContent = "Exit viewport component selection before deleting or keying an object."; return;
+    if ((componentPickShape || paintSettings) && ["delete", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault(); notice.textContent = "Exit the skin editing tool before deleting or keying an object."; return;
     }
     if (
       !event.altKey &&
@@ -1207,6 +1239,7 @@ async function start() {
   });
   function setPlaying(value: boolean) {
     if (value) {
+      skinPaintPanel?.stopPainting();
       clearPoseDraft();
       const settings = animationSettings();
       if (!timelinePanel?.turntable && getFrame() >= settings.end) time = settings.start / settings.fps;
@@ -1223,6 +1256,7 @@ async function start() {
     constraintsPanel?.refresh();
     controllerPanel?.refresh();
     skinWeightsPanel?.refresh();
+    skinPaintPanel?.refresh();
     updateWeightPreview();
     channelKeys?.refresh();
   }
@@ -1284,6 +1318,7 @@ async function start() {
   function busy(value: boolean, message = "") {
     loading = value;
     if (value) {
+      skinPaintPanel?.stopPainting();
       setPlaying(false);
       cancelSelection();
     }
@@ -1312,6 +1347,7 @@ async function start() {
     selectedIKId = "";
     selected.clear();
     skinWeightsPanel?.resetScene();
+    skinPaintPanel?.resetScene();
     const previousObjects = [...runtime.values()];
     runtime.clear();
     assetFiles.clear();
@@ -1626,7 +1662,23 @@ async function start() {
     time = timelinePanel?.turntable ? Number(timeline.value) : Math.round(Number(timeline.value)) / animationSettings().fps;
     updateTime();
   });
+  skinPaintTool = createSkinWeightPaintTool(webgl.domElement, viewport, {
+    available: () => !loading && !playing && !dragId,
+    showPreview: () => gizmosVisible,
+    getCamera: () => camera,
+    getRevision: () => skinPoseVersion,
+    getContext: shapeId => {
+      const entry = bindings.get(shapeId);
+      return entry ? { identity: entry.skin, mesh: entry.mesh, count: entry.skin.componentCount,
+        getWeights: entry.skin.getWeights, getPositions: entry.skin.getComponentPositions } : undefined;
+    },
+    commit: (settings, values, context) => editSkinWeightValues(store, settings.shapeId, values, settings.jointId,
+      { count: context.count, getWeights: context.getWeights }),
+    onBusyChange: () => skinPaintPanel?.refresh(),
+    onMessage: message => { notice.textContent = message; },
+  });
   webgl.domElement.addEventListener("webglcontextlost", (event) => {
+    skinPaintPanel?.stopPainting();
     event.preventDefault();
     abortDrag();
     setPlaying(false);
