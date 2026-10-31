@@ -26,6 +26,10 @@ export type AssetRecord = { id: string } & (
   | { kind: "file"; fileName: string; byteLength: number }
 );
 export type SceneDocument = {
+  animation?: import("./animation.ts").AnimationData;
+  drivenKeys?: import("./driven-keys.ts").DrivenKeyRelationship[];
+  ikHandles?: import("./ik.ts").IKHandle[];
+  constraints?: import("./constraints.ts").Constraint[];
   joints?: import("./skeleton.ts").Joint[];
   format: "musubi-scene";
   version: 1;
@@ -138,6 +142,10 @@ export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>): Sce
   const nodes = Object.fromEntries(Object.entries(doc.nodes).filter(([id]) => !removed.has(id)));
   const retainedAssets = new Set(Object.values(nodes).filter(n => n.type === "splatShape").map(n => n.assetId));
   return { ...doc, nodes, rootIds: doc.rootIds.filter(id => !removed.has(id)),
+    ...(doc.animation ? { animation: { ...doc.animation, tracks: doc.animation.tracks.filter(t => !removed.has(t.targetId)) } } : {}),
+    ...(doc.drivenKeys ? { drivenKeys: doc.drivenKeys.filter(r => !removed.has(r.driver.targetId) && !removed.has(r.driven.targetId)) } : {}),
+    ...(doc.ikHandles ? { ikHandles: doc.ikHandles.filter(h => !removed.has(h.rootId) && !removed.has(h.endId)) } : {}),
+    ...(doc.constraints ? { constraints: doc.constraints.filter(c => !removed.has(c.sourceId) && !removed.has(c.targetId)) } : {}),
     assets: Object.fromEntries(Object.entries(doc.assets).filter(([id]) => retainedAssets.has(id))),
     ...(doc.joints ? { joints: doc.joints.filter(j => !removed.has(j.id)) } : {}),
   };

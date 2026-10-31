@@ -1,6 +1,10 @@
 import { strFromU8, strToU8, unzip, zip } from "fflate";
 import { validateJoints } from "./skeleton.ts";
 import { validateElasticity } from "./elasticity";
+import { validateAnimation } from "./animation.ts";
+import { validateDrivenKeys } from "./driven-keys.ts";
+import { validateIKHandles } from "./ik.ts";
+import { validateConstraints } from "./constraints.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 
 export const MAX_PROJECT_BYTES = 512 * 1024 * 1024;
@@ -170,6 +174,10 @@ export function validateScene(value: unknown): SceneDocument {
       [...parents.values()].filter((p) => p === null).length
   )
     fail("Invalid scene roots.");
+  if (doc.animation !== undefined) validateAnimation(doc.animation, value as SceneDocument);
+  if (doc.drivenKeys !== undefined) validateDrivenKeys(doc.drivenKeys, value as SceneDocument);
+  if (doc.ikHandles !== undefined) validateIKHandles(doc.ikHandles, value as SceneDocument);
+  if (doc.constraints !== undefined) validateConstraints(doc.constraints, value as SceneDocument);
   return value as SceneDocument;
 }
 function validateEditor(value: unknown): EditorSnapshot {
@@ -188,8 +196,7 @@ function validateEditor(value: unknown): EditorSnapshot {
     camera.fov > 179 ||
     camera.near <= 0 ||
     camera.far <= camera.near ||
-    editor.time < 0 ||
-    editor.time > 12 ||
+    Math.abs(editor.time) > 1000000 ||
     camera.position.every((n, i) => n === (camera.target as Vec3)[i])
   )
     fail("Invalid saved viewport.");
