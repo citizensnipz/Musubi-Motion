@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: { server: { deps: { inline: ["zundo"] } } },
+  // Example generators load the editor commands through Vite's server loader.
+  // Keep the framework-free Zustand alias effective inside Zundo there too.
+  ssr: { noExternal: ["zundo"] },
   resolve: {
     // Zundo imports createStore from Zustand's root (which also exports React hooks).
     // This editor uses the same public store API from the framework-free entry point.

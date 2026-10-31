@@ -102,7 +102,7 @@ export function createPropertiesPanel(
   const collapsed = new Set<string>();
   return {
     update(
-      nodes: (TransformNode & { joint?: boolean })[],
+      nodes: (TransformNode & { joint?: boolean; curve?: boolean })[],
       selected: Set<string>,
       shapeName: string | undefined,
       preview?: TransformChannels,
@@ -111,7 +111,7 @@ export function createPropertiesPanel(
         selected.size === 1 ? nodes.find((n) => selected.has(n.id)) : undefined;
       activeId = single?.id;
       const listKey = JSON.stringify(
-        [nodes.map((n) => [n.id, n.name, n.parentId]), [...collapsed]],
+        [nodes.map((n) => [n.id, n.name, n.parentId, n.joint, n.curve]), [...collapsed]],
       );
       if (lastList !== listKey) {
         lastList = listKey;
@@ -157,7 +157,13 @@ export function createPropertiesPanel(
           button.setAttribute("aria-pressed", String(selected.has(node.id)));
           const symbol = document.createElement("span");
           symbol.slot = "start";
-          symbol.append(icon(node.joint ? "bone" : "object"));
+          if(node.curve){
+            const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+            svg.setAttribute("viewBox","0 0 16 16");svg.setAttribute("width","16");svg.setAttribute("height","16");svg.setAttribute("aria-hidden","true");
+            const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+            path.setAttribute("d","M3 11C3 2 13 2 13 11M1.5 9.5h3v3h-3zM11.5 9.5h3v3h-3z");
+            path.setAttribute("fill","none");path.setAttribute("stroke","currentColor");path.setAttribute("stroke-width","1.3");svg.append(path);symbol.append(svg);
+          }else symbol.append(icon(node.joint ? "bone" : "object"));
           const label = document.createElement("span");
           label.className = "object-name";
           label.textContent = node.name;
@@ -222,7 +228,7 @@ export function createPropertiesPanel(
       }
       host.querySelector("#object-id")!.textContent = single.id;
       host.querySelector("#object-shape")!.textContent = shapeName ?? "—";
-      host.querySelector(".node-details dd")!.textContent = single.joint ? "Joint" : "Transform / Gaussian splat shape";
+      host.querySelector(".node-details dd")!.textContent = single.joint ? "Joint" : single.curve ? "Transform / NURBS curve shape" : "Transform / Gaussian splat shape";
     },
   };
 }

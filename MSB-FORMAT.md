@@ -59,12 +59,26 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `joints` | Joint IDs/names, parent IDs, local position, optional XYZ Euler rotation in degrees |
 | `SplatShape.binding` | Influence joint IDs and matching rest matrices |
 | `SplatShape.elasticity` | Stretch/spacing/expansion, allocation budget, optional density/distribution, selected connection scope |
+| `CurveShape` | `type: "curveShape"`, ID/name/parent ID, `degree`, weighted `points`, `knots`, `closed`, `color` |
 | `animation` | `fps`, `start`, `end`, `loop`, `tracks` |
 | Animation track | `id`, `targetId`, `channel`, ordered `keys` |
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
 | `drivenKeys` | Relationship `id`, `driver` and `driven` property references, and curve `keys` |
 | `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend` |
 | `constraints` | `id`, `name`, `type`, `sourceId`, `targetId`, `enabled`, `maintainOffset`, stored `offset`, optional `aimAxis`/`worldUpAxis` |
+
+Each transform owns exactly one splat or controller curve shape. Curve shapes
+need no asset record or binary entry; their parent transforms use the existing
+animation and constraint channels. Curve degree is 1, 2, or 3. Each control point
+is `[x, y, z, weight]`; there must be at least degree + 1 and at most 128 points.
+Coordinates and knot values are finite within ±1,000,000; weights are positive
+from 0.000001 through 1,000,000. The knot vector has point count + degree + 1
+entries, is nondecreasing, has a nonempty active interval, allows multiplicity
+up to degree + 1, and separates distinct values by at least 0.000000001.
+`closed` is a boolean and joins rendered endpoints without periodic conversion;
+`color` is a six-digit `#rrggbb` string. Samples, line buffers, and selection
+bounds are rebuilt at load time rather than saved. Existing splat-only archives
+remain supported; older applications may reject the new shape type.
 
 Property references contain `targetId` and `channel`. Channels are
 `position.x/y/z`, `rotation.x/y/z`, `scale.x/y/z`, and `visibility`; joints do not

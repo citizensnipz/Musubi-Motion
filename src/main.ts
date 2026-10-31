@@ -8,6 +8,7 @@ import type {
   SceneDocument,
   AssetRecord,
   SplatShapeNode,
+  CurveShapeNode,
   TransformChannels,
   Vec3,
 } from "./scene-document.ts";
@@ -56,6 +57,9 @@ import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
 import { PoseDrafts } from "./pose-drafts.ts";
 import { createIKTargets } from "./ik-targets.ts";
+import { createControllerRenderable } from "./controller-renderer.ts";
+import { createControllerPanel } from "./controller-panel.ts";
+import { controllerPlacement } from "./controller-placement.ts";
 import { mountSkeleton } from "./skeleton.ts";
 import { createBinding } from "./splat-binding.ts";
 import { createTerminal } from "./terminal-panel.ts";
@@ -122,16 +126,27 @@ theme.addEventListener("click", () => {
 });
 applyTheme();
 
-type RuntimeObject = {
+type RuntimeBase = {
   root: THREE.Group;
   preview: THREE.Group;
-  mesh: SplatMesh;
   bounds: THREE.Box3;
   centers: Float32Array;
   count: number;
   box: THREE.Box3Helper;
-  assetId: string;
 };
+type RuntimeObject = RuntimeBase & (
+  | { kind: "splat"; mesh: SplatMesh; assetId: string }
+  | { kind: "curve"; mesh: ReturnType<typeof createControllerRenderable>["mesh"]; controller: ReturnType<typeof createControllerRenderable>; shape: CurveShapeNode }
+);
+
+function controllerRuntime(shape: CurveShapeNode): RuntimeObject {
+  const controller = createControllerRenderable(shape);
+  const root = new THREE.Group(), preview = new THREE.Group();
+  preview.add(controller.mesh); root.add(preview);
+  const box = new THREE.Box3Helper(new THREE.Box3(), 0x999999); box.visible = false;
+  return { kind: "curve", root, preview, mesh: controller.mesh, controller, shape, box,
+    bounds: controller.bounds, centers: controller.centers, count: 0 };
+}
 
 async function start() {
   try {
@@ -198,6 +213,7 @@ async function start() {
   let drivenPanel: ReturnType<typeof createDrivenKeyPanel> | undefined;
   let ikPanel: ReturnType<typeof createIKPanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
+  let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
   let channelKeys: ReturnType<typeof mountChannelKeyControls> | undefined;
   let evaluationError = "";
   const animationSettings = () => store.getState().document.animation ?? defaultAnimation();
@@ -252,6 +268,7 @@ async function start() {
   }
   const bindings = new Map<string, { signature: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
   function boundSelection(object:RuntimeObject) {
+    if (object.kind !== "splat") return undefined;
     return [...bindings.values()].find(b=>b.mesh===object.mesh)?.skin.selection();
   }
   function updateBindings() {
@@ -265,7 +282,7 @@ async function start() {
     }
     for (const shape of shapes) if (shape.binding) {
       const object = runtime.get(shape.parentId);
-      if (!object) continue;
+      if (!object || object.kind !== "splat") continue;
       if (!bindings.has(shape.id)) bindings.set(shape.id, {signature:JSON.stringify([shape.binding, shape.elasticity, doc.joints?.map(j => [j.id, j.parentId])]),mesh:object.mesh,skin:createBinding(object.mesh,shape.binding,shape.elasticity,doc.joints)});
       bindings.get(shape.id)!.skin.update(id => skeleton.boneMatrix(id));
     }
@@ -303,7 +320,9 @@ async function start() {
       if (action === "Bind splats") terminal.log(`Joint influences: ${joints.map(j => j.name).join(", ")}. Up to four nearest joints per splat; inverse-distance weights.`);
       const nodes = {...doc.nodes};
       for (const shape of shapes) {
-        const mesh = runtime.get(shape.parentId)!.mesh;
+        const object = runtime.get(shape.parentId);
+        if (!object || object.kind !== "splat") continue;
+        const mesh = object.mesh;
         terminal.log(`${action}: ${doc.nodes[shape.parentId].name}; ${runtime.get(shape.parentId)!.count.toLocaleString()} splats.`);
         mesh.updateWorldMatrix(true,false);
         const inverse = mesh.matrixWorld.clone().invert();
@@ -511,12 +530,13 @@ async function start() {
     const doc = store.getState().document,
       id = singleId();
     const shape = Object.values(doc.nodes).find(
-      (node) => node.type === "splatShape" && node.parentId === id,
+      (node) => node.type !== "transform" && node.parentId === id,
     );
     const jointNodes = (doc.joints ?? []).map(j => ({...j, type: "transform" as const, joint: true,
       rotationOrder: "XYZ" as const, rotation: j.rotation ?? [0,0,0] as Vec3, scale: [1,1,1] as Vec3 }));
     const ids = [...selected, ...skeleton.selectedIds];
-    panel.update([...transformNodes(doc), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
+    const curves = new Set(Object.values(doc.nodes).filter(node => node.type === "curveShape").map(node => node.parentId));
+    panel.update([...transformNodes(doc).map(node => ({ ...node, curve: curves.has(node.id) })), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
     elasticityPanel.update(shape?.type === "splatShape" ? shape : undefined, new Map((doc.joints??[]).map(j=>[j.id,j.name])));
     channelKeys?.refresh();
   }
@@ -549,9 +569,19 @@ async function start() {
     updatePanel();
     timelinePanel?.refresh();
     animationEditors?.refresh();
+    controllerPanel?.refresh();
   }
   function syncScene() {
     const doc = store.getState().document;
+    for (const shape of Object.values(doc.nodes)) if (shape.type === "curveShape") {
+      let object = runtime.get(shape.parentId);
+      if (!object) {
+        object = controllerRuntime(shape); runtime.set(shape.parentId, object); world.add(object.box);
+      }
+      if (object.kind === "curve" && object.shape !== shape) {
+        object.controller.update(shape); object.centers = object.controller.centers; object.shape = shape;
+      }
+    }
     for (const [id, object] of runtime) {
       const node = doc.nodes[id];
       if (node?.type !== "transform") {
@@ -575,7 +605,7 @@ async function start() {
         (n): n is SplatShapeNode =>
           n.type === "splatShape" && n.parentId === id,
       );
-      if (shape) {
+      if (shape && object.kind === "splat") {
         object.mesh.name = shape.name;
         object.mesh.position.fromArray(shape.offset);
       }
@@ -585,7 +615,10 @@ async function start() {
     updateBindings();
     updateFileState();
     const count = nodes.reduce(
-      (sum, node) => sum + (runtime.get(node.id)?.mesh.extSplats?.numSplats ?? runtime.get(node.id)?.count ?? 0),
+      (sum, node) => {
+        const object = runtime.get(node.id);
+        return sum + (object?.kind === "splat" ? object.mesh.extSplats?.numSplats ?? object.count : 0);
+      },
       0,
     );
     element("asset-detail").textContent =
@@ -624,11 +657,7 @@ async function start() {
     );
     for (const [id, object] of runtime)
       if (!retainedIds.has(id)) {
-        object.root.removeFromParent();
-        world.remove(object.box);
-        object.box.geometry.dispose();
-        (object.box.material as THREE.Material).dispose();
-        object.mesh.dispose();
+        disposeObject(object);
         runtime.delete(id);
       }
     const retainedAssets = new Set(
@@ -645,6 +674,17 @@ async function start() {
   drivenPanel = createDrivenKeyPanel(store, { getFrame, getSelection: allSelection, getPoses: () => evaluated, available: () => !loading && !dragId && !playing });
   ikPanel = createIKPanel(store, { getFrame, canKey: () => !timelinePanel?.turntable, getPoses: () => evaluated, getFKPoses: () => fkPoses, getSolvedPoses: () => solvedPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
   constraintsPanel = createConstraintsPanel(store, { getPoses: () => evaluated, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  controllerPanel = createControllerPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection,
+    getPlacement: () => {
+      const ids = allSelection();
+      if (!ids.length) return undefined;
+      if (ids.length !== 1) throw Error("Select one object or joint to place the controller.");
+      return controllerPlacement(store.getState().document, evaluated, ids[0]);
+    },
+    onSelect: id => selectObjects([id]),
+  });
   channelKeys = mountChannelKeyControls(panelHost, store, { getFrame, getPose: currentPose, getSelection: allSelection, available: () => !loading && !dragId && !playing && !timelinePanel?.turntable });
   workspace.registerPanel("graph", "Graph Editor", animationEditors.graph);
   workspace.registerPanel("dope-sheet", "Dope Sheet", animationEditors.dopeSheet);
@@ -660,6 +700,7 @@ async function start() {
   }
   ikPanel.element.addEventListener("ik-target-select", event => selectIKTarget((event as CustomEvent<string>).detail));
   workspace.registerPanel("constraints", "Constraints", constraintsPanel.element);
+  workspace.registerPanel("controllers", "Curve Controls", controllerPanel.element);
   for (const control of Array.from(document.querySelectorAll<WaButton>("[data-rig-action]"))) {
     if (["Create IK chain", "Move IK target", "IK / FK blend"].includes(control.dataset.rigAction!)) {
       control.disabled = false; control.title = "Open IK Handles";
@@ -939,6 +980,9 @@ async function start() {
     });
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) {
       raycaster.setFromCamera(end, camera);
+      const height = camera === orthographic ? (orthographic.top - orthographic.bottom) / orthographic.zoom
+        : 2 * camera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(perspective.fov / 2));
+      raycaster.params.Line.threshold = Math.max(0.001, height * 6 / Math.max(1, rect.height));
       const targetHit = ikTargets.pick(raycaster);
       if (targetHit) { selectIKTarget(targetHit); return; }
       const jointHit = skeleton.pick(raycaster);
@@ -1064,6 +1108,7 @@ async function start() {
     drivenPanel?.refresh();
     ikPanel?.refresh();
     constraintsPanel?.refresh();
+    controllerPanel?.refresh();
     channelKeys?.refresh();
   }
   function applyAnimationPose() {
@@ -1137,7 +1182,8 @@ async function start() {
     object.box.removeFromParent();
     object.box.geometry.dispose();
     (object.box.material as THREE.Material).dispose();
-    object.mesh.dispose();
+    if (object.kind === "curve") object.controller.dispose();
+    else object.mesh.dispose();
   }
   function replaceScene(
     doc: SceneDocument,
@@ -1248,6 +1294,8 @@ async function start() {
         new Uint8Array(await file.arrayBuffer()),
       );
       for (const node of transformNodes(project.scene)) {
+        const curve = Object.values(project.scene.nodes).find((shape): shape is CurveShapeNode => shape.type === "curveShape" && shape.parentId === node.id);
+        if (curve) { staged.set(node.id, controllerRuntime(curve)); continue; }
         const shape = Object.values(project.scene.nodes).find(
           (n): n is SplatShapeNode =>
             n.type === "splatShape" && n.parentId === node.id,
@@ -1271,6 +1319,7 @@ async function start() {
           root.add(preview);
           box.visible = false;
           staged.set(node.id, {
+            kind: "splat",
             ...data,
             root,
             preview,
@@ -1382,6 +1431,7 @@ async function start() {
       box.visible = false;
       world.add(box);
       runtime.set(added.id, {
+        kind: "splat",
         root,
         preview,
         mesh: candidate,

@@ -30,6 +30,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
 - **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture the current solved joint rotations and switch to FK in one undoable edit. Blend is not animated; matching captures one frame.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
+- **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
 - **Undo/redo:** editing operations use shared document commands. History retains up to 100 edits without copying splat buffers; playback and scrubbing create no history entries.
 - **Turntable preview:** the Timeline's separate playback mode retains the original 12-second rotation preview.
 - **Portable scenes:** save and reopen `.msb` packages with source assets, joints, binding/elasticity settings, animation curves, driven relationships, IK handles, and constraints.
@@ -66,7 +67,7 @@ Open the URL printed by Vite.
 | Pan | Alt + middle drag |
 | Dolly | Alt + right drag |
 | Zoom | Scroll wheel |
-| Select object | Click a splat surface or Outliner row |
+| Select object | Click a splat surface, controller line, or Outliner row |
 | Marquee select | Drag a rectangle in the viewport |
 | Toggle selection | Shift + click / marquee |
 | Clear selection / cancel gizmo drag | Escape |
@@ -117,7 +118,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 ## Remaining priorities
 
 1. Pole vectors, analytic two-bone IK, joint orientation/limits, target/blend animation, and range-based IK/FK baking.
-2. Object-up and roll controls for aim constraints, multi-source constraint weights, and curve-based rig controls.
+2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
 3. Influence management, editable normalized skin weights, weight painting, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.
 5. Editable polygon topology, component selection, extrusion/inset/bevel/subdivision, materials, and mesh import/export.

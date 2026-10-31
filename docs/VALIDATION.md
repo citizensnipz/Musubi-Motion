@@ -13,6 +13,7 @@ service was introduced by this work.
 | Curve-insertion checkpoint at 17:12 | 126 tests passed across 15 files |
 | Aim-constraint checkpoint at 17:19 | 137 tests passed across 15 files |
 | IK/FK matching checkpoint at 17:28 | 148 tests passed across 15 files |
+| Curve-controller checkpoint at 17:51 | 168 tests passed across 18 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -56,6 +57,11 @@ latest checked session had no browser console errors.
 | Draft pose history | After seeking, undo preserved the frame's evaluated value 1.5; renaming preserved a draft value of 7 and its undo behavior |
 | Portable project | Browser download and reopen preserved animation keys, SDK, IK, and frame 24 |
 | Binding and elasticity | One 11,629-splat object was bound to three joints; elasticity remained usable during playback |
+| Curve creation and shape history | Created circle/arrow controls beside a splat; CV X changed 2→3, undo→2, redo→3, and Escape canceled a typed 9 back to 3 |
+| Curve shape validation and rebuild | Weight 0 was rejected and restored to 1. Insert CV rebuilt knots with 10 CVs; undo restored the original 9 |
+| Controller animation and constraint | Controller X keys 4/6 at frames 0/24 evaluated to 5 at frame 12. A point-constrained splat followed X=5/6 at frames 12/24 |
+| Controller placement and picking | An arrow matched the selected controller's evaluated X=5 world pose. An actual canvas click selected the curve line |
+| Controller project and deletion | Download/reopen retained both shapes, CV X=3, keys, constraint and frame 24. Delete removed the selected controller; undo restored it and the three-object scene |
 
 The viewport target drag/release/cancel/history checks passed with no browser
 console errors. Testing exposed a pointer-capture condition that omitted the
@@ -78,6 +84,8 @@ the browser retest now cover preservation of the opposite handle.
 | Node CPU constraint evaluation, 100 parent constraints, 100 evaluations | 43.5 ms total, approximately 0.44 ms per evaluation |
 | Node CPU aim evaluation, 100 aim constraints, 100 evaluations after 10 warmups | 27.94 ms total, approximately 0.28 ms per evaluation |
 | Browser animation with binding/elasticity, approximately 23,600 scene splats, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms |
+| Node creation of 100 rational circle renderables, 129 samples each | 17.69 ms total; excludes GPU upload/rendering |
+| Browser looping a controller-driven 11,629-splat scene with two curves, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms |
 
 CPU microbenchmarks exclude rendering, editor drawing, asset decoding, Spark
 sorting, binding uploads, and elasticity. The browser sample is a small local
@@ -85,7 +93,8 @@ scene and measures frame scheduling intervals; it is not isolated GPU time and
 does not establish performance for production-size assets. Device, browser,
 graphics driver, scene density, and active editor panels can change the result.
 
-The representative scene is [animation-study.msb](../examples/animation-study.msb).
+The representative scenes are [animation-study.msb](../examples/animation-study.msb)
+and [controller-study.msb](../examples/controller-study.msb).
 It uses procedural knots and a short rig, not a large imported capture. Cross-
 browser compatibility, large-asset memory/load times, and long-session editing
 remain outside this checkpoint's evidence. Imported multi-million-splat scenes
@@ -98,6 +107,7 @@ were not benchmarked.
 - `1ba021a` — Add viewport IK target manipulation and enforce exact constraint poses.
 - `c7f422e` — Preserve animation curve shape when inserting keys.
 - `1a15714` — Add aim constraints with configurable local and world-up axes.
+- `341d863` — Match solved IK poses to keyed FK with atomic pose validation.
 
 The curve-insertion commit adds verified shape-preserving key insertion,
 preserves the animation frame during import, and restores Save/Open shortcuts
@@ -113,5 +123,12 @@ The accompanying IK/FK matching commit adds rotation keys and a static blend
 switch in one history entry. Ten new command tests and one packed-archive
 integration test cover pose preservation, Euler continuity, partial blends,
 ownership conflicts, staged dependency checks, undo/redo and reopening.
+The accompanying controller commit adds shared transform-based NURBS controls,
+weighted CV editing, mixed-scene persistence and viewport selection. Twenty new
+tests cover commands, curve evaluation, renderer lifetime and world placement.
+It also fixes server-side example tooling: Zundo now passes through Vite's
+existing framework-free Zustand alias, avoiding an unintended React import.
+IK/FK matching retains the actual fractional playback frame when capturing a
+paused pose instead of rounding a pose sampled at a different time.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.

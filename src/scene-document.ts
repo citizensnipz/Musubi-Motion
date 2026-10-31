@@ -21,6 +21,18 @@ export type SplatShapeNode = {
   assetId: string;
   offset: Vec3;
 };
+export type CurveControlPoint = [number, number, number, number]; // local XYZ, positive rational weight
+export type CurveShapeNode = {
+  id: string;
+  type: "curveShape";
+  name: string;
+  parentId: string;
+  degree: 1 | 2 | 3;
+  points: CurveControlPoint[];
+  knots: number[];
+  closed: boolean; // join the rendered endpoints; does not make the NURBS periodic
+  color: string;
+};
 export type AssetRecord = { id: string } & (
   | { kind: "procedural"; generator: "knot-v1" }
   | { kind: "file"; fileName: string; byteLength: number }
@@ -36,7 +48,7 @@ export type SceneDocument = {
   upAxis: "Y";
   units: "unitless";
   rootIds: string[];
-  nodes: Record<string, TransformNode | SplatShapeNode>;
+  nodes: Record<string, TransformNode | SplatShapeNode | CurveShapeNode>;
   assets: Record<string, AssetRecord>;
 };
 

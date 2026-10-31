@@ -15,7 +15,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   );
   contents.set("rigging", riggingContent);
   contents.set("terminal", terminalContent);
-  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints" };
+  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints", controllers: "Curve Controls" };
   for (const id of Object.keys(animationPanels)) {
     const wrapper = document.createElement("div"); wrapper.className = "animation-dock-host";
     contents.set(id, wrapper);
@@ -166,7 +166,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     customized = true;
     const existing = api.getPanel(id);
     if (existing) { existing.api.setActive(); return; }
-    const attribute = ["driven-keys", "ik-handles", "constraints"].includes(id);
+    const attribute = ["driven-keys", "ik-handles", "constraints", "controllers"].includes(id);
     const reference = attribute ? "properties" : "viewport";
     api.addPanel({ id, component: id, title, tabComponent: "label", renderer: "always",
       minimumWidth: attribute ? 300 : 440, minimumHeight: attribute ? 180 : 260,

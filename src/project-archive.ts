@@ -5,6 +5,7 @@ import { validateAnimation } from "./animation.ts";
 import { validateDrivenKeys } from "./driven-keys.ts";
 import { validateIKHandles } from "./ik.ts";
 import { validateConstraints } from "./constraints.ts";
+import { validateCurveShape } from "./controller-curves.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 
 export const MAX_PROJECT_BYTES = 512 * 1024 * 1024;
@@ -150,12 +151,16 @@ export function validateScene(value: unknown): SceneDocument {
         parent as string,
         (shapeCounts.get(parent as string) ?? 0) + 1,
       );
+    } else if (node.type === "curveShape") {
+      if (parent === null) fail("Curve shape has no transform.");
+      validateCurveShape(node);
+      shapeCounts.set(parent as string, (shapeCounts.get(parent as string) ?? 0) + 1);
     } else fail("Unsupported node type.");
   }
   const visited = new Set<string>();
   for (const key of parents.keys()) {
     if (shapeCounts.get(key) !== 1)
-      fail("Each transform must have exactly one splat shape in this version.");
+      fail("Each transform must have exactly one renderable shape (splat or curve).");
     const path = new Set<string>();
     let current: string | null = key;
     while (current !== null && !visited.has(current)) {

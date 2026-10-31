@@ -107,8 +107,8 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (options.canKey && !options.canKey()) throw Error("Switch the timeline to Animation mode before matching and keying FK.");
     const handle = current();
     if(!handle?.enabled || handle.blend <= 0)throw Error("Enable the selected IK handle and set its blend above zero before matching FK to IK.");
-    matchFKToIK(store, handle.id, Math.round(options.getFrame()), options.getSolvedPoses(), options.getFKPoses?.());
-  }, `Joint rotation keys set at frame ${Math.round(options.getFrame())}; the handle now uses FK.`));
+    matchFKToIK(store, handle.id, options.getFrame(), options.getSolvedPoses(), options.getFKPoses?.());
+  }, `Joint rotation keys set at frame ${Number(options.getFrame().toFixed(3))}; the handle now uses FK.`));
   matchFK.title = "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
   const matchHelp = document.createElement("p");
   matchHelp.textContent = "Match FK to IK and key writes rotation keys for every joint in this handle's chain at the current frame, then sets its static blend to 0 (FK). Remove Set Driven Key relationships on chain rotations; disable or delete constraints that drive those rotations.";

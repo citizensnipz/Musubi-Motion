@@ -254,6 +254,42 @@ target/blend keyframing, or range-based IK-to-FK pose baking. Matching a target 
 does not reproduce every possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
 
+## Curve controllers
+
+Open **Rigging → Curve Controls** to create or edit a controller. Choose a preset,
+plane and size, then click **Create curve control**. **Match selected world pose**
+places it at one selected object's or joint's evaluated world transform; it does
+not parent or constrain it. Unrepresentable shear and very small world scales are
+rejected with an explanation.
+
+Curve controllers are selectable line shapes attached to ordinary scene
+transforms. Use a Circle, Square, or Arrow preset, choose its XY, XZ, or YZ plane,
+and set its size and color. The default plane is XZ. The Circle uses rational
+quadratic NURBS data; Square and Arrow use straight segments. Transform and
+animate the controller through the same Properties, timeline, and Graph Editor
+as other objects. Connect its channels through SDK or use its transform as a
+constraint source to drive a joint or object. Creating a controller alone does
+not connect it to a rig.
+
+Shape editing changes local control vertices (CVs), including positive rational
+weights. Degree 1, 2, and 3 curves are supported. Rebuilding knots changes the
+curve while retaining its CVs and weights; it is not a shape-preserving degree
+conversion. Closing a curve adds an endpoint connection, without creating a
+periodic spline. Shape edits use undo/redo and save inside the `.msb` document;
+they require no external asset files.
+
+The [controller study](../examples/controller-study.msb) contains a splat, an
+edited circle controller, and an arrow control. The circle's Position X keys
+move 4→6 over frames 0→24, and a point constraint makes the splat follow it.
+The first circle CV has X=3; the arrow was placed at the circle's frame-12 pose.
+
+These are rig controls, not a NURBS surface modeling system. There is no CV
+animation, construction history, curve-to-surface modeling, or periodic-curve
+editing. Controllers contain no splats and cannot be bound or given elasticity.
+Their display is a sampled line, and shape sampling is reused during playback.
+CV editing is currently numeric in the Curve Controls panel; viewport CV
+selection and manipulation are not implemented.
+
 ## Constraints
 
 Open **Rigging → Constraints**. Choose **Source · follow this**, **Driven ·
@@ -346,7 +382,7 @@ small-scene playback results.
 1. Pole vectors, analytic two-bone IK, local joint axes/orientation, rotation
    limits, target/blend animation, and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
-   animation, and curve-based controller shapes.
+   animation, and richer controller/component editing.
 3. Editable normalized skin weights, influence management, weight painting,
    joint/pose mirroring, and conventional deformers.
 4. Animation layers, camera/custom-property animation, Euler filtering, richer
@@ -370,10 +406,14 @@ joint chain. Its [IK/FK blending workflow](https://help.autodesk.com/cloudhelp/2
 also animates blend values across frames. Musubi's matching commands cover target
 alignment and a current-frame rotation capture; animated blend transitions remain
 future work.
+Curve terminology follows Autodesk's [NURBS curve components](https://help.autodesk.com/cloudhelp/ENU/MayaCRE-Modeling/files/GUID-3C709643-E723-4518-84B7-45EB07778AD2.htm)
+and [curve degree overview](https://help.autodesk.com/cloudhelp/2023/ENU/Maya-Modeling/files/GUID-0C6DD36E-E336-4DE2-ADA1-86665998EF77.htm).
+Musubi supports degrees 1–3 and stores the full Three.js knot vector; it does not
+import Maya curve files or implement Maya's complete curve editing toolset.
 The interface adapts these concepts without using Autodesk code, branding,
 proprietary artwork, or file formats.
 
-Curve primitives and CCD solving reuse the existing Three.js dependency. Its
+Curve primitives, NURBS sampling, line rendering, and CCD solving reuse the existing Three.js dependency. Its
 [MIT license](https://github.com/mrdoob/three.js/blob/r180/LICENSE) is compatible
 with this Apache-2.0 project. No new package dependencies or paid services were
 introduced for these animation/rigging additions. Other dependencies retain

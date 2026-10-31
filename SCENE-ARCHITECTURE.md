@@ -1,7 +1,8 @@
 # Scene data architecture
 
 Musubi uses a Maya-inspired transform/shape model: named transforms own local
-position, rotation, and scale; child splat shapes reference assets. The design
+position, rotation, and scale; child splat shapes reference assets and controller
+curve shapes store local NURBS data. The design
 follows the principles of Maya's documented [DAG hierarchy](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Basics/files/GUID-5029CF89-D420-4236-A7CF-884610828B70.htm)
 and [parent-relative transforms](https://help.autodesk.com/cloudhelp/ENU/MayaCRE-Tech-Docs/Nodes/dagNode.html).
 It does not implement Maya's complete dependency graph or construction history.
@@ -14,6 +15,7 @@ SceneDocument v1
   nodes[id]
     Transform: name, parentId, position, rotation, scale, rotationOrder
     SplatShape: name, parentId, assetId, offset, optional binding/elasticity
+    CurveShape: name, parentId, degree, weighted points, knots, closed, color
   assets[id]: procedural generator or original file metadata
   joints?: local position/rotation, name, ID, parentId
   animation?: fps, start, end, loop, tracks
@@ -31,7 +33,8 @@ SceneDocument v1
   transforms. Original source assets are separate from editable metadata.
 - Joint hierarchy parenting preserves the authored world pose and rejects
   cycles. General transform grouping, interactive object parenting, and DAG
-  instancing remain future work. Archive transforms still require one splat shape.
+  instancing remain future work. Archive transforms require one shape, either a
+  splat shape or a controller curve shape.
 - Binding records influence joint IDs and rest matrices. The runtime creates
   normalized distance-based weights and passes bone transforms to Spark skinning.
   Editable weights and weight painting are not implemented.
@@ -70,6 +73,21 @@ weighted handles. Curves hold their endpoint values outside the keyed interval.
 Rotation curves retain full turns; numerical inputs preserve intentional spins.
 `src/animation-edit.ts` maintains nearby equivalent XYZ angles for gizmo commits
 and preserves unaffected evaluated channels during FK edits.
+
+`src/controller-curves.ts` validates and edits rational controller curves, using
+the existing Three.js `NURBSCurve` for sampling. A controller's ordinary transform
+participates in animation, SDK, and constraints; its shape is local display
+geometry rather than a separate pose system. Circle, square, and arrow presets
+need no asset bytes. Shape edits are shared document commands with undo.
+
+`src/controller-renderer.ts` owns a Three.js `Line`, geometry, and material per
+controller. Local samples provide bounds and selection points; line raycasting
+provides viewport picking. Replacing curve geometry disposes the previous buffer
+while retaining the line, material, and bounds identities. Runtime shape-record
+comparison avoids resampling during playback or transform-only changes. The
+adapter reports zero splats, and controller curves bypass binding and elasticity.
+Closing a curve joins its sampled endpoints; it does not construct periodic
+NURBS data. The renderer disposes its owned resources when the object is removed.
 
 `src/driven-keys.ts` owns attribute connections. Each driven property has one
 driver, while one driver may feed many outputs. A property-level topological
