@@ -201,9 +201,6 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
     updateCurrent(evaluated());
   }
   // Scene shortcuts must not interpret text editing or Delete in this dedicated editor.
-  element.addEventListener("keydown", event => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) event.stopPropagation();
-  });
   store.subscribe(refresh); refresh();
   return { element, refresh };
 }

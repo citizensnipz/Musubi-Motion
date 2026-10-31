@@ -98,7 +98,8 @@ degrees, with labelled frame and value axes.
 | Select keys in a rectangle | Drag blank graph space; Shift adds to selection |
 | Move selected keys | Drag a key; frame coordinates snap to whole frames |
 | Edit one key precisely | Frame and Value fields |
-| Insert on active curve | Insert key, focused-editor S, or double-click a time/value |
+| Insert without changing curve shape | Insert key or focused-editor S, at the current frame |
+| Author a key at a chosen time/value | Double-click the graph |
 | Delete selected keys | Delete button, Delete, or Backspace |
 | Copy/paste | Toolbar or Ctrl/Cmd+C and Ctrl/Cmd+V |
 | Zoom around the pointer | Mouse wheel |
@@ -112,6 +113,19 @@ Paste offsets copied keys so the earliest copied time lands on the current
 frame. It preserves their original object/channel destinations; this is not
 animation retargeting. Moves and time scaling that create conflicting key times
 are rejected atomically. A completed key or tangent drag is one undoable edit.
+
+**Insert key** samples the active curve at the current frame and preserves its
+shape. Linear and stepped intervals retain their existing interpolation; Bezier
+intervals are subdivided with De Casteljau interpolation, including ordinary
+weighted handles. Affected neighboring tangents become Fixed so their adjacent
+segments retain the same shape. The insertion and tangent changes form one
+undoable edit. Double-clicking an explicit time/value instead performs ordinary
+key authoring and may change the curve.
+
+Some extreme weighted splits would require infinite tangent slopes or handle
+weights greater than one, which the saved curve schema cannot represent. Those
+insertions are rejected atomically with an instruction to adjust tangent weights;
+the editor does not substitute an approximate curve.
 
 Choose **Bezier**, **Linear**, or **Stepped** interpolation. Bezier keys expose
 incoming/outgoing handles on the active curve. Drag a handle or edit **In slope**

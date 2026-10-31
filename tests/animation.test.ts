@@ -3,7 +3,7 @@ import { addSplat, emptyScene, type SceneDocument } from "../src/scene-document.
 import { createSceneStore } from "../src/scene-store.ts";
 import {
   baseChannels, copyKeys, defaultAnimation, deleteKeys, evaluateChannels, evaluateCurve,
-  evaluateSceneAnimation, keyChannels, moveKeys, pasteKeys, patchKeys, readChannel, replaceTracks,
+  evaluateSceneAnimation, insertKey, keyChannels, moveKeys, pasteKeys, patchKeys, readChannel, replaceTracks,
   scaleKeys, setAnimationSettings, setKeys, tangentSlope, upsertTrack, validateAnimation, validateCurveKeys,
   withTangent, writeChannel, type AnimationTrack, type CurveKey,
 } from "../src/animation.ts";
@@ -104,6 +104,78 @@ describe("animation evaluation", () => {
 });
 
 describe("animation commands and document integrity", () => {
+  it("inserts unweighted Bezier keys without changing the split or neighboring auto segments", () => {
+    for (const mode of ["auto", "clamped", "spline", "flat"] as const) {
+      const store = createSceneStore(fixture()), curve = track([key(-10, -4, { tangentMode: mode }), key(0, 0, { tangentMode: mode }), key(20, 8, { tangentMode: mode }), key(30, 1, { tangentMode: mode })]);
+      upsertTrack(store, curve);
+      const before = store.getState().document, id = insertKey(store, curve.id, 7.25);
+      const inserted = store.getState().document.animation!.tracks[0].keys;
+      expect(inserted.find(k => k.id === id)!.time).toBe(7.25);
+      for (let frame = -15; frame <= 35; frame += 0.125) expect(evaluateCurve(inserted, frame)).toBeCloseTo(evaluateCurve(curve.keys, frame)!, 8);
+      expect(inserted[1].tangentMode).toBe("fixed"); expect(inserted[3].tangentMode).toBe("fixed");
+      expect(store.temporal.getState().pastStates).toHaveLength(2);
+      store.temporal.getState().undo(); expect(store.getState().document).toBe(before);
+      store.temporal.getState().redo(); expect(store.getState().document.animation!.tracks[0].keys.find(k => k.id === id)).toBeDefined();
+    }
+  });
+  it("splits weighted Bezier control polygons with unchanged values throughout adjoining segments", () => {
+    for (const time of [0.001, 2.5, 7.75, 19.999]) {
+      const store = createSceneStore(fixture()), curve = track([
+        key(-10, -3, { tangentMode: "fixed", outSlope: 0.2, outWeight: 0.5 }),
+        key(0, 0, { tangentMode: "fixed", inSlope: -0.3, outSlope: 1.8, inWeight: 0.2, outWeight: 0.65, broken: true }),
+        key(20, 10, { tangentMode: "fixed", inSlope: -0.4, outSlope: 0.3, inWeight: 0.15, outWeight: 0.6, broken: true }),
+        key(30, 15, { tangentMode: "fixed", inSlope: -0.5, inWeight: 0.25 }),
+      ], { channel: "rotation.y" });
+      upsertTrack(store, curve); insertKey(store, curve.id, time);
+      const inserted = store.getState().document.animation!.tracks[0].keys;
+      for (let frame = -10; frame <= 30; frame += 0.125) expect(evaluateCurve(inserted, frame)).toBeCloseTo(evaluateCurve(curve.keys, frame)!, 7);
+      expect(inserted[1].inSlope).toBe(-0.3); expect(inserted[3].outSlope).toBe(0.3);
+    }
+  });
+  it("preserves linear full-spin rotations and stepped boundaries when inserting", () => {
+    for (const interpolation of ["linear", "step"] as const) {
+      const store = createSceneStore(fixture()), curve = track([key(0, 0, { interpolation }), key(20, 720)], { channel: "rotation.z" });
+      upsertTrack(store, curve); insertKey(store, curve.id, 10);
+      const inserted = store.getState().document.animation!.tracks[0].keys;
+      for (const time of [-1, 0, 5, 9.999, 10, 10.001, 19.999, 20, 25]) expect(evaluateCurve(inserted, time)).toBeCloseTo(evaluateCurve(curve.keys, time)!, 10);
+    }
+  });
+  it("preserves endpoint hold and neighboring curves when inserting outside the range", () => {
+    const store = createSceneStore(fixture()), curve = track([key(0, 0), key(10, 7), key(20, -2)]);
+    upsertTrack(store, curve); insertKey(store, curve.id, -10); insertKey(store, curve.id, 30);
+    const inserted = store.getState().document.animation!.tracks[0].keys;
+    for (let time = -20; time <= 40; time += 0.125) expect(evaluateCurve(inserted, time)).toBeCloseTo(evaluateCurve(curve.keys, time)!, 8);
+  });
+  it("returns existing key IDs without history changes and inserts into single-key curves", () => {
+    const store = createSceneStore(fixture()), curve = track([key(10, 2)]);
+    upsertTrack(store, curve); const before = store.getState().document;
+    expect(insertKey(store, curve.id, 10)).toBe(curve.keys[0].id); expect(store.getState().document).toBe(before);
+    expect(store.temporal.getState().pastStates).toHaveLength(1);
+    insertKey(store, curve.id, 20); insertKey(store, curve.id, 0);
+    for (let time = -10; time < 30; time++) expect(evaluateCurve(store.getState().document.animation!.tracks[0].keys, time)).toBe(2);
+  });
+  it("rejects invalid frames, missing curves and empty curves without history changes", () => {
+    const store = createSceneStore(fixture()), empty = track([]);
+    upsertTrack(store, empty); const before = store.getState().document;
+    expect(() => insertKey(store, empty.id, 5)).toThrow(/first key/);
+    expect(() => insertKey(store, "missing", 5)).toThrow(/existing animation curve/);
+    expect(() => insertKey(store, empty.id, Infinity)).toThrow(/insert frame/);
+    expect(store.getState().document).toBe(before);
+    expect(store.temporal.getState().pastStates).toHaveLength(1);
+  });
+  it("rejects unrepresentable vertical or out-of-segment tangent splits atomically", () => {
+    for (const [weight, time] of [[1, 5], [0.9, 6.368]]) {
+      const store = createSceneStore(fixture()), curve = track([key(0, 0, { tangentMode: "flat", outWeight: weight }), key(10, 10, { tangentMode: "flat", inWeight: weight })]);
+      upsertTrack(store, curve); const before = store.getState().document;
+      expect(() => insertKey(store, curve.id, time)).toThrow(/Adjust tangent weights/);
+      expect(store.getState().document).toBe(before); expect(store.temporal.getState().pastStates).toHaveLength(1);
+    }
+  });
+  it("preserves discrete visibility even when a legacy curve stores non-stepped interpolation", () => {
+    const store = createSceneStore(fixture()), curve = track([key(0, 0), key(10, 1)], { channel: "visibility" });
+    upsertTrack(store, curve); const before = store.getState().document; insertKey(store, curve.id, 7);
+    for (const time of [0, 6, 7, 8, 9.99, 10]) expect(evaluateChannels(store.getState().document, "object", time).visibility).toBe(evaluateChannels(before, "object", time).visibility);
+  });
   it("sets all transform channels together and retains existing key identity", () => {
     const store = createSceneStore(fixture());
     setKeys(store, ["object"], 0);

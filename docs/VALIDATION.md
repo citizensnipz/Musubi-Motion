@@ -10,6 +10,7 @@ service was introduced by this work.
 | --- | --- |
 | Baseline before animation work | 31 tests passed across 5 files |
 | Development checkpoint recorded at 16:56 | 118 tests passed across 15 files |
+| Final curve-insertion checkpoint at 17:12 | 126 tests passed across 15 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -32,6 +33,9 @@ latest checked session had no browser console errors.
 | Curve clipboard and retiming | Copied frame 24 to 36; Dope Sheet Shift +5 produced 41, with undo/redo restoring 36/41; a key drag moved 41→43 |
 | Multi-channel edits and scaling | Two selected channel keys moved 0→2 together; scaling selected times 24/43 by 2 produced 24/62 |
 | Graph text-field stability | A value field retained focus and typed text during refresh; Enter committed the value |
+| Shape-preserving key insertion | Insert at frame 12 created one key with displayed value 0.938 and Fixed tangents; undo removed it and redo restored it. Dense automated samples verify curve preservation, including adjacent segments |
+| Import during animation | Adding a demo object at frame 60 with range starting at 50 retained frame 60 |
+| Save shortcut in a rigging field | Ctrl+Shift+S from the Set Driven Key driver-value field opened Save As; cancel returned to editing |
 | Set Driven Key | The example mapped driver value 1.5 to 90° rotation; an additional Scale X relationship mapped 0.5→1 |
 | IK | Editing a target changed the solved pose; blend 0 restored the FK value 7.5°; target matching was exercised |
 | IK viewport target selection | Move target in viewport selected the target and attached the translation gizmo; pointer selection was checked |
@@ -84,8 +88,12 @@ were not benchmarked.
 
 - `f9fba29` — Add validated animation curves, driven keys and rig solvers.
 - `962a2f3` — Integrate animation editors and rigging workspaces with scene playback.
+- `1ba021a` — Add viewport IK target manipulation and enforce exact constraint poses.
 
-The follow-up viewport target controls and final constraint guards accompany
-this report; their commit identifier is available in repository history.
+The accompanying follow-up commit adds verified shape-preserving key insertion,
+preserves the animation frame during import, and restores Save/Open shortcuts
+from rigging fields. Eight additional focused animation tests cover insertion,
+discrete visibility, neighboring segments, history and atomic rejection of
+unrepresentable tangent splits.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.

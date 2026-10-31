@@ -116,6 +116,35 @@ export function withTangent(keys: readonly CurveKey[], index: number, side: "in"
   return next;
 }
 
+function bezierSegment(keys: readonly CurveKey[], index: number): CubicBezierCurve {
+  const a = keys[index], b = keys[index + 1], duration = b.time - a.time;
+  const outWeight = a.outWeight ?? 1 / 3, inWeight = b.inWeight ?? 1 / 3;
+  let segments = segmentCache.get(keys);
+  if (!segments) { segments = new Map(); segmentCache.set(keys, segments); }
+  let curve = segments.get(index);
+  if (!curve) {
+    curve = new CubicBezierCurve(new Vector2(0, a.value),
+      new Vector2(outWeight, a.value + tangentSlope(keys, index, "out") * duration * outWeight),
+      new Vector2(1 - inWeight, b.value - tangentSlope(keys, index + 1, "in") * duration * inWeight), new Vector2(1, b.value));
+    segments.set(index, curve);
+  }
+  return curve;
+}
+function bezierParameter(curve: CubicBezierCurve, fraction: number): number {
+  // Three evaluates the cubic; bisection finds its monotonic time parameter.
+  // Normalize time first to retain precision in scenes far from frame zero.
+  if (Math.abs(curve.v1.x - 1 / 3) < 1e-12 && Math.abs(curve.v2.x - 2 / 3) < 1e-12) return fraction;
+  let start = 0, end = 1, parameter = fraction;
+  const point = new Vector2();
+  for (let i = 0; i < 52; i++) {
+    parameter = (start + end) / 2;
+    const x = curve.getPoint(parameter, point).x;
+    if (x === fraction) break;
+    if (x < fraction) start = parameter; else end = parameter;
+  }
+  return parameter;
+}
+
 export function evaluateCurve(keys: readonly CurveKey[], time: number): number | undefined {
   if (!Number.isFinite(time)) throw Error("Curve time must be finite.");
   if (!keys.length) return undefined;
@@ -127,32 +156,12 @@ export function evaluateCurve(keys: readonly CurveKey[], time: number): number |
     const middle = (low + high) >>> 1;
     if (keys[middle].time <= time) low = middle; else high = middle;
   }
-  const a = keys[low], b = keys[high], duration = b.time - a.time;
+  const a = keys[low], b = keys[high];
   if (time === a.time || a.interpolation === "step") return a.value;
-  const fraction = (time - a.time) / duration;
+  const fraction = (time - a.time) / (b.time - a.time);
   if (a.interpolation === "linear") return a.value + (b.value - a.value) * fraction;
-  const outWeight = a.outWeight ?? 1 / 3, inWeight = b.inWeight ?? 1 / 3;
-  let segments = segmentCache.get(keys);
-  if (!segments) { segments = new Map(); segmentCache.set(keys, segments); }
-  let curve = segments.get(low);
-  if (!curve) {
-    curve = new CubicBezierCurve(new Vector2(0, a.value),
-      new Vector2(outWeight, a.value + tangentSlope(keys, low, "out") * duration * outWeight),
-      new Vector2(1 - inWeight, b.value - tangentSlope(keys, high, "in") * duration * inWeight), new Vector2(1, b.value));
-    segments.set(low, curve);
-  }
-  // Three evaluates the cubic; bisection finds its monotonic time parameter.
-  // Normalize time first to retain precision in scenes far from frame zero.
-  let start = 0, end = 1, parameter = fraction;
-  const point = new Vector2();
-  if (Math.abs(outWeight - 1 / 3) > 1e-12 || Math.abs(inWeight - 1 / 3) > 1e-12) {
-    for (let i = 0; i < 40; i++) {
-      parameter = (start + end) / 2;
-      const x = curve.getPoint(parameter, point).x;
-      if (x < fraction) start = parameter; else end = parameter;
-    }
-  }
-  return curve.getPoint(parameter, point).y;
+  const curve = bezierSegment(keys, low);
+  return curve.getPoint(bezierParameter(curve, fraction)).y;
 }
 
 export function readChannel(channels: TransformChannels & { visibility?: number }, channel: AnimationChannel): number {
@@ -307,6 +316,71 @@ export function replaceTracks(store: SceneStore, replacements: AnimationTrack[],
   saveAnimation(store, { ...animation, tracks }, label);
 }
 export function upsertTrack(store: SceneStore, track: AnimationTrack) { replaceTracks(store, [track]); }
+
+/** Insert at the evaluated value without changing the curve. Existing keys are
+ * returned unchanged. Adjacent presets become fixed tangents to retain shape. */
+export function insertKey(store: SceneStore, trackId: string, time: number): string {
+  if (!finite(time, 1e6)) throw Error("Invalid insert frame.");
+  const animation = store.getState().document.animation ?? defaultAnimation();
+  const track = animation.tracks.find(track => track.id === trackId);
+  if (!track) throw Error("Select an existing animation curve.");
+  const existing = track.keys.find(key => key.time === time);
+  if (existing) return existing.id;
+  if (!track.keys.length) throw Error("Set the first key before inserting into a curve.");
+  const keys = [...track.keys], value = evaluateCurve(track.keys, time)!;
+  const inserted: CurveKey = { ...newKey(time, value), tangentMode: "fixed", inSlope: 0, outSlope: 0 };
+  const freeze = (index: number): CurveKey => ({ ...keys[index], tangentMode: "fixed",
+    inSlope: tangentSlope(track.keys, index, "in"), outSlope: tangentSlope(track.keys, index, "out") });
+  if (time < keys[0].time) {
+    keys[0] = freeze(0); inserted.interpolation = "step"; keys.unshift(inserted);
+  } else if (time > keys[keys.length - 1].time) {
+    const last = keys.length - 1;
+    keys[last] = { ...freeze(last), interpolation: "step" }; inserted.interpolation = "step"; keys.push(inserted);
+  } else {
+    const index = keys.findIndex(key => key.time > time) - 1;
+    const a = freeze(index), b = freeze(index + 1), duration = b.time - a.time;
+    // Visibility is discrete in scene evaluation even for legacy curves whose
+    // serialized interpolation says Bezier. Preserve its held state.
+    if (track.channel === "visibility") { a.interpolation = "step"; inserted.value = a.value; }
+    inserted.interpolation = a.interpolation;
+    if (a.interpolation === "linear") inserted.inSlope = inserted.outSlope = (b.value - a.value) / duration;
+    if (a.interpolation === "bezier") {
+      const curve = bezierSegment(track.keys, index), fraction = (time - a.time) / duration;
+      const u = bezierParameter(curve, fraction);
+      // De Casteljau splits the original control polygon using Three's vector
+      // operations; the time parameter is the same one used by evaluation.
+      const left1 = curve.v0.clone().lerp(curve.v1, u), center = curve.v1.clone().lerp(curve.v2, u), right2 = curve.v2.clone().lerp(curve.v3, u);
+      const left2 = left1.clone().lerp(center, u), right1 = center.clone().lerp(right2, u);
+      const split = left2.clone().lerp(right1, u);
+      const failure = () => Error("This insertion needs a vertical or out-of-segment tangent. Adjust tangent weights before inserting here.");
+      const weight = (value: number) => {
+        if (!Number.isFinite(value) || value < -1e-10 || value > 1 + 1e-10) throw failure();
+        return Math.max(0, Math.min(1, value));
+      };
+      const slope = (dx: number, dy: number) => {
+        if (Math.abs(dx) < 1e-15) { if (Math.abs(dy) > 1e-12) throw failure(); return 0; }
+        const result = dy / (dx * duration);
+        if (!finite(result)) throw failure();
+        return result;
+      };
+      inserted.value = split.y;
+      a.outWeight = weight(left1.x / fraction);
+      b.inWeight = weight((1 - right2.x) / (1 - fraction));
+      inserted.inWeight = weight((fraction - left2.x) / fraction);
+      inserted.outWeight = weight((right1.x - fraction) / (1 - fraction));
+      inserted.inSlope = slope(fraction - left2.x, split.y - left2.y);
+      inserted.outSlope = slope(right1.x - fraction, right1.y - split.y);
+      // A zero-length handle has no effect; use the other side's slope so the
+      // inserted key remains linked when a handle is subsequently extended.
+      if (inserted.inWeight === 0) inserted.inSlope = inserted.outSlope;
+      if (inserted.outWeight === 0) inserted.outSlope = inserted.inSlope;
+      inserted.broken = false;
+    }
+    keys.splice(index, 2, a, inserted, b);
+  }
+  saveAnimation(store, { ...animation, tracks: animation.tracks.map(candidate => candidate.id === trackId ? { ...track, keys } : candidate) }, "Insert keyframe");
+  return inserted.id;
+}
 
 export function deleteKeys(store: SceneStore, keyIds: Iterable<string>) {
   const animation = store.getState().document.animation ?? defaultAnimation(), selected = new Set(keyIds);

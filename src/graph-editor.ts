@@ -2,7 +2,7 @@ import type { SceneStore } from "./scene-store.ts";
 import {
   defaultAnimation, evaluateCurve, tangentSlope, upsertTrack, deleteKeys, moveKeys,
   patchKeys, replaceTracks, copyKeys, pasteKeys,
-  validateCurveKeys, scaleKeys, withTangent,
+  validateCurveKeys, scaleKeys, withTangent, insertKey,
 } from "./animation.ts";
 import type { AnimationTrack, CurveKey, KeyClipboard } from "./animation.ts";
 import "./graph-editor.css";
@@ -124,11 +124,15 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   function insert(time = Math.round(options.getFrame()), value?: number) {
     const track = animation().tracks.find(t => t.id === activeTrack);
     if (!track) { announce("Set a key in the Timeline first, then select its channel.", true); return; }
+    if(value===undefined){
+      edit(()=>{selected=new Set([insertKey(store,track.id,time)]);});
+      return;
+    }
     const existing = track.keys.find(key => key.time === time);
-    const key: CurveKey = { id: existing?.id ?? crypto.randomUUID(), time, value: value ?? evaluateCurve(track.keys, time) ?? 0, interpolation: existing?.interpolation ?? "bezier", tangentMode: existing?.tangentMode ?? "auto" };
+    const key: CurveKey = { id: existing?.id ?? crypto.randomUUID(), time, value, interpolation: existing?.interpolation ?? "bezier", tangentMode: existing?.tangentMode ?? "auto" };
     edit(() => { upsertTrack(store, { ...track, keys: [...track.keys.filter(k => k.time !== time), key].sort((a,b) => a.time-b.time) }); selected = new Set([key.id]); });
   }
-  button(toolbar, "Insert key", () => insert(), "Insert a key on the active channel at the current frame; double-click the graph to insert at a time/value");
+  button(toolbar, "Insert key", () => insert(), "Insert a key at the current frame while preserving the curve shape. Double-click the graph to author a different time/value.");
   button(toolbar, "Delete", remove, "Delete selected keys");
   button(toolbar, "Copy", copy); button(toolbar, "Paste", paste);
   button(toolbar, "Frame all", () => fit()); button(toolbar, "Frame selected", () => fit(true));

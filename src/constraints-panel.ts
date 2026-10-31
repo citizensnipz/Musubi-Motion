@@ -94,9 +94,6 @@ export function createConstraintsPanel(store: SceneStore, options: Options) {
     create.disabled = !options.available() || !source.value || !target.value || source.value === target.value
       || (type.value === "scale" && !!doc.joints?.some(joint => joint.id === target.value));
   }
-  element.addEventListener("keydown", event => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) event.stopPropagation();
-  });
   store.subscribe(refresh); refresh();
   return { element, refresh };
 }

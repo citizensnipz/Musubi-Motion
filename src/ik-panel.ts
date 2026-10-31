@@ -174,9 +174,6 @@ export function createIKPanel(store: SceneStore, options: Options) {
     const chain = ikChain(doc, selected.rootId, selected.endId);
     chainDescription.textContent = `${names.get(selected.rootId)} → ${names.get(selected.endId)} · ${chain.length - 1} bones`;
   }
-  element.addEventListener("keydown", event => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) event.stopPropagation();
-  });
   store.subscribe(refresh); refresh();
   return { element, refresh, select(id: string) { selectedHandleId = id; refresh(); } };
 }

@@ -1394,7 +1394,7 @@ async function start() {
       store.setState({ document: added.document, editLabel: "Import object" });
       if (initial) store.temporal.getState().clear();
       selectObjects([added.id]);
-      time = 0;
+      if (timelinePanel?.turntable) time = 0;
       updateTime();
       fitView();
       notice.textContent = "";
