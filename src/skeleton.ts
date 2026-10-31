@@ -50,7 +50,8 @@ export function activeJoint(joints:Joint[], selection:ReadonlySet<string>):strin
   }
   return "";
 }
-export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLElement, available: () => boolean) {
+export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLElement, available: () => boolean,
+  prepareEdit?: (next: Joint[], label: string) => import("./scene-document.ts").SceneDocument) {
   let selected = "";
   let selection = new Set<string>();
   const bones = new Map<string, THREE.Bone>();
@@ -82,8 +83,15 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
   const joints = () => store.getState().document.joints ?? [];
   const commit = (next: Joint[], editLabel: string) => {
     if (!available()) return;
-    validateJoints(next);
-    store.setState({ document: { ...store.getState().document, joints: next }, editLabel });
+    try {
+      validateJoints(next);
+      store.setState({ document: prepareEdit ? prepareEdit(next, editLabel) : { ...store.getState().document, joints: next }, editLabel });
+    } catch (error) {
+      render();
+      const message = error instanceof Error ? error.message : String(error);
+      status.textContent = message;
+      host.dispatchEvent(new CustomEvent("rigging-error", { detail: message }));
+    }
   };
   function render() {
     selection = new Set([...selection].filter(id => joints().some(j => j.id === id)));
@@ -160,8 +168,19 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       }
     });
   }
-  store.subscribe(render); render();
+  store.subscribe((state, previous) => { if (state.document.joints !== previous.document.joints) render(); }); render();
   return {
+    applyPose(poses: ReadonlyMap<string, import("./animation.ts").AnimationPose>) {
+      for (const [id, bone] of bones) {
+        const pose = poses.get(id);
+        if (!pose) continue;
+        bone.position.fromArray(pose.position);
+        bone.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as [number, number, number]);
+        const marker = markers.find(m => m.userData.jointId === id);
+        if (marker) marker.visible = pose.visibility >= .5;
+      }
+      this.preview();
+    },
     beginRotation() {
       rotationStart.clear();
       for(const id of selection){const bone=bones.get(id);if(bone)rotationStart.set(id,bone.quaternion.clone());}
@@ -184,7 +203,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
     },
     setVisible(visible:boolean) { layer.visible=visible; },
     get selectedId() { return selected; },
-    boneMatrix(id: string) { layer.updateMatrixWorld(true); return bones.get(id)?.matrixWorld.clone(); },
+    boneMatrix(id: string) { return bones.get(id)?.matrixWorld.clone(); },
     get selectedIds() { return new Set(selection); },
     get selectedBone() { return bones.get(selected); },
     select(id: string) { selection = new Set(id ? [id] : []); render(); },
@@ -207,7 +226,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
     pick(raycaster: THREE.Raycaster) {
       if(!layer.visible)return undefined;
       layer.updateMatrixWorld(true);
-      return raycaster.intersectObjects(markers, false)[0]?.object.userData.jointId as string | undefined;
+      return raycaster.intersectObjects(markers.filter(marker => marker.visible), false)[0]?.object.userData.jointId as string | undefined;
     },
     preview() {
       layer.updateMatrixWorld(true);

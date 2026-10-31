@@ -1,0 +1,15 @@
+#timeline-panel { display: flex; flex-direction: column; align-items: stretch; justify-content: center; padding: 6px 14px; gap: 6px; overflow: auto; }
+.timeline-transport { display: flex; align-items: center; gap: 14px; }
+.timeline-transport .timeline { padding-top: 3px; position: relative; }
+.timeline-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; font-size: 11px; }
+.timeline-options label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.timeline-options input[type=number] { width: 62px; }
+.timeline-options input, .timeline-options select, .timeline-options button, #workspace-preset { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; font: inherit; padding: 3px 5px; }
+.timeline-options button { cursor: pointer; }
+.timeline-options :disabled { opacity: .45; cursor: default; }
+.timeline-hint { color: var(--muted); font-size: 10px; }
+.timeline-error { color: #efaa70; }
+.animation-dock-host { height: 100%; width: 100%; overflow: hidden; }
+#workspace-preset { font-size: 11px; max-width: 100px; }
+.timeline-keys { position: absolute; left: 5px; right: 5px; top: 18px; height: 7px; pointer-events: none; }
+.timeline-keys button { position: absolute; width: 4px; height: 7px; border: 0; padding: 0; background: #dfac63; transform: translateX(-50%); pointer-events: auto; cursor: pointer; }

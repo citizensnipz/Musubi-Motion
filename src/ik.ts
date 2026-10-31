@@ -37,6 +37,7 @@ export function ikChain(doc: SceneDocument, rootId: string, endId: string): stri
 }
 
 export function validateIKHandles(value: unknown, doc: SceneDocument): asserts value is IKHandle[] {
+  if (doc.joints?.some(joint => Object.hasOwn(doc.nodes, joint.id))) throw Error("Joint and object IDs must be distinct.");
   if (!Array.isArray(value) || value.length > 128) throw Error("Invalid IK handles.");
   const ids = new Set<string>(), occupied = new Map<string, string>();
   const joints = new Map((doc.joints ?? []).map(joint => [joint.id, joint]));

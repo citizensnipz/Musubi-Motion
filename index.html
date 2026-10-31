@@ -86,7 +86,19 @@
           <wa-dropdown id="view-menu" size="s" placement="bottom-start"><wa-button slot="trigger" size="s" appearance="plain" variant="neutral">View</wa-button><wa-dropdown-item id="view-properties">Properties</wa-dropdown-item><wa-dropdown-item id="view-outliner">Outliner</wa-dropdown-item><wa-dropdown-item id="view-viewport">Viewport</wa-dropdown-item><wa-dropdown-item id="view-timeline">Timeline</wa-dropdown-item><wa-dropdown-item id="view-terminal">Terminal</wa-dropdown-item></wa-dropdown><wa-dropdown id="rigging-menu" size="s" placement="bottom-start">
             <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Rigging</wa-button>
             <wa-dropdown-item id="rigging-open"><span slot="icon" data-icon="sidebar"></span>Rigging Panel</wa-dropdown-item>
+            <wa-dropdown-item id="view-ik-handles">IK Handles</wa-dropdown-item>
+            <wa-dropdown-item id="view-constraints">Constraints</wa-dropdown-item>
           </wa-dropdown>
+          <wa-dropdown id="animation-menu" size="s" placement="bottom-start">
+            <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Animation</wa-button>
+            <wa-dropdown-item id="animation-set-key">Set key <kbd slot="details">S</kbd></wa-dropdown-item>
+            <wa-dropdown-item id="view-graph">Graph Editor</wa-dropdown-item>
+            <wa-dropdown-item id="view-dope-sheet">Dope Sheet</wa-dropdown-item>
+            <wa-dropdown-item id="view-driven-keys">Set Driven Key</wa-dropdown-item>
+          </wa-dropdown>
+          <select id="workspace-preset" aria-label="Workspace preset" title="Arrange panels for a workflow">
+            <option value="general">General</option><option value="animation">Animation</option><option value="rigging">Rigging</option>
+          </select>
           <span class="nav-spacer"></span>
           <wa-button
             id="demo"

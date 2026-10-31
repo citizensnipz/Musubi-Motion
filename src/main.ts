@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
-import { addSplat, emptyScene, transformNodes, deleteSceneItems } from "./scene-document.ts";
+import { addSplat, emptyScene, transformNodes, deleteSceneItems, normalizedChannels } from "./scene-document.ts";
 import type {
   SceneDocument,
   AssetRecord,
@@ -13,7 +13,6 @@ import type {
 } from "./scene-document.ts";
 import {
   createSceneStore,
-  commitChannels,
   renameObject,
 } from "./scene-store.ts";
 import { createPropertiesPanel } from "./properties-panel.ts";
@@ -43,6 +42,19 @@ import type WaButton from "@awesome.me/webawesome/dist/components/button/button.
 import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.js";
 import type WaDropdown from "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
 import "./style.css";
+import { defaultAnimation, evaluateChannels, evaluateSceneAnimation, keyChannels, setKeys, type AnimationPose } from "./animation.ts";
+import { evaluateDrivenKeys } from "./driven-keys.ts";
+import { mountTimeline } from "./timeline-panel.ts";
+import { advanceFrame } from "./animation-playback.ts";
+import { mountAnimationEditors } from "./graph-editor.ts";
+import { createDrivenKeyPanel } from "./driven-key-panel.ts";
+import { prepareJointAnimationEdit, unwrapEuler } from "./animation-edit.ts";
+import { evaluateIK, validateIKHandles } from "./ik.ts";
+import { createIKPanel } from "./ik-panel.ts";
+import { evaluateConstraints, validateConstraints } from "./constraints.ts";
+import { createConstraintsPanel } from "./constraints-panel.ts";
+import { mountChannelKeyControls } from "./channel-animation-controls.ts";
+import { PoseDrafts } from "./pose-drafts.ts";
 import { mountSkeleton } from "./skeleton.ts";
 import { createBinding } from "./splat-binding.ts";
 import { createTerminal } from "./terminal-panel.ts";
@@ -173,7 +185,61 @@ async function start() {
     time = 0,
     previous = 0;
   let dragId: string | undefined;
-  const skeleton = mountSkeleton(store, world, riggingPanel, () => !loading && !dragId);
+  const poseOverrides = new Map<string, AnimationPose>();
+  const poseDrafts = new PoseDrafts();
+  let evaluated = new Map<string, AnimationPose>();
+  let fkPoses = new Map<string, AnimationPose>();
+  let timelinePanel: ReturnType<typeof mountTimeline> | undefined;
+  let animationEditors: ReturnType<typeof mountAnimationEditors> | undefined;
+  let drivenPanel: ReturnType<typeof createDrivenKeyPanel> | undefined;
+  let ikPanel: ReturnType<typeof createIKPanel> | undefined;
+  let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
+  let channelKeys: ReturnType<typeof mountChannelKeyControls> | undefined;
+  const animationSettings = () => store.getState().document.animation ?? defaultAnimation();
+  const getFrame = () => time * animationSettings().fps;
+  const allSelection = (): string[] => [...selected, ...skeleton.selectedIds];
+  const currentPose = (id: string): AnimationPose => evaluated.get(id) ?? poseOverrides.get(id) ?? evaluateChannels(store.getState().document, id, getFrame());
+  function prepareJointEdit(next: import("./skeleton.ts").Joint[], label: string): SceneDocument {
+    const result = prepareJointAnimationEdit(store.getState().document, next, label, Math.round(getFrame()), timelinePanel?.autoKey ?? false, currentPose);
+    if (result.document.ikHandles) validateIKHandles(result.document.ikHandles, result.document);
+    if (result.document.constraints) validateConstraints(result.document.constraints, result.document);
+    for (const [id, pose] of result.overrides) poseOverrides.set(id, pose);
+    if (result.overrides.size) poseDrafts.capture(result.document, poseOverrides);
+    return result.document;
+  }
+  const skeleton = mountSkeleton(store, world, riggingPanel, () => !loading && !dragId, prepareJointEdit);
+  function editPose(id: string, channels: TransformChannels, label: string) {
+    setPlaying(false);
+    let doc = store.getState().document;
+    const node = doc.nodes[id];
+    if (node?.type !== "transform") return;
+    const pose = { ...normalizedChannels(channels), visibility: currentPose(id).visibility };
+    poseOverrides.set(id, pose);
+    doc = { ...doc, nodes: { ...doc.nodes, [id]: { ...node, position: pose.position, rotation: pose.rotation, scale: pose.scale } } };
+    if (timelinePanel?.autoKey) doc = keyChannels(doc, id, pose, Math.round(getFrame()));
+    poseDrafts.capture(doc, poseOverrides);
+    store.setState({ document: doc, editLabel: label });
+  }
+  function setFrame(frame: number) {
+    if (!Number.isFinite(frame) || loading || dragId) return;
+    setPlaying(false); clearPoseDraft();
+    const settings = animationSettings();
+    time = Math.max(settings.start, Math.min(settings.end, Math.round(frame))) / settings.fps;
+    updateTime();
+  }
+  function keySelection() {
+    if (loading || dragId || timelinePanel?.turntable) return;
+    setPlaying(false);
+    const ids = allSelection();
+    if (!ids.length) { notice.textContent = "Select objects or joints to set keys."; return; }
+    setKeys(store, ids, Math.round(getFrame()), new Map(ids.map(id => [id, currentPose(id)])));
+    clearPoseDraft(); updateTime();
+    notice.textContent = `Set keys for ${ids.length} selected item(s) at frame ${Math.round(getFrame())}.`;
+  }
+  function clearPoseDraft() {
+    poseOverrides.clear();
+    poseDrafts.clear();
+  }
   const bindings = new Map<string, { signature: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
   function boundSelection(object:RuntimeObject) {
     return [...bindings.values()].find(b=>b.mesh===object.mesh)?.skin.selection();
@@ -352,6 +418,7 @@ async function start() {
   selectionLabel.setAttribute("role", "status");
   viewport.append(selectionLabel);
   riggingPanel.addEventListener("joint-selection-change", () => {
+    if (!dragId) { applyAnimationPose(); updateBindings(); }
     if (skeleton.selectedIds.size) {
       for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
       selectionLabel.textContent = skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : `${skeleton.selectedIds.size} joints selected`;
@@ -364,6 +431,7 @@ async function start() {
     if (selected.size && skeleton.selectedIds.size) selectionLabel.textContent = `${selected.size} objects · ${skeleton.selectedIds.size} joints selected`;
     refreshGizmo();
   });
+  riggingPanel.addEventListener("rigging-error", event => { notice.textContent = (event as CustomEvent<string>).detail; });
   function readChannels(object: THREE.Object3D): TransformChannels {
     return {
       position: object.position.toArray() as Vec3,
@@ -398,28 +466,18 @@ async function start() {
     },
     channel(id, channel, axis, value) {
       if (loading || dragId) return;
+      if (store.getState().document.drivenKeys?.some(r => r.driven.targetId === id && r.driven.channel === `${channel}.${"xyz"[axis]}`)) {
+        notice.textContent = "This channel is driven. Edit its relationship in Animation → Set Driven Key."; return;
+      }
+      setPlaying(false);
+      const pose = structuredClone(currentPose(id));
+      pose[channel][axis] = value;
       const joint = store.getState().document.joints?.find(j => j.id === id);
       if (joint) {
-        if (channel === "rotation") {
-          const rotation = [...(joint.rotation ?? [0,0,0])] as Vec3; rotation[axis] = value;
-          skeleton.commitMove(id, joint.position, rotation);
-        }
-        if (channel === "position") {
-          const position = [...joint.position] as Vec3; position[axis] = value;
-          skeleton.commitMove(id, position);
-        }
+        if (channel !== "scale") skeleton.commitMove(id, pose.position, pose.rotation);
         return;
       }
-      const node = store.getState().document.nodes[id];
-      if (node?.type !== "transform") return;
-      setPlaying(false);
-      const channels: TransformChannels = {
-        position: [...node.position],
-        rotation: [...node.rotation],
-        scale: [...node.scale],
-      };
-      channels[channel][axis] = value;
-      commitChannels(store, id, channels, `Edit ${channel}`);
+      editPose(id, pose, `Edit ${channel}`);
     },
   });
   panelHost.addEventListener("focusout", () =>
@@ -440,8 +498,10 @@ async function start() {
     );
     const jointNodes = (doc.joints ?? []).map(j => ({...j, type: "transform" as const, joint: true,
       rotationOrder: "XYZ" as const, rotation: j.rotation ?? [0,0,0] as Vec3, scale: [1,1,1] as Vec3 }));
-    panel.update([...transformNodes(doc), ...jointNodes], new Set([...selected, ...skeleton.selectedIds]), shape?.name, preview);
+    const ids = [...selected, ...skeleton.selectedIds];
+    panel.update([...transformNodes(doc), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
     elasticityPanel.update(shape?.type === "splatShape" ? shape : undefined, new Map((doc.joints??[]).map(j=>[j.id,j.name])));
+    channelKeys?.refresh();
   }
   function selectObjects(ids: string[], additive = false) {
     if (dragId) return;
@@ -467,6 +527,8 @@ async function start() {
       : "Nothing selected";
     refreshGizmo();
     updatePanel();
+    timelinePanel?.refresh();
+    animationEditors?.refresh();
   }
   function syncScene() {
     const doc = store.getState().document;
@@ -499,6 +561,7 @@ async function start() {
       }
     }
     const nodes = transformNodes(doc);
+    applyAnimationPose();
     updateBindings();
     updateFileState();
     const count = nodes.reduce(
@@ -510,14 +573,16 @@ async function start() {
     play.disabled =
       rewind.disabled =
       timeline.disabled =
-        loading || nodes.length === 0;
+        loading || (nodes.length === 0 && !doc.joints?.length);
     refreshSelection();
+    updateTime(false);
   }
   function updateHistoryButtons() {
     for (const id of ["scene-new", "scene-open", "scene-save", "scene-save-as"])
       element<WaButton>(id).disabled = loading || !!dragId;
     panelHost.inert = loading;
     element("outliner-panel").inert = loading;
+    timelinePanel?.refresh();
     const history = store.temporal.getState();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
@@ -552,7 +617,38 @@ async function start() {
     for (const id of assetFiles.keys())
       if (!retainedAssets.has(id)) assetFiles.delete(id);
   }
+  timelinePanel = mountTimeline(store, { getFrame, setFrame, setKey: keySelection, getSelection: allSelection,
+    available: () => !loading && !dragId,
+    onModeChange() { setPlaying(false); clearPoseDraft(); time = timelinePanel?.turntable ? 0 : animationSettings().start / animationSettings().fps; updateTime(); },
+  });
+  animationEditors = mountAnimationEditors(store, { getFrame, setFrame, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  drivenPanel = createDrivenKeyPanel(store, { getFrame, getSelection: allSelection, getPoses: () => evaluated, available: () => !loading && !dragId && !playing });
+  ikPanel = createIKPanel(store, { getPoses: () => evaluated, getFKPoses: () => fkPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  constraintsPanel = createConstraintsPanel(store, { getPoses: () => evaluated, getSelection: allSelection, available: () => !loading && !dragId && !playing });
+  channelKeys = mountChannelKeyControls(panelHost, store, { getFrame, getPose: currentPose, getSelection: allSelection, available: () => !loading && !dragId && !playing && !timelinePanel?.turntable });
+  workspace.registerPanel("graph", "Graph Editor", animationEditors.graph);
+  workspace.registerPanel("dope-sheet", "Dope Sheet", animationEditors.dopeSheet);
+  workspace.registerPanel("driven-keys", "Set Driven Key", drivenPanel.element);
+  workspace.registerPanel("ik-handles", "IK Handles", ikPanel.element);
+  workspace.registerPanel("constraints", "Constraints", constraintsPanel.element);
+  for (const control of Array.from(document.querySelectorAll<WaButton>("[data-rig-action]"))) {
+    if (["Create IK chain", "Move IK target", "IK / FK blend"].includes(control.dataset.rigAction!)) {
+      control.disabled = false; control.title = "Open IK Handles";
+      control.addEventListener("click", () => element("view-ik-handles").click());
+    }
+  }
+  for (const control of Array.from(document.querySelectorAll<WaButton>("[data-rig-action='Keyframe pose']"))) {
+    control.disabled = false; control.title = "Set keys on selected joints at the current frame";
+    control.addEventListener("click", keySelection);
+  }
+  element("animation-set-key").addEventListener("click", keySelection);
   store.subscribe((state, previous) => {
+    poseOverrides.clear();
+    for (const [id, pose] of poseDrafts.restore(state.document, previous.document, state.editLabel)) poseOverrides.set(id, pose);
+    const beforeFPS = previous.document.animation?.fps ?? 24;
+    const after = state.document.animation ?? defaultAnimation();
+    if (beforeFPS !== after.fps) time = time * beforeFPS / after.fps;
+    if (!timelinePanel?.turntable) time = Math.max(after.start / after.fps, Math.min(after.end / after.fps, time));
     if (state.document !== previous.document) terminal.log(`${state.editLabel} · ${transformNodes(state.document).length} objects · ${state.document.joints?.length ?? 0} joints`);
     syncScene();
     queueMicrotask(collectUnusedResources);
@@ -588,19 +684,21 @@ async function start() {
       dragId = undefined;
       if (jointPosition) {
         if (!cancelDrag && currentMode==="rotate") skeleton.commitRotation();
-        else if (!cancelDrag) skeleton.commitMove(id, jointPosition, readChannels(joint!).rotation);
+        else if (!cancelDrag) skeleton.commitMove(id, jointPosition, currentPose(id).rotation);
         else skeleton.reset();
         updateHistoryButtons();
         return;
       }
       const object = runtime.get(id);
-      if (!cancelDrag && object)
-        commitChannels(
-          store,
+      if (!cancelDrag && object) {
+        const channels = readChannels(object.root);
+        channels.rotation = currentMode === "rotate" ? unwrapEuler(channels.rotation, currentPose(id).rotation) : currentPose(id).rotation;
+        editPose(
           id,
-          readChannels(object.root),
+          channels,
           `${currentMode[0].toUpperCase() + currentMode.slice(1)} object`,
         );
+      }
       else syncScene();
       updatePanel();
     }
@@ -795,7 +893,11 @@ async function start() {
     const objects = transformNodes(store.getState().document).map((node) => ({
       id: node.id,
       object: runtime.get(node.id)!,
-    }));
+    })).filter(({object}) => {
+      let current: THREE.Object3D | null = object?.root;
+      while (current) { if (!current.visible) return false; current = current.parent; }
+      return !!object;
+    });
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) {
       raycaster.setFromCamera(end, camera);
       const jointHit = skeleton.pick(raycaster);
@@ -876,6 +978,9 @@ async function start() {
       return;
     }
     if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+    if (key === "s") { event.preventDefault(); keySelection(); return; }
+    if (key === " ") { event.preventDefault(); if (!loading && !dragId) setPlaying(!playing); return; }
+    if (key === "," || key === ".") { event.preventDefault(); setFrame(getFrame() + (key === "," ? -1 : 1)); return; }
     if (key === "delete") {
       if (loading || dragId) return;
       event.preventDefault();
@@ -902,20 +1007,54 @@ async function start() {
     }
   });
   function setPlaying(value: boolean) {
+    if (value) {
+      clearPoseDraft();
+      const settings = animationSettings();
+      if (!timelinePanel?.turntable && getFrame() >= settings.end) time = settings.start / settings.fps;
+    }
     playing = value;
-    buttonContent(play, value ? "pause" : "play");
+    buttonContent(play, value ? "pause" : "play", value ? "Pause" : "Play");
     play.setAttribute(
       "aria-label",
       value ? "Pause animation" : "Play animation",
     );
+    animationEditors?.refresh();
+    drivenPanel?.refresh();
+    ikPanel?.refresh();
+    constraintsPanel?.refresh();
+    channelKeys?.refresh();
   }
-  function updateTime() {
-    // Temporary turntable preview is below authored transforms and excluded from history.
-    for (const object of runtime.values())
-      object.preview.rotation.y = (time / duration) * Math.PI * 2;
-    timeline.value = time;
-    element<HTMLOutputElement>("time").value =
-      `${time.toFixed(2).padStart(5, "0")} / 12.00`;
+  function applyAnimationPose() {
+    if (dragId) return;
+    const doc = store.getState().document;
+    evaluated = evaluateSceneAnimation(doc, getFrame());
+    for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, pose);
+    evaluateDrivenKeys(doc, evaluated);
+    fkPoses = new Map(evaluated);
+    evaluateIK(doc, evaluated);
+    evaluateConstraints(doc, evaluated);
+    for (const [id, object] of runtime) {
+      const pose = evaluated.get(id);
+      if (!pose) continue;
+      object.root.position.fromArray(pose.position);
+      object.root.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as Vec3);
+      object.root.scale.fromArray(pose.scale);
+      object.root.visible = pose.visibility >= .5;
+      object.preview.rotation.y = timelinePanel?.turntable ? (time / duration) * Math.PI * 2 : 0;
+    }
+    skeleton.applyPose(evaluated);
+  }
+  function updateTime(apply = true) {
+    if (apply) { applyAnimationPose(); updateBindings(); }
+    timelinePanel?.refresh();
+    const turntable = timelinePanel?.turntable;
+    timeline.value = turntable ? time : getFrame();
+    element<HTMLOutputElement>("time").value = turntable ? `${time.toFixed(2)} / 12.00s` : `${Math.round(getFrame())} / ${animationSettings().end}`;
+    updatePanel();
+    animationEditors?.refresh();
+    if (!playing) drivenPanel?.refresh();
+    ikPanel?.refresh();
+    constraintsPanel?.refresh();
   }
   const sceneInput = element<HTMLInputElement>("scene-file");
   function closeFileMenu() {
@@ -951,6 +1090,7 @@ async function start() {
     handle?: SceneFileHandle,
   ) {
     transform.detach();
+    clearPoseDraft();
     selected.clear();
     const previousObjects = [...runtime.values()];
     runtime.clear();
@@ -1004,7 +1144,7 @@ async function start() {
     controls.maxDistance = Infinity;
     resizeProjection();reconnectControls(new THREE.Vector3(...editor.camera.target));viewportTools.setView(activeView);
     controls.enableDamping = true;
-    time = editor.time;
+    time = Math.max(animationSettings().start / animationSettings().fps, Math.min(animationSettings().end / animationSettings().fps, editor.time));
     updateTime();
   }
   async function saveProject(saveAs = false) {
@@ -1250,12 +1390,15 @@ async function start() {
   });
   rewind.addEventListener("click", () => {
     setPlaying(false);
-    time = 0;
+    clearPoseDraft();
+    time = timelinePanel?.turntable ? 0 : animationSettings().start / animationSettings().fps;
     updateTime();
   });
   timeline.addEventListener("input", () => {
     setPlaying(false);
-    time = Number(timeline.value);
+    if (dragId || loading) return;
+    clearPoseDraft();
+    time = timelinePanel?.turntable ? Number(timeline.value) : Math.round(Number(timeline.value)) / animationSettings().fps;
     updateTime();
   });
   webgl.domElement.addEventListener("webglcontextlost", (event) => {
@@ -1274,7 +1417,12 @@ async function start() {
     const delta = previous ? Math.min((now - previous) / 1000, 0.1) : 0;
     previous = now;
     if (playing) {
-      time = (time + delta) % duration;
+      if (timelinePanel?.turntable) time = (time + delta) % duration;
+      else {
+        const next = advanceFrame(getFrame(), delta, animationSettings());
+        time = next.frame / animationSettings().fps;
+        if (next.stopped) setPlaying(false);
+      }
       updateTime();
     }
     controls.update();
@@ -1282,15 +1430,18 @@ async function start() {
       const object = runtime.get(id);
       if (object) {
         object.mesh.updateWorldMatrix(true, false);
+        const skin = playing ? [...bindings.values()].find(b => b.mesh === object.mesh)?.skin : undefined;
         object.box.box
-          .copy(boundSelection(object)?.bounds??object.bounds)
+          .copy(skin ? skin.conservativeBounds(object.bounds) : boundSelection(object)?.bounds ?? object.bounds)
           .applyMatrix4(object.mesh.matrixWorld);
+        object.box.visible = gizmosVisible && object.root.visible;
       }
     }
     viewportTools.updateOrientation(camera.quaternion);
     webgl.render(world, camera);
   });
   choose("select");
+  setPlaying(false);
   syncScene();
   updateHistoryButtons();
   await importObject(

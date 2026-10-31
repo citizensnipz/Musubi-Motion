@@ -55,6 +55,7 @@ export function validateCurveKeys(value: unknown): asserts value is CurveKey[] {
 }
 
 export function validateAnimation(value: unknown, doc: SceneDocument): asserts value is AnimationData {
+  if (doc.joints?.some(joint => Object.hasOwn(doc.nodes, joint.id))) throw Error("Joint and object IDs must be distinct.");
   if (!record(value) || !finite(value.fps, 240) || value.fps < 1 || !finite(value.start, 1e6) || !finite(value.end, 1e6)
     || value.end <= value.start || typeof value.loop !== "boolean" || !Array.isArray(value.tracks) || value.tracks.length > 100000) throw Error("Invalid animation settings.");
   const trackIds = new Set<string>(), keyIds = new Set<string>(), channels = new Set<string>();

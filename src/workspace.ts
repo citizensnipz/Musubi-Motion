@@ -15,6 +15,11 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   );
   contents.set("rigging", riggingContent);
   contents.set("terminal", terminalContent);
+  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints" };
+  for (const id of Object.keys(animationPanels)) {
+    const wrapper = document.createElement("div"); wrapper.className = "animation-dock-host";
+    contents.set(id, wrapper);
+  }
   const api = createDockview(host, {
     theme: { name: "musubi", className: "dockview-theme-musubi", gap: 4 },
     disableFloatingGroups: true,
@@ -68,8 +73,8 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
       tabComponent: "label",
       renderer: "always",
       position: { direction: "below" },
-      initialHeight: 112,
-      minimumHeight: 98,
+      initialHeight: 156,
+      minimumHeight: 140,
       minimumWidth: 220,
     });
     api.addPanel({
@@ -100,7 +105,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
       minimumWidth: 240,
       minimumHeight: 220,
     });
-    api.getPanel("timeline")!.api.setSize({ height: 112 });
+    api.getPanel("timeline")!.api.setSize({ height: 156 });
     api
       .getPanel("outliner")!
       .api.setSize(compact ? { height: 260 } : { width: 240 });
@@ -155,7 +160,34 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
       }).api.setActive();
     });
   }
+  function showAnimationPanel(id: string) {
+    const title = animationPanels[id];
+    if (!title) return;
+    customized = true;
+    const existing = api.getPanel(id);
+    if (existing) { existing.api.setActive(); return; }
+    const attribute = ["driven-keys", "ik-handles", "constraints"].includes(id);
+    const reference = attribute ? "properties" : "viewport";
+    api.addPanel({ id, component: id, title, tabComponent: "label", renderer: "always",
+      minimumWidth: attribute ? 300 : 440, minimumHeight: 260, initialHeight: 330,
+      position: api.getPanel(reference) ? { referencePanel: reference, direction: attribute ? "within" : "below" }
+        : api.panels.length ? { direction: "below" } : undefined,
+    }).api.setActive();
+  }
+  for (const id of Object.keys(animationPanels)) document.getElementById(`view-${id}`)!.addEventListener("click", () => showAnimationPanel(id));
+  document.getElementById("workspace-preset")!.addEventListener("change", event => {
+    const preset = (event.target as HTMLSelectElement).value;
+    arrange();
+    if (preset === "animation") showAnimationPanel("graph");
+    if (preset === "rigging") document.getElementById("rigging-open")!.click();
+    saveLayout();
+  });
   return {
+    registerPanel(id: string, _title: string, content: HTMLElement) {
+      const wrapper = contents.get(id);
+      if (!wrapper) throw Error(`Unknown panel: ${id}`);
+      wrapper.replaceChildren(content);
+    },
     showRigging() {
       customized = true;
       const existing = api.getPanel("rigging");

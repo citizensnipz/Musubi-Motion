@@ -1,0 +1,42 @@
+.animation-editor {
+  display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
+  background: var(--panel); color: var(--text); font-size: 11px;
+}
+.animation-editor button, .animation-editor select, .animation-editor input {
+  color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 3px; padding: 4px 6px; font: inherit; min-height: 25px;
+}
+.animation-editor button { cursor: pointer; white-space: nowrap; }
+.animation-editor button:hover { background: var(--hover); }
+.animation-editor button:disabled, .animation-editor input:disabled, .animation-editor select:disabled { opacity: .45; cursor: default; }
+.animation-editor button:focus-visible, .animation-editor input:focus-visible, .animation-editor select:focus-visible, .animation-editor svg:focus-visible { outline: 1px solid var(--strong); outline-offset: -1px; }
+.animation-toolbar, .animation-key-fields { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.animation-toolbar label, .animation-key-fields label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.animation-toolbar input[type=number], .animation-key-fields input { width: 66px; }
+.animation-toolbar input[type=checkbox], .animation-key-fields input[type=checkbox] { min-height: auto; width: auto; }
+.animation-key-fields { gap: 8px; color: var(--muted); }
+.animation-graph-body { display: grid; grid-template-columns: 166px minmax(120px, 1fr); flex: 1; min-height: 100px; overflow: hidden; }
+.animation-channel-list { overflow: auto; border-right: 1px solid var(--line); padding: 5px; }
+.animation-channel-list button { display: block; width: 100%; text-align: left; margin-bottom: 3px; border-color: transparent; overflow: hidden; text-overflow: ellipsis; }
+.animation-channel-list button[aria-pressed=true] { border-color: var(--muted); background: var(--hover); }
+.animation-channel-list .channel-object { display: block; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.animation-channel-list .channel-color { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; }
+.animation-graph-surface { min-height: 100px; min-width: 0; position: relative; overflow: hidden; }
+.animation-graph-surface svg, .animation-dope-scroll svg { display: block; width: 100%; touch-action: none; user-select: none; background: var(--bg); }
+.animation-graph-surface svg { height: 100%; }
+.animation-editor .animation-grid { stroke: var(--line); stroke-width: .6; }
+.animation-editor .animation-axis-label { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.animation-editor .animation-playhead { stroke: #e49555; stroke-width: 1; pointer-events: none; }
+.animation-editor .animation-key { stroke: var(--bg); stroke-width: 1.3; cursor: move; }
+.animation-editor .animation-key.selected { stroke: #f5c76d; stroke-width: 2; }
+.animation-editor .animation-tangent-line { stroke: #c9aa6f; stroke-width: 1; }
+.animation-editor .animation-tangent-handle { fill: var(--bg); stroke: #d9b56d; stroke-width: 1.5; cursor: crosshair; }
+.animation-editor .animation-box { stroke: var(--text); stroke-width: 1; fill: var(--text); fill-opacity: .08; pointer-events: none; }
+.animation-status { min-height: 26px; padding: 6px 9px; color: var(--muted); border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.animation-status.error { color: #e78376; }
+.animation-empty { padding: 12px 8px; color: var(--muted); line-height: 1.5; }
+.animation-dope-scroll { flex: 1; overflow: auto; min-height: 100px; }
+.animation-dope-scroll .dope-row { fill: var(--panel); }
+.animation-dope-scroll .dope-row:nth-child(2n) { fill: var(--bg); }
+.animation-dope-scroll .dope-name { fill: var(--text); font-size: 10px; pointer-events: none; }
+@media (max-width: 650px) { .animation-graph-body { grid-template-columns: 126px minmax(120px, 1fr); } }

@@ -13,7 +13,7 @@ A browser-based Gaussian splat animation engine and editor, built on **Three.js 
 
 Musubi Motion treats Gaussian splats as named, selectable scene objects with their own transforms and asset references. The goal is a focused browser workspace for composing and animating splat scenes, with familiar Maya-style controls and a minimal monochrome interface.
 
-**Current status: working editor prototype.** Scene composition, transform editing, portable scene files, and a turntable preview are implemented. Keyframe tracks, curve editing, skeletal animation, and per-splat deformation remain future work. The renderer uses WebGL2; WebGPU is not implemented.
+**Current status: working editor prototype.** The editor supports transform and joint animation, a Graph Editor and Dope Sheet, Set Driven Keys, FK joints, CCD inverse kinematics, constraints, splat binding, and elasticity. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU, polygon modeling, and particle FX are not implemented.
 
 **Topics:** `gaussian-splatting` · `3d-animation` · `3d-editor` · `threejs` · `sparkjs` · `webgl2` · `typescript` · `dockview`
 
@@ -21,12 +21,18 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 
 - **Splat scenes:** import local PLY, SPZ, SPLAT, KSPLAT, and SOG files; add multiple named objects; start with the included grayscale knot. Format variants depend on Spark's decoder support.
 - **Selection and transforms:** click or marquee selection, an Outliner, editable position/rotation/scale properties, and full X/Y/Z transform gizmos, including non-uniform scaling.
-- **Customizable workspace:** drag Dockview panel tabs to dock beside other panels or combine them as tabs. Resize panels with their dividers. Properties starts beside Outliner on desktop.
+- **Customizable workspace:** General, Animation, and Rigging presets arrange relevant panels. Drag Dockview tabs to split or combine panels, resize with dividers, and reopen editors from their menus. Layouts are remembered in local browser storage.
 - **Floating tools:** icon-only selection and transform controls sit inside the viewport. Unlock the panel to move it by its grip, then lock it in place.
-- **Monochrome UI:** light/dark themes, Web Awesome menus and fields, and Lucide icons. The theme is remembered locally; custom panel arrangements currently last for the session.
-- **Undo/redo:** the Edit menu and keyboard shortcuts cover imports, names, numeric properties, and completed gizmo drags. History retains up to 100 edits without copying splat buffers.
-- **Turntable preview:** play/pause, rewind, loop, and scrub a 12-second rotation preview. Authored transforms remain separate from playback.
-- **Portable scenes:** save and reopen `.msb` packages with scene data and source splat assets.
+- **Monochrome UI:** light/dark themes, Web Awesome menus and fields, and Lucide icons. Theme and panel layouts are remembered locally.
+- **Animation:** frame-based timeline, configurable frame rate and playback range, looping, manual keys with **S**, and auto-key for channels that already have keys. Transform and joint curves evaluate from the requested frame without writing playback into scene history.
+- **Channel key controls:** key individual Properties channels with their diamonds and author stepped visibility with the Visible checkbox. Indicators distinguish unanimated channels, animated channels, and keys at the current frame.
+- **Graph Editor and Dope Sheet:** dockable curve/channel editing, key multiselection and box selection, Bezier tangent handles, linear/stepped interpolation, tangent presets, copy/paste, retiming, and time scaling.
+- **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
+- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, world-space targets, FK/IK blend, and matching a target to the current FK endpoint.
+- **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, scale, and parent relationships with optional maintain-offset. Each output group has one source; dependency cycles are rejected.
+- **Undo/redo:** editing operations use shared document commands. History retains up to 100 edits without copying splat buffers; playback and scrubbing create no history entries.
+- **Turntable preview:** the Timeline's separate playback mode retains the original 12-second rotation preview.
+- **Portable scenes:** save and reopen `.msb` packages with source assets, joints, binding/elasticity settings, animation curves, driven relationships, IK handles, and constraints.
 
 Splat files are decoded in the browser, not uploaded to a server. The interface and included demo are grayscale; transform gizmos and the red X / blue Z grid origin lines retain axis colors. Imported splats retain their source colors.
 
@@ -68,8 +74,15 @@ Open the URL printed by Vite.
 | Redo | Ctrl+Y or Ctrl+Shift+Z; Maya-style Shift+Z outside text fields |
 | Save / Save as | Ctrl+S / Ctrl+Shift+S |
 | Open scene | Ctrl+O |
+| Set keys on selected objects/joints | S, outside text fields and curve-editor focus |
+| Play / pause | Space |
+| Previous / next frame | , / . |
 
 Command can replace Ctrl for the application shortcuts on macOS. Text fields retain native text undo. Enter or leaving a property field commits its value. Gizmos and properties edit one selected object at a time. Marquee selection includes objects with splat centers inside the rectangle.
+
+Use **Animation → Graph Editor / Dope Sheet / Set Driven Key** for dedicated animation tools. The Graph Editor has its own shortcuts when focused: **S** inserts a key on its active curve, **F** frames keys, and arrow keys retime selected keys. See [the animation guide](docs/ANIMATION.md) for workflows, tangent behavior, and current limitations.
+
+Open [examples/animation-study.msb](examples/animation-study.msb) for a procedural bounce/spin animation, a driven rotation, and a keyed three-joint FK chain. Rebuild it with `node scripts/create-animation-example.mjs`.
 
 Drag a **panel title tab** toward another panel's edge to split the space, or toward its center to combine them as tabs. The floating tool panel is separate: click its lock icon to unlock it, then drag the grip. An unlocked grip also supports arrow-key nudging, with Shift for larger steps.
 
@@ -77,7 +90,7 @@ Drag a **panel title tab** toward another panel's edge to split the space, or to
 
 Use **File → New scene / Open scene / Save / Save as**. An asterisk beside the scene name indicates unsaved edits.
 
-An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, the viewport camera, and the timeline position. It does not store undo history or the UI panel arrangement.
+An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, joints and binding, elasticity, animation/SDK/IK data, constraints, the viewport camera, and the timeline position. It does not store undo history, unkeyed animation previews, or the UI panel arrangement.
 
 Supported browsers can save back to a selected file through native file pickers. Other browsers download an `.msb` copy. New/Open asks before discarding unsaved edits; opening stages the scene before replacing the current one. Undo history starts fresh after opening.
 
@@ -88,6 +101,7 @@ Packages are built in memory and currently capped at **512 MiB**. Autosave and r
 | Layer | Foundation |
 | --- | --- |
 | Scene, camera, and rendering integration | Three.js |
+| Cubic curve primitives and CCD IK solver | Existing Three.js dependency, MIT licensed |
 | Gaussian splat rendering and decoding | Spark 2.4, using WebGL2 |
 | Docking and resizable panels | Dockview |
 | Menus, dialogs, and property controls | Web Awesome web components |
@@ -100,14 +114,19 @@ The document model follows Maya's transform/shape organization with stable IDs a
 
 Non-uniform scaling uses Spark covariance rendering with extended-precision splats. Scale values must remain positive, with a minimum of 0.001. See [SCALING-EXPERIMENT.md](SCALING-EXPERIMENT.md) for validation and limitations, and [SCENE-ARCHITECTURE.md](SCENE-ARCHITECTURE.md) for the document model.
 
-## Roadmap
+## Remaining priorities
 
-- Expose grouping and parenting tools for scene organization.
-- Add editable keyframe tracks and deterministic playback for objects and cameras.
-- Add per-splat deformation and validate covariance, bounds, and overlap sorting during animation.
-- Explore skeletal or structured deformation after validating the basic animation workflow.
-- Measure load time, frame time, and memory across representative scenes and devices.
-- Add recovery snapshots and more efficient saving for large projects.
+1. Pole vectors, analytic two-bone IK, joint orientation/limits, and complete IK/FK matching and baking.
+2. Aim constraints, multi-source constraint weights, and curve-based rig controls.
+3. Influence management, editable normalized skin weights, weight painting, and joint/pose mirroring.
+4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.
+5. Editable polygon topology, component selection, extrusion/inset/bevel/subdivision, materials, and mesh import/export.
+6. Deterministic particle emitters, fields, lifetime properties, and an FX workspace.
+7. Object grouping/reparenting tools, recovery snapshots, and saving strategies for large projects.
+
+Only the General, Animation, and Rigging workspace presets exist today. Modeling and FX workspaces will accompany functioning tools. Existing disabled rigging entries describe work still to come; they are not implemented commands.
+
+Local CPU measurements were approximately **0.56 ms for 1,000 animation tracks** and **2.62 ms for 20 IK chains**. These development measurements exclude WebGL/Spark rendering, binding, elasticity, editor drawing, and large asset loads; they are not a browser frame-rate or production performance guarantee. See [the animation guide](docs/ANIMATION.md#performance-and-verification).
 
 Capture reconstruction, model training, and recorded 4D splat playback are outside the current scope. A future WebGPU backend needs a compatible splat rendering path; switching the Three.js renderer alone is insufficient.
 

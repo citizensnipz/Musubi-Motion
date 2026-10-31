@@ -7,6 +7,7 @@ import { posedSelection } from "./splat-selection";
 export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNode["binding"]>, elasticity?: SplatShapeNode["elasticity"], joints: Joint[] = []) {
  const skin = new SplatSkinning({mesh, numSplats: mesh.numSplats + (elasticity?.budget ?? 0), numBones:binding.jointIds.length, mode:SplatSkinningMode.LINEAR_BLEND});
  const rests = binding.restMatrices.map(m => new THREE.Matrix4().fromArray(m));
+ const inverseRests = rests.map(m => m.clone().invert());
  const centers = rests.map(m => new THREE.Vector3().setFromMatrixPosition(m));
  rests.forEach((_,i)=>skin.setRestMatrix(i,new THREE.Matrix4()));
  mesh.forEachSplat((index, center)=>{
@@ -25,13 +26,16 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
   const inverse = mesh.matrixWorld.clone().invert();
   const currentMatrices = binding.jointIds.map((id,i)=>{ const matrix=boneMatrix(id); return matrix ? inverse.clone().multiply(matrix) : rests[i].clone(); });
   elastic?.update(currentMatrices);
-  transforms=currentMatrices.map((m,i)=>m.clone().multiply(rests[i].clone().invert()));
+  transforms=currentMatrices.map((m,i)=>m.clone().multiply(inverseRests[i]));
   const next=transforms.map(m=>m.elements.join(",")).join(";")+":"+mesh.extSplats?.numSplats;
   if(next!==signature){selection=undefined;signature=next;}
-  binding.jointIds.forEach((id,i)=>{
-   const current = boneMatrix(id);
-   skin.setBoneMatrix(i,current ? inverse.clone().multiply(current).multiply(rests[i].clone().invert()) : new THREE.Matrix4());
-  });
+  transforms.forEach((matrix,i)=>skin.setBoneMatrix(i,matrix));
   skin.updateBones();
+ }, conservativeBounds(bounds:THREE.Box3) {
+  // A weighted point lies within the union of its positive-weight transformed
+  // bounds. This avoids reading every splat just to draw a playback selection box.
+  const result=new THREE.Box3();
+  for(const matrix of transforms)result.union(bounds.clone().applyMatrix4(matrix));
+  return result;
  }, selection() { return selection??=posedSelection(mesh,skin,transforms); }, dispose() { elastic?.dispose(); mesh.skinning=null; mesh.updateGenerator(); skin.skinTexture.dispose();skin.boneTexture.dispose(); } };
 }

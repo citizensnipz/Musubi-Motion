@@ -66,6 +66,10 @@ export function validateScene(value: unknown): SceneDocument {
     fail("Unsupported scene units or axis.");
   const nodes = record(doc.nodes),
     assets = record(doc.assets);
+  for (const joint of (doc.joints ?? []) as import("./skeleton.ts").Joint[]) {
+    id(joint.id);
+    if (Object.hasOwn(nodes, joint.id)) fail("Joint IDs must not collide with scene node IDs.");
+  }
   if (
     Object.keys(nodes).length > MAX_NODES ||
     Object.keys(assets).length > MAX_NODES

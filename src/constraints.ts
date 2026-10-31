@@ -25,7 +25,7 @@ const validId = (value: unknown): value is string => typeof value === "string" &
 function nodesFor(doc: SceneDocument): Map<string, Node> {
   const nodes = new Map<string, Node>(Object.values(doc.nodes).filter(node => node.type === "transform").map(node => [node.id, node]));
   for (const joint of doc.joints ?? []) {
-    if (nodes.has(joint.id)) throw Error("Joint and object IDs must be distinct.");
+    if (Object.hasOwn(doc.nodes, joint.id) || nodes.has(joint.id)) throw Error("Joint and object IDs must be distinct.");
     nodes.set(joint.id, joint);
   }
   return nodes;

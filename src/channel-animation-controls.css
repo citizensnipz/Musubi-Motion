@@ -1,0 +1,19 @@
+.property-axis-row.channel-key-row { gap: 4px; }
+.channel-key-button {
+  flex: 0 0 22px; width: 22px; height: 25px; padding: 0; border: 1px solid transparent;
+  border-radius: 3px; background: transparent; color: var(--muted); font-size: 14px;
+  line-height: 1; cursor: pointer;
+}
+.channel-key-button:hover:not(:disabled), .channel-key-button:focus-visible { background: var(--hover); border-color: var(--line); }
+.channel-key-button:focus-visible { outline: 1px solid var(--strong); outline-offset: 1px; }
+.channel-key-button[data-key-state="animated"] { color: var(--text); }
+.channel-key-button[data-key-state="keyed"] { color: #c98c31; }
+:root[data-theme="dark"] .channel-key-button[data-key-state="keyed"] { color: #efbb64; }
+.channel-key-button:disabled { cursor: default; opacity: .35; }
+.channel-visibility-control { display: flex; align-items: center; gap: 5px; margin-top: 14px; font-size: 10px; color: var(--text); }
+.channel-visibility-control label { display: inline-flex; align-items: center; gap: 5px; flex: 1; cursor: pointer; }
+.channel-visibility-control input { margin: 0; accent-color: var(--text); }
+.channel-key-status { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.channel-key-status:empty { display: none; }
+.channel-key-status[data-error="true"] { color: #ce756a; }
+.channel-key-legend { margin: 8px 0 0; font-size: 10px; line-height: 1.4; color: var(--muted); }
