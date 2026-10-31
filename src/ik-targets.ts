@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { ikChain, jointWorldMatrices, type IKHandle } from "./ik.ts";
+import { getIKTargetPoints, ikChain, jointWorldMatrices, type IKHandle, type IKTargetPoints } from "./ik.ts";
 import type { AnimationPose } from "./animation.ts";
 import type { SceneDocument } from "./scene-document.ts";
 
@@ -76,10 +76,13 @@ export function createIKTargets(world: THREE.Scene) {
     if(selected&&!retained.has(selected))selected=undefined;
     // The IK helper reuses its bone hierarchy; only fresh endpoint matrices are needed.
     const matrices = handles.length ? jointWorldMatrices(doc,poses) : undefined;
+    let points = new Map<string, IKTargetPoints>();
+    try { points = getIKTargetPoints(doc, poses); } catch { /* Keep stored markers visible after a reported evaluation error. */ }
     for(const handle of handles){
       const kinds: IKControlKind[] = handle.solver === "two-bone" && handle.poleTarget ? ["target","pole"] : ["target"];
       for(const kind of kinds){
-      const controlKey = key(handle.id,kind), point = kind === "pole" ? handle.poleTarget! : handle.target;
+      const resolved = points.get(handle.id);
+      const controlKey = key(handle.id,kind), point = kind === "pole" ? resolved?.poleTarget ?? handle.poleTarget! : resolved?.target ?? handle.target;
       const target = targets.get(controlKey) ?? create(handle,kind);
       target.object.position.fromArray(point);
       target.object.name = `${handle.name} · ${kind} · ${handle.enabled ? `IK ${Math.round(handle.blend*100)}%` : "disabled"}`;

@@ -1,7 +1,8 @@
 import { Vector3 } from "three";
 import type { AnimationPose } from "./animation.ts";
-import { createIKHandle, defaultPoleTarget, deleteIKHandle, ikChain, jointWorldMatrices, matchIKToFK, matchFKToIK, updateIKHandle, type IKHandle } from "./ik.ts";
-import type { Vec3 } from "./scene-document.ts";
+import { createIKHandle, defaultPoleTarget, deleteIKHandle, getIKTargetPoints, ikChain, jointWorldMatrices, matchIKToFK, matchFKToIK, updateIKHandle, type IKHandle } from "./ik.ts";
+import { createIKControl, matchIKControlsToFKAndKey, setIKControl } from "./ik-controls.ts";
+import { transformNodes, type Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
 type Options = {
@@ -9,10 +10,10 @@ type Options = {
   getPoses: () => Map<string, AnimationPose>;
   getFrame: () => number;
   canKey?: () => boolean;
-  /** Solved joint poses after IK and before the constraint pass. */
+  /** Solved joint poses after IK and before remaining output constraints. */
   getSolvedPoses: () => Map<string, AnimationPose>;
   getSelection: () => string[];
-  /** Time/driven/preview poses before the IK pass; optional for older hosts. */
+  /** Time/driven/preview poses plus prerequisite constraints, before IK. */
   getFKPoses?: () => Map<string, AnimationPose>;
 };
 
@@ -51,7 +52,7 @@ export function createIKPanel(store: SceneStore, options: Options) {
   }
   function commitField(input: HTMLInputElement, action: () => void) {
     let cancel = false;
-    input.addEventListener("blur", () => { if (!cancel) run(action); cancel = false; });
+    input.addEventListener("blur", () => { if (!cancel && !input.readOnly) run(action); cancel = false; });
     input.addEventListener("keydown", event => {
       if (event.key === "Enter") { event.preventDefault(); input.blur(); }
       if (event.key === "Escape") { event.preventDefault(); cancel = true; input.blur(); status.textContent = ""; refresh(); }
@@ -103,6 +104,24 @@ export function createIKPanel(store: SceneStore, options: Options) {
   const targetRow = document.createElement("div"); targetRow.className = "ik-target";
   targets.forEach((input, index) => targetRow.append(label(`Target ${"XYZ"[index]}`, input)));
   const targetHeading = document.createElement("p"); targetHeading.textContent = "World-space target";
+  const targetControl = select("IK target control"), poleControl = select("IK pole control");
+  const maintainOffset = document.createElement("input"); maintainOffset.type = "checkbox"; maintainOffset.checked = true;
+  const offsetLabel = label("Keep target position when linking", maintainOffset); offsetLabel.className = "ik-enabled";
+  function linkControl(kind: "target" | "pole", picker: HTMLSelectElement) {
+    run(() => setIKControl(store, selectedHandleId, kind, picker.value || undefined, maintainOffset.checked, options.getPoses()),
+      picker.value ? "Control linked. Animate its transform with the timeline or Graph Editor." : "Control unlinked; its current target position is retained.");
+    refresh();
+  }
+  targetControl.onchange = () => linkControl("target", targetControl);
+  poleControl.onchange = () => linkControl("pole", poleControl);
+  function createControl(kind: "target" | "pole") {
+    run(() => {
+      const id = createIKControl(store, selectedHandleId, kind, options.getPoses());
+      element.dispatchEvent(new CustomEvent<string>("ik-control-created", { detail: id }));
+    }, "Curve control created. Move it in the viewport and key its transform with S.");
+  }
+  const createTarget = button("Create target control", () => createControl("target"));
+  const createPole = button("Create pole control", () => createControl("pole"));
   const poleControls = document.createElement("div");
   const poleHeading = document.createElement("p"); poleHeading.textContent = "World-space pole target";
   const poleRow = document.createElement("div"); poleRow.className = "ik-target";
@@ -112,8 +131,8 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (selectedHandleId && current()?.solver === "two-bone" && options.available())
       element.dispatchEvent(new CustomEvent<string>("ik-pole-select", { detail: selectedHandleId }));
   });
-  const poleHelp = document.createElement("p"); poleHelp.textContent = "The static world-space pole determines the two-bone chain's bend plane. Move it beside the root-to-target line to choose the elbow or knee direction. Pole targets are saved with undo but cannot be animated yet.";
-  poleControls.append(poleHeading, poleRow, selectPole, poleHelp);
+  const poleHelp = document.createElement("p"); poleHelp.textContent = "The pole chooses the elbow or knee direction. Link a control to animate it; the linked world coordinates are read-only here.";
+  poleControls.append(poleHeading, label("Pole control", poleControl), createPole, poleRow, selectPole, poleHelp);
   const blendRow = document.createElement("div"); blendRow.className = "ik-blend";
   const blendSlider = document.createElement("input"); blendSlider.type = "range"; blendSlider.min = "0"; blendSlider.max = "1"; blendSlider.step = "0.01"; blendSlider.setAttribute("aria-label", "IK FK blend slider");
   const blend = number("IK FK blend", "0.01"); blend.min = "0"; blend.max = "1"; blendRow.append(blendSlider, blend);
@@ -122,8 +141,11 @@ export function createIKPanel(store: SceneStore, options: Options) {
   const iterationsLabel = label("Solver iterations", iterations);
   const match = button(options.getFKPoses ? "Match target to FK" : "Match target to authored FK", () => run(() => {
     if (!selectedHandleId) return;
-    matchIKToFK(store, selectedHandleId, options.getFKPoses?.());
-  }, "Target matched to the FK end joint."));
+    if (current()?.targetControl || current()?.poleControl) {
+      if (options.canKey && !options.canKey()) throw Error("Switch the timeline to Animation mode before matching and keying controls.");
+      matchIKControlsToFKAndKey(store, selectedHandleId, options.getFrame(), options.getFKPoses?.());
+    } else matchIKToFK(store, selectedHandleId, options.getFKPoses?.());
+  }, "Targets matched to FK. Linked controls receive position keys at the current frame."));
   const matchFK = button("Match FK to IK and key", () => run(() => {
     if (options.canKey && !options.canKey()) throw Error("Switch the timeline to Animation mode before matching and keying FK.");
     const handle = current();
@@ -141,9 +163,9 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-target-select", { detail: selectedHandleId }));
   });
   const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, matchFK, remove);
-  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, label("Solver", solver), targetHeading, targetRow, poleControls, blendLabel, blendRow, iterationsLabel, actions, matchHelp);
+  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, label("Solver", solver), offsetLabel, targetHeading, label("Target control", targetControl), createTarget, targetRow, poleControls, blendLabel, blendRow, iterationsLabel, actions, matchHelp);
   const empty = document.createElement("p"); empty.className = "ik-empty"; empty.textContent = "No IK handles. Create a joint chain, then choose its root and end above.";
-  const note = document.createElement("p"); note.textContent = "CCD solves multi-joint chains iteratively. Analytic two-bone IK requires exactly three joints and uses a pole target to choose its bend plane. Both preserve bone lengths; unreachable targets are limited by the chain's reach. Joint limits are not supported; overlapping chains are rejected. Targets, poles, and solver settings are saved but are not yet keyframe channels.";
+  const note = document.createElement("p"); note.textContent = "Animate targets and poles by linking ordinary transforms or creating curve controls. Controls can use keyframes, Set Driven Key, and constraints. Feedback through an IK chain is rejected. Blend and solver settings remain static. Both solvers preserve bone lengths; unreachable targets stop at the chain's reach. Joint limits are not supported.";
   element.append(details, empty, status, note);
 
   function current(): IKHandle | undefined { return store.getState().document.ikHandles?.find(handle => handle.id === selectedHandleId); }
@@ -188,12 +210,17 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (descendants.some(joint => joint.id === preferred)) end.value = preferred;
     if (!descendants.length) end.add(new Option("No descendant joints", ""));
   }
-  let jointSignature = "", handleSignature = "", displayedHandleId = "";
+  let jointSignature = "", handleSignature = "", controlSignature = "", displayedHandleId = "";
   function setValue(input: HTMLInputElement, value: string, force: boolean) {
-    if (force || document.activeElement !== input) input.value = value;
+    if (force || input.readOnly || document.activeElement !== input) input.value = value;
   }
   function refresh() {
     const doc = store.getState().document, available = options.available();
+    const objects = transformNodes(doc), nextControlSignature = JSON.stringify(objects.map(node => [node.id, node.name]));
+    if (nextControlSignature !== controlSignature) {
+      controlSignature = nextControlSignature;
+      for (const picker of [targetControl, poleControl]) picker.replaceChildren(new Option("None · static target", ""), ...objects.map(node => new Option(node.name, node.id)));
+    }
     const nextJointSignature = JSON.stringify((doc.joints ?? []).map(joint => [joint.id, joint.name, joint.parentId]));
     if (nextJointSignature !== jointSignature) {
       jointSignature = nextJointSignature;
@@ -228,14 +255,22 @@ export function createIKPanel(store: SceneStore, options: Options) {
       ? "Switch the timeline to Animation mode to match and key FK."
       : "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
     if (!selected) return;
+    targetControl.value = selected.targetControl?.objectId ?? ""; poleControl.value = selected.poleControl?.objectId ?? "";
+    const linked = !!(selected.targetControl || selected.poleControl);
+    match.textContent = linked ? "Match controls to FK and key" : options.getFKPoses ? "Match target to FK" : "Match target to authored FK";
+    match.disabled = !available || (linked && options.canKey !== undefined && !options.canKey());
+    move.textContent = selected.targetControl ? "Move target control" : "Move target in viewport";
+    selectPole.textContent = selected.poleControl ? "Move pole control" : "Select pole target";
     const analytic = selected.solver === "two-bone";
     solver.value = selected.solver ?? "ccd";
     poleControls.hidden = !analytic; iterationsLabel.hidden = analytic; iterations.disabled = !available || analytic;
     for (const input of poles) input.disabled = !available || !analytic;
     selectPole.disabled = !available || !analytic;
     setValue(name, selected.name, force);
-    targets.forEach((input, index) => setValue(input, String(Number(selected.target[index].toFixed(6))), force));
-    poles.forEach((input, index) => setValue(input, selected.poleTarget ? String(Number(selected.poleTarget[index].toFixed(6))) : "", force));
+    let points: { target: Vec3; poleTarget?: Vec3 } = { target: selected.target, poleTarget: selected.poleTarget };
+    try { points = getIKTargetPoints(doc, options.getPoses()).get(selected.id)!; } catch { /* The viewport reports evaluation errors. */ }
+    targets.forEach((input, index) => { input.readOnly = !!selected.targetControl; setValue(input, String(Number(points.target[index].toFixed(6))), force); });
+    poles.forEach((input, index) => { input.readOnly = !!selected.poleControl; setValue(input, points.poleTarget ? String(Number(points.poleTarget[index].toFixed(6))) : "", force); });
     if (force || (document.activeElement !== blend && document.activeElement !== blendSlider)) { blend.value = String(selected.blend); blendSlider.value = String(selected.blend); }
     setValue(iterations, String(selected.iterations), force); enabled.checked = selected.enabled;
     const names = new Map((doc.joints ?? []).map(joint => [joint.id, joint.name]));

@@ -1,8 +1,8 @@
 import type { Matrix4 } from "three";
 import { evaluateSceneAnimation } from "./animation.ts";
 import { evaluateDrivenKeys } from "./driven-keys.ts";
-import { evaluateIK } from "./ik.ts";
-import { constraintWorldMatrices, evaluateConstraints } from "./constraints.ts";
+import { evaluateRigStages } from "./ik.ts";
+import { constraintWorldMatrices } from "./constraints.ts";
 import type { SceneDocument } from "./scene-document.ts";
 
 const MAX_CACHED_FRAMES = 256;
@@ -23,8 +23,7 @@ export function createParticlePoseSampler(doc: SceneDocument): { worldAt(frame: 
       }
       const poses = evaluateSceneAnimation(doc, frame);
       evaluateDrivenKeys(doc, poses);
-      evaluateIK(doc, poses);
-      evaluateConstraints(doc, poses);
+      evaluateRigStages(doc, poses);
       const world = constraintWorldMatrices(doc, poses);
       // Failed historical evaluations never enter or evict entries from the cache.
       cache.set(frame, world);

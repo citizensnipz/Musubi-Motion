@@ -4,6 +4,63 @@ This records the local development checkpoint, not a production rollout or a
 cross-browser certification. No deployment, push, or paid service was introduced.
 The particle checkpoint adds one pinned package, described below.
 
+## Animated IK control checkpoint
+
+The final local check passed **439 tests across 46 files**, TypeScript, and the
+Vite production build. The existing bundle-size warning remains. This checkpoint
+adds no dependencies. Its browser build was `index-B7anngP4.js`.
+
+Target and pole links use ordinary object transforms with world-space offsets.
+Tests cover animated and SDK inputs, constrained controls and FK ancestors,
+stable prerequisite phases across disabled/blend-zero handles, feedback rejection,
+atomic evaluation failure, matching, deletion, marker positions, and fractional
+historical particle sampling. Matching additionally rejects new control keys that
+would change the prepared FK chain through a driven relationship, including a
+rotation change that does not move the endpoint.
+
+Browser checks used the local Chromium preview at 1600 × 1000:
+
+- Frame 30 in the example showed target `[-1.2, 1.8, 0.5]` and pole
+  `[0.2, 0.1, 1.5]`. Focusing and leaving a read-only target field kept the scene
+  clean. A blur handler initially wrote ignored fallback values; it now skips
+  read-only inputs.
+- Dragging a linked target updated its displayed world coordinates while the
+  pointer was held, without creating history. Escape restored the original
+  target. A committed drag followed by **S** survived scrubbing and save/reopen;
+  the downloaded archive retained local X `0.17363740461834387` at frame 30,
+  producing world X `-0.6263625953816561` under its constrained parent.
+- A linked control rotated from 350° to 392.04595° during the drag and retained
+  that value on release. Undo returned to 350°, then to the original clean file.
+  The live preview now unwraps Euler angles before replacing the displayed pose.
+- Creating target and pole curve controls, unlinking, and both FK matching
+  actions each restored the original clean scene with one undo. Matching
+  controls placed the target at the FK endpoint `[-0.8, 2.5, 0]`; matching FK to
+  IK set the static blend to zero and created joint rotation keys.
+- Linking to Control Space with the offset option retained the target position;
+  disabling that option snapped it to `[-0.8, 0.1, 0]`. Matching a position-owned
+  constrained control was rejected without another history entry.
+- Deleting the selected linked target removed its link, kept world X
+  `-0.626363`, and made its numeric fields editable. Undo restored the control
+  and the clean save state. This exposed an early skeleton subscriber refreshing
+  a removed selection; selection access and panel refresh now filter deleted
+  IDs. Repeating deletion/undo on the rebuilt app produced **zero console errors**.
+
+`examples/animated-ik-controls.msb` is a 10,617-byte, 24 fps, 0–120-frame example
+with keyed target/pole controls and a constrained FK base/control space. Its
+generator verified 241 half-frame samples both before and after disk archive
+readback, with maximum endpoint error **1.64e-8 world units** and agreement with
+the historical particle sampler. The browser was left on this clean example.
+
+The Node 22.16.0 CPU benchmark used 50 warmups and 300 samples. Full time/SDK/rig
+evaluation measured 0.0448 ms median / 0.0944 ms p95 for one chain, and 0.2472 ms
+median / 0.4230 ms p95 for 16 chains. Historical cache misses for 16 chains measured
+0.281 ms median / 0.651 ms p95; cache hits were about 0.0001 ms. These exclude
+browser drawing, GPU work, skinning, and editor refresh and are not frame-rate
+guarantees. Reproduce with `node scripts/benchmark-ik-controls.mjs`.
+
+Blend and solver settings remain static. Cross-IK input dependencies, animated
+blend, joint limits/orientation, and range-based baking remain outside this slice.
+
 ## Automated checks
 
 | Checkpoint | Result |

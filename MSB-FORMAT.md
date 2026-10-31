@@ -66,7 +66,8 @@ application builds are not guaranteed to preserve extensions when resaving.
 | Animation track | `id`, `targetId`, `channel`, ordered `keys` |
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
 | `drivenKeys` | Relationship `id`, `driver` and `driven` property references, and curve `keys` |
-| `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend` |
+| `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend`, optional `solver`, `poleTarget`, `targetControl`, `poleControl` |
+| IK control link | Existing transform `objectId`, XYZ world-space `offset`; resolved point = evaluated transform world origin + offset |
 | `constraints` | `id`, `name`, `type`, `sourceId`, `targetId`, `enabled`, `maintainOffset`, stored `offset`, optional `aimAxis`/`worldUpAxis` |
 
 Each transform owns exactly one splat, controller curve, polygon mesh, or particle emitter shape. Curve shapes
@@ -155,6 +156,26 @@ controlled by another handle's ancestor. Deleting targets removes affected
 animation/driven relationships; deleting relevant joints also removes affected
 IK handles. History restores those records together on undo.
 
+An omitted `solver` means legacy CCD; `two-bone` requires exactly three joints and
+a finite `poleTarget`. Optional `targetControl`/`poleControl` links animate those
+points through existing transform tracks or driven relationships, without changing
+the archive version. Link IDs must name transforms, not shapes or joints; offsets
+and resolved IK coordinates are finite XYZ values within ±1,000,000. Literal
+`target`/`poleTarget` values remain fallback snapshots. Binding or creating a
+control captures the current point, and unlinking captures the current resolved
+point. Deleting a linked control keeps the handle and removes the link: viewport
+deletion freezes the evaluated point; pure document deletion without evaluated
+poses uses the saved literal fallback. Undo restores the linked records together.
+
+Every configured link participates in dependency validation, including disabled
+handles, zero blend, disabled constraints, and pole links retained on CCD handles.
+The prerequisite closure follows linked controls, hierarchy ancestors, constraint
+sources, and linked-chain root ancestors. Feedback through any IK chain is
+rejected. Constraints in this closure run before IK; remaining constraints run
+after it. SDK reads its pre-IK channels. Scenes without links retain the legacy
+animation → SDK → IK → constraints order. Blend and solver properties are static;
+matching adds ordinary current-frame position or rotation keys, not blend curves.
+
 Constraint types are `point`, `orient`, `aim`, `scale`, and `parent`. Offsets contain
 position and scale XYZ tuples plus a normalized XYZW rotation quaternion.
 Offsets and endpoints are captured at creation; enabled/name may be changed
@@ -180,8 +201,10 @@ can animate into unsupported transforms. Orient/aim/parent/scale require
 uniformly scaled driven parents; orient/parent/scale require nonsheared sources.
 Aim reads only the source position. Point permits arbitrary finite invertible
 parents. Non-finite values and singular driven parents are rejected. A runtime
-failure stops playback with a notice and leaves the underlying pre-constraint
-pose intact. This check does not remove the saved constraint; it can be disabled
+failure stops playback with a notice and leaves the input time/preview/SDK pose
+intact. Prerequisite constraints, IK, and remaining constraints form one atomic
+rig stage, so a failure retains none of its partial results. This check does not
+remove the saved constraint; it can be disabled
 or deleted to repair the scene.
 
 The loader validates format versions, IDs, references, unique sibling names,
@@ -221,3 +244,9 @@ The animation and driven-key suites additionally cover extended metadata
 roundtrips, malformed keys/dependencies, and deletion cleanup. A representative
 portable scene is included at [examples/animation-study.msb](examples/animation-study.msb);
 its source is [scripts/create-animation-example.mjs](scripts/create-animation-example.mjs).
+
+[examples/animated-ik-controls.msb](examples/animated-ik-controls.msb) exercises
+linked target/pole transforms, their position curves, and constrained input parents.
+Its [generator](scripts/create-ik-controls-example.mjs) verifies 241 half-frame
+samples before and after archive readback with endpoint error below 1.7 × 10⁻⁸
+scene units, and checks the shared historical pose sampler.

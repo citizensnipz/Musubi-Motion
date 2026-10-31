@@ -23,7 +23,8 @@ SceneDocument v1
   animation?: fps, start, end, loop, tracks
     track: ID, targetId, channel, keys
   drivenKeys?: driver property, driven property, response curve
-  ikHandles?: root/end joint IDs, world target, enabled, iterations, blend
+  ikHandles?: root/end joint IDs, world target, enabled, iterations, blend,
+    optional solver/poleTarget, targetControl/poleControl { objectId, offset }
   constraints?: source/target IDs, type, enabled, maintain-offset, stored offsets
 ```
 
@@ -115,9 +116,11 @@ UI / keyboard → shared commands → immutable SceneDocument → undo history
                                       ↓
                    driven-key curves in property dependency order
                                       ↓
+                   prerequisite constraints for linked IK inputs
+                                      ↓
                           IK solution blended with FK
                                       ↓
-                    constraints in hierarchy/dependency order
+                 remaining constraints in hierarchy/dependency order
                                       ↓
              Three.js transforms / joints → Spark binding and elasticity
 ```
@@ -155,10 +158,12 @@ driver, while one driver may feed many outputs. A property-level topological
 order supports chained relationships and rejects cycles. A driven output cannot
 also have a time curve. Driven values use the same cubic evaluator as animation;
 their horizontal coordinate is the driver value rather than a frame.
+SDK still reads authored/time/preview channels and earlier SDK outputs, before
+IK or constraints; a solved IK rotation is not a feedback driver.
 
 `src/ik.ts` adapts Three.js's MIT-licensed `CCDIKSolver` to the shared joint pose.
 IK affects the pose map before binding, leaving authored FK values intact.
-Handles have independent world-space targets and an FK/IK blend. Overlapping or
+Handles have world-space targets and an FK/IK blend. Overlapping or
 ancestor-dependent chains are rejected so array ordering cannot change the result.
 An optional `solver` field selects `two-bone` for exactly three joints; an absent
 field retains CCD compatibility. Analytic handles require a finite world-space
@@ -166,23 +171,55 @@ field retains CCD compatibility. Analytic handles require a finite world-space
 quaternions, preserving bone lengths and leaving the endpoint's local rotation
 unchanged. It adds deterministic fallback planes for singular inputs. Its license
 and pinned source revision ship in `public/licenses/ozz-animation.txt`.
-Endpoint and pole markers share the viewport adapter and translation history;
-the pole's line connects to the evaluated middle joint. Drag previews remain
-outside the document until release. Pole positions are static scene properties.
+Optional `targetControl` and `poleControl` records reference an ordinary transform
+by `objectId` with an XYZ world-space `offset`. The resolved point is its evaluated
+world origin plus that offset. Literal `target`/`poleTarget` values remain saved
+fallbacks; old files without links retain static targets and the original
+animation → SDK → IK → constraints order. Linked controls use ordinary transform
+curves, SDK, and supported constraints; there is no separate target-key schema.
 
-`matchFKToIK` captures post-IK, pre-constraint local rotations for every joint
-from root through end, unwraps them against the evaluated pre-IK FK pose, keys
+`src/ik-controls.ts` binds/unlinks controls, creates a circle target or arrow pole,
+and matches control positions with staged shared commands and one live undo step.
+Bind/create refresh the fallback point; unlink freezes the current resolved point.
+Deleting a control removes its link while retaining the handle: the viewport
+supplies current resolved points, while a pure deletion command without a pose
+uses the saved fallback. Undo restores nodes and links together.
+
+Endpoint and pole markers share the viewport adapter; the pole's line connects
+to the evaluated middle joint. Linked markers and Move buttons select the ordinary
+control object. Its gizmo previews drive the chain live without changing history
+until commit. Unlinked markers instead edit literal world points. Linked numeric
+target fields display resolved coordinates read-only.
+
+`src/ik-control-plan.ts` computes a cached prerequisite closure from every configured
+control link, its hierarchy and constraint sources, and the linked chain root's
+ancestors. The plan is structural: disabled handles/constraints, zero blend, and
+latent pole links on CCD handles still reserve dependencies. Reaching any IK
+chain through hierarchy or constraints rejects the configuration, including
+cross-chain feedback. Constraints on chain outputs remain post-IK; unrelated
+constraints keep their usual order. `evaluateRigStages` runs prerequisites → IK
+→ remaining constraints on a candidate pose map, publishing only after all stages
+succeed. A failure leaves the input time/preview/SDK pose intact; no partial IK
+or prerequisite result leaks through. Optional snapshots capture prepared FK and
+post-IK poses for matching. SDK is not reevaluated after either constraint phase.
+
+`matchFKToIK` captures local rotations after IK and before remaining constraints
+for every joint from root through end, unwraps them against the prepared FK pose, keys
 the current frame, and sets the handle blend to zero in one document command.
 It retains existing key settings and leaves position/scale channels untouched.
 SDK-owned joint rotations and enabled rotation constraints reject the command
 atomically. The target-to-FK command aligns the endpoint target and, for analytic
-handles, the pole with the displayed FK bend plane. Matching
-does not add a blend animation channel or bake a frame range; the stored blend
-change applies at every frame. Both matching operations use existing animation
-tracks and handle fields, with no additional archive schema.
+handles, the pole with the displayed FK bend plane. With linked controls,
+`matchIKControlsToFKAndKey` subtracts world offsets and converts desired origins
+through evaluated parent inverses before keying local position XYZ. Unlinked
+points are updated in the same transaction. Position SDK/Point/Parent ownership,
+incompatible target/pole requests on one object, or dependencies that would shift
+the keyed result reject the whole edit. Matching does not add a blend animation
+channel or bake a frame range; the stored blend change applies at every frame.
+Matching keys reuse the existing animation track schema.
 
-Matching stages the new keys and handle settings before touching live history,
-reevaluates time curves, SDK, and IK, and compares every chain joint's world
+FK rotation capture stages the new keys and handle settings before touching live history,
+reevaluates time curves, SDK, and the shared rig stages, and compares every chain joint's world
 position and orientation with the captured pose. It repeats that comparison
 after constraints. Unkeyed translation previews or rotation-driven feedback
 that would move the chain therefore reject the whole operation; benign point
@@ -191,17 +228,18 @@ constraints remain supported. Only a verified document enters the live store.
 `src/constraints.ts` provides point, orient, aim, scale, and parent constraints across
 objects and joints. It computes source world poses in dependency order, converts
 results into the driven node's parent space, and overrides the corresponding
-output groups after IK. Parent constraints affect position and rotation while
+output groups in their assigned prerequisite or post-IK phase. Parent constraints affect position and rotation while
 retaining target scale; their positional offset follows the source's full
 transform, including source scale. Point offsets stay in world space. Rotation
 offsets are normalized quaternions. One constraint owns each output group;
-hierarchy/constraint cycles, including disabled links, are rejected. SDK and IK
-are not reevaluated from constrained results. Joint scale constraints are not
+hierarchy/constraint cycles, including disabled links, are rejected. IK consumes
+its prerequisite results once; remaining constraints do not feed back into IK.
+Joint scale constraints are not
 supported. Orient/aim/parent/scale reject nonuniform driven-parent transforms.
 Orient/parent/scale reject sheared sources; aim reads only the source position.
 Point supports arbitrary finite invertible parents. Unsupported
 animated poses stop playback with an explicit notice. Evaluation is atomic, so
-the whole constraint stage falls back to its underlying pose when a check fails.
+the whole rig stage falls back to its input time/preview/SDK pose when a check fails.
 Disabled constraints remain editable for repair.
 
 Aim owns the target's rotation group and uses Three.js orientation math to
@@ -249,7 +287,8 @@ their source mesh's transform, so subtree deletion also removes the emitter.
 The scene-wide validator checks source references, parent links, duration at the
 current FPS, and particle budgets. Animation settings enforce those budgets too.
 
-`particle-pose-sampler.ts` evaluates authored animation→SDK→IK→constraints at
+`particle-pose-sampler.ts` evaluates authored animation → SDK → prerequisite
+constraints → IK → remaining constraints through the same shared rig stage at
 historical birth times, excluding viewport drafts and turntable rotation. Its
 cache is limited to 256 frames and approximately 32,768 matrices (one frame is
 always retained). `particle-simulation.ts` uses pinned Nebula integration and

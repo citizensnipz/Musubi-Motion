@@ -158,7 +158,8 @@ export function addSplat(
 }
 
 // Scene metadata is renderer-independent. Asset bytes are intentionally external.
-export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>): SceneDocument {
+export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>,
+  ikPoints?: ReadonlyMap<string, { target: Vec3; poleTarget?: Vec3 }>): SceneDocument {
   const removed = new Set(ids);
   const all = [...Object.values(doc.nodes), ...(doc.joints ?? [])];
   let changed = true;
@@ -170,10 +171,21 @@ export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>): Sce
   }
   const nodes = Object.fromEntries(Object.entries(doc.nodes).filter(([id]) => !removed.has(id)));
   const retainedAssets = new Set(Object.values(nodes).filter(n => n.type === "splatShape").map(n => n.assetId));
+  const freezePoint = (point: Vec3 | undefined, fallback: Vec3): Vec3 =>
+    point?.length === 3 && [0, 1, 2].every(i => Number.isFinite(point[i]) && Math.abs(point[i]) <= 1e6)
+      ? [...point] : [...fallback];
   return { ...doc, nodes, rootIds: doc.rootIds.filter(id => !removed.has(id)),
     ...(doc.animation ? { animation: { ...doc.animation, tracks: doc.animation.tracks.filter(t => !removed.has(t.targetId)) } } : {}),
     ...(doc.drivenKeys ? { drivenKeys: doc.drivenKeys.filter(r => !removed.has(r.driver.targetId) && !removed.has(r.driven.targetId)) } : {}),
-    ...(doc.ikHandles ? { ikHandles: doc.ikHandles.filter(h => !removed.has(h.rootId) && !removed.has(h.endId)) } : {}),
+    ...(doc.ikHandles ? { ikHandles: doc.ikHandles.filter(h => !removed.has(h.rootId) && !removed.has(h.endId)).map(handle => {
+      const unlinkTarget = handle.targetControl && removed.has(handle.targetControl.objectId);
+      const unlinkPole = handle.poleControl && removed.has(handle.poleControl.objectId);
+      if (!unlinkTarget && !unlinkPole) return handle;
+      const next = { ...handle }, points = ikPoints?.get(handle.id);
+      if (unlinkTarget) { next.target = freezePoint(points?.target, handle.target); delete next.targetControl; }
+      if (unlinkPole) { next.poleTarget = freezePoint(points?.poleTarget, handle.poleTarget ?? [0, 0, 0]); delete next.poleControl; }
+      return next;
+    }) } : {}),
     ...(doc.constraints ? { constraints: doc.constraints.filter(c => !removed.has(c.sourceId) && !removed.has(c.targetId)) } : {}),
     assets: Object.fromEntries(Object.entries(doc.assets).filter(([id]) => retainedAssets.has(id))),
     ...(doc.joints ? { joints: doc.joints.filter(j => !removed.has(j.id)) } : {}),

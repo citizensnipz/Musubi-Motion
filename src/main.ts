@@ -52,9 +52,10 @@ import { advanceFrame } from "./animation-playback.ts";
 import { mountAnimationEditors } from "./graph-editor.ts";
 import { createDrivenKeyPanel } from "./driven-key-panel.ts";
 import { prepareJointAnimationEdit, unwrapEuler } from "./animation-edit.ts";
-import { evaluateIK, validateIKHandles, updateIKHandle, deleteIKHandle } from "./ik.ts";
+import { evaluateRigStages, getIKTargetPoints, validateIKHandles, updateIKHandle, deleteIKHandle } from "./ik.ts";
+import { ikInputConstraintTargets } from "./ik-control-plan.ts";
 import { createIKPanel } from "./ik-panel.ts";
-import { evaluateConstraints, validateConstraints } from "./constraints.ts";
+import { validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
 import { PoseDrafts } from "./pose-drafts.ts";
@@ -240,6 +241,7 @@ async function start() {
     time = 0,
     previous = 0;
   let dragId: string | undefined;
+  let dragControlPose: { id: string; pose: AnimationPose } | undefined;
   const poseOverrides = new Map<string, AnimationPose>();
   const poseDrafts = new PoseDrafts();
   let evaluated = new Map<string, AnimationPose>();
@@ -283,7 +285,11 @@ async function start() {
   let evaluationError = "";
   const animationSettings = () => store.getState().document.animation ?? defaultAnimation();
   const getFrame = () => time * animationSettings().fps;
-  const allSelection = (): string[] => [...selected, ...skeleton.selectedIds];
+  const allSelection = (): string[] => {
+    const doc = store.getState().document, joints = new Set(doc.joints?.map(joint => joint.id));
+    // Earlier store subscribers can refresh panels before syncScene prunes selection.
+    return [...selected, ...skeleton.selectedIds].filter(id => doc.nodes[id]?.type === "transform" || joints.has(id));
+  };
   const currentPose = (id: string): AnimationPose => evaluated.get(id) ?? poseOverrides.get(id) ?? evaluateChannels(store.getState().document, id, getFrame());
   function prepareJointEdit(next: import("./skeleton.ts").Joint[], label: string): SceneDocument {
     const result = prepareJointAnimationEdit(store.getState().document, next, label, Math.round(getFrame()), timelinePanel?.autoKey ?? false, currentPose);
@@ -566,6 +572,8 @@ async function start() {
   selectionLabel.setAttribute("role", "status");
   viewport.append(selectionLabel);
   riggingPanel.addEventListener("joint-selection-change", () => {
+    const doc = store.getState().document;
+    selected = new Set([...selected].filter(id => doc.nodes[id]?.type === "transform"));
     if (skeleton.selectedIds.size) { selectedIKId = ""; ikTargets.setSelected(); }
     if (!dragId) { applyAnimationPose(); updateBindings(); }
     if (skeleton.selectedIds.size) {
@@ -651,7 +659,7 @@ async function start() {
     );
     const jointNodes = (doc.joints ?? []).map(j => ({...j, type: "transform" as const, joint: true,
       rotationOrder: "XYZ" as const, rotation: j.rotation ?? [0,0,0] as Vec3, scale: [1,1,1] as Vec3 }));
-    const ids = [...selected, ...skeleton.selectedIds];
+    const ids = allSelection();
     const curves = new Set(Object.values(doc.nodes).filter(node => node.type === "curveShape").map(node => node.parentId));
     const meshes = new Set(Object.values(doc.nodes).filter(node => node.type === "meshShape").map(node => node.parentId));
     const emitters = new Set(Object.values(doc.nodes).filter(node => node.type === "particleShape").map(node => node.parentId));
@@ -836,6 +844,12 @@ async function start() {
     setPlaying(false);
     skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting();
     modelingPanel?.stopEditing();
+    const handle = store.getState().document.ikHandles?.find(handle => handle.id === id);
+    const control = kind === "pole" ? handle?.poleControl : handle?.targetControl;
+    if (control) {
+      selectObjects([control.objectId]); ikPanel?.select(id); choose("translate");
+      element("view-ik-handles").click(); return;
+    }
     selected.clear(); skeleton.select("");
     selectedIKId = id; selectedIKKind = kind; ikTargets.setSelected(id, kind); ikPanel?.select(id);
     choose("translate"); refreshSelection();
@@ -843,6 +857,9 @@ async function start() {
   }
   ikPanel.element.addEventListener("ik-target-select", event => selectIKTarget((event as CustomEvent<string>).detail));
   ikPanel.element.addEventListener("ik-pole-select", event => selectIKTarget((event as CustomEvent<string>).detail, "pole"));
+  ikPanel.element.addEventListener("ik-control-created", event => {
+    modelingPanel?.stopEditing(); selectObjects([(event as CustomEvent<string>).detail]); choose("translate");
+  });
   workspace.registerPanel("constraints", "Constraints", constraintsPanel.element);
   workspace.registerPanel("controllers", "Curve Controls", controllerPanel.element);
   for (const control of Array.from(document.querySelectorAll<WaButton>("[data-rig-action]"))) {
@@ -1005,6 +1022,7 @@ async function start() {
       const joint = skeleton.selectedId === id ? skeleton.selectedBone : undefined;
       const jointPosition = joint?.position.toArray() as Vec3 | undefined;
       dragId = undefined;
+      dragControlPose = undefined;
       if (jointPosition) {
         if (!cancelDrag && currentMode==="rotate") skeleton.commitRotation();
         else if (!cancelDrag) skeleton.commitMove(id, jointPosition, currentPose(id).rotation);
@@ -1045,6 +1063,12 @@ async function start() {
       object = id ? runtime.get(id) : undefined;
     if (!object) return;
     object.root.scale.clampScalar(0.001, Number.MAX_VALUE);
+    if (dragId === id && ikInputConstraintTargets(store.getState().document).has(id!)) {
+      const previous = currentPose(id!), channels = readChannels(object.root);
+      channels.rotation = currentMode === "rotate" ? unwrapEuler(channels.rotation, previous.rotation) : previous.rotation;
+      dragControlPose = { id: id!, pose: { ...previous, ...channels } };
+      applyAnimationPose(); updateBindings(); ikPanel?.refresh();
+    }
     updatePanel(readChannels(object.root));
   });
   function abortDrag() {
@@ -1437,7 +1461,10 @@ async function start() {
       const ids = new Set([...selected, ...skeleton.selectedIds]);
       if (!ids.size) return;
       setPlaying(false);
-      store.setState({ document: deleteSceneItems(store.getState().document, ids), editLabel: "Delete selection" });
+      const doc = store.getState().document;
+      let targets: ReturnType<typeof getIKTargetPoints> | undefined;
+      try { targets = getIKTargetPoints(doc, evaluated); } catch { /* Invalid previews fall back to stored targets. */ }
+      store.setState({ document: deleteSceneItems(doc, ids, targets), editLabel: "Delete selection" });
       return;
     }
     if (key === "z") {
@@ -1484,7 +1511,7 @@ async function start() {
   }
   function applyAnimationPose() {
     const draggingTarget = !!selectedIKId && dragId === `ik:${selectedIKId}`;
-    if (dragId && !draggingTarget) return;
+    if (dragId && !draggingTarget && !dragControlPose) return;
     let doc = store.getState().document;
     if (draggingTarget) {
       const target = ikTargets.getObject(selectedIKId, selectedIKKind)!.position.toArray() as Vec3;
@@ -1493,12 +1520,13 @@ async function start() {
     }
     evaluated = evaluateSceneAnimation(doc, getFrame());
     for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, pose);
+    if (dragControlPose) evaluated.set(dragControlPose.id, dragControlPose.pose);
     evaluateDrivenKeys(doc, evaluated);
     fkPoses = new Map(evaluated);
-    evaluateIK(doc, evaluated);
     solvedPoses = new Map(evaluated);
     try {
-      evaluateConstraints(doc, evaluated);
+      const stages = evaluateRigStages(doc, evaluated, true);
+      fkPoses = stages.fkPoses!; solvedPoses = stages.solvedPoses!;
       evaluationError = "";
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

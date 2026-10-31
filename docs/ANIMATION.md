@@ -3,8 +3,9 @@
 Musubi implements a practical subset of Maya-style animation workflows. The
 current editor has a frame timeline, editable transform/joint curves, driven
 keys, FK, CCD and analytic two-bone IK with pole targets, numeric and painted skin
-weights, and point/orient/aim/scale/parent constraints. Animation layers, polygon modeling,
-and particle FX remain future work.
+weights, and point/orient/aim/scale/parent constraints. Targets and poles can use
+animated curve controls. Animation layers remain future work; polygon tools and
+particle FX have separate [modeling](MODELING.md) and [particle](PARTICLES.md) guides.
 
 ## Start with the example
 
@@ -29,6 +30,14 @@ node scripts/create-animation-example.mjs
 
 The script uses the application's own document/archive modules and the existing
 Vite dependency. It does not download assets or introduce a service dependency.
+
+For linked IK, open [examples/animated-ik-controls.msb](../examples/animated-ik-controls.msb).
+Its analytic chain follows keyed target and pole controls while a constrained
+root moves. Inspect frames 0–120 and the controls' position curves. Regenerate it
+with `node scripts/create-ik-controls-example.mjs`. The generator evaluates 241
+half-frame samples both before and after native archive readback, with maximum
+endpoint error below 1.7 × 10⁻⁸ scene units, and checks the historical pose sampler.
+These are reproducible model checks, not a browser playback measurement.
 
 ## Workspaces and panels
 
@@ -214,10 +223,10 @@ Older files without a solver setting continue to use CCD.
 
 The target is a world-space XYZ position. Change it to solve the chain; both
 solvers use the FK/IK blend to retain FK at zero or apply the solution at one.
-**Match target to FK** places the target at the current FK endpoint. For an
+Without control links, **Match target to FK** places the target at the current FK endpoint. For an
 analytic handle it also derives the pole from that FK pose, preserving the
 current bend direction when defined. This matching command does not key joints
-or change the blend. Enable/disable, targets, poles, solver choice, blend, CCD
+or change the blend. Enable/disable, literal targets/poles, control links, solver choice, blend, CCD
 iteration count, and handle removal are document edits with undo and serialization.
 
 Analytic handles expose **World-space pole target** with **Pole X**, **Pole Y**,
@@ -230,11 +239,63 @@ drags, release commits one edit and **Escape** cancels the drag. Numeric fields
 commit on Enter or blur, and Escape cancels the pending field edit. CCD hides the
 pole controls; analytic mode hides **Solver iterations**, which it does not use.
 
+### Animate targets and poles with controls
+
+Choose an ordinary transform in **Target control** or **Pole control**, or click
+**Create target control** / **Create pole control** to create and link an editable
+circle / arrow curve at the current point. Creation and linking form one undo
+step. **Keep target position when linking** preserves the point using a world-space
+offset; clearing it snaps the point to the chosen control's world origin. Choose
+**None · static target** to unlink while retaining the currently evaluated point.
+Pole controls are available for analytic two-bone handles.
+
+Use **Move target control** or **Move pole control**, or click its target/pole
+marker, to select the linked scene object. Move it with the ordinary viewport
+gizmo: the chain updates during the drag. Use the same Animation-mode transform
+key workflow as other objects, including **S**, the timeline, and the Graph Editor.
+The control can also be driven by SDK or supported constraints. The panel's
+linked XYZ fields show resolved world coordinates read-only; edit the control's
+transform instead. Unlinked marker drags continue to edit static target points.
+
+With links, the matching button becomes **Match controls to FK and key**. In
+Animation mode it places the target at the prepared FK endpoint and the analytic
+pole along the FK bend direction, then keys linked controls' local position XYZ
+at the exact current frame. It preserves world offsets, converts through evaluated
+parent transforms, and updates any unlinked target/pole point in the same undo
+step. It does not change the blend or key the joints. Position channels owned by
+SDK or an enabled Point/Parent constraint reject matching; remove the SDK
+relationship or disable the competing constraint first. Incompatible requests
+for one object used as both controls, noninvertible parents, or an unkeyed parent
+preview that would shift the saved result also reject the entire command.
+Matching also verifies every prepared FK chain joint's world position and
+orientation. If control keys would move that chain through a downstream SDK
+relationship, the whole edit is rejected; unrelated or constant SDK responses
+that leave the chain unchanged remain supported.
+
+Control links, offsets, curves, and keys save in `.msb` files. Deleting a linked
+control through the editor unlinks it and freezes the current resolved point;
+undo restores both object and link. A document-only deletion without an evaluated
+pose uses the fallback point captured when the link was created or rebound.
+
+Linked control and root-parent constraints run before IK when required to place
+the solver's inputs. Their hierarchy and constraint-source dependencies form a
+prerequisite closure. Remaining constraints run after IK, including chain-output
+constraints that are not prerequisites. This plan includes every configured link
+even when the handle is disabled, blend is zero, or a CCD handle retains a latent
+pole link; toggling those settings does not reorder the rig. Hierarchy or
+constraint dependencies that reach any IK chain are rejected, including
+cross-chain feedback. SDK continues to read pre-IK authored/time/preview channels
+and earlier SDK outputs. With no links, the original time → SDK → IK → constraints
+order remains unchanged.
+
+### Capture IK as FK
+
 To keep the current solved pose as FK, select an enabled handle with blend above
 zero and click **Match FK to IK and key**. The command captures XYZ local rotation
 keys for every joint from root through end at the current frame, then sets the
 handle's blend to zero. Both changes form one undo command. It samples the IK
-result before constraints and chooses equivalent Euler angles near the current
+result after prerequisite constraints and IK, but before remaining constraints,
+and chooses equivalent Euler angles near the current
 FK values to preserve rotation continuity. Existing keys at that frame retain
 their interpolation and tangent settings; new keys use auto Bezier tangents.
 Position and scale keys are unchanged.
@@ -253,7 +314,7 @@ the command then rejects the entire edit. Key those position previews or resolve
 the dependencies first. Point constraints are allowed when the resulting pose
 remains unchanged.
 
-Click **Move target in viewport** to select the handle's target marker and attach
+For an unlinked target, click **Move target in viewport** to select its marker and attach
 the translation gizmo. Target markers can also be selected by clicking them in
 the viewport. Drag to preview the solution; release records one target edit in
 history. **Escape** cancels the drag, and **Delete** removes the selected handle.
@@ -270,10 +331,10 @@ track bend continuity across frames. Position the pole clearly beside the target
 line to choose an unambiguous bend. Chains may not overlap or control ancestors
 of another chain, preventing order-dependent results.
 
-Solver choice, pole, target, and blend are static saved settings, not animation
-channels. Both solvers share the current-frame **Match FK to IK and key** workflow
-above. Joint orientation/axis editing, angular limits, stretch, separate target
-transform nodes, target/pole/blend animation, and range-based IK-to-FK pose baking
+Solver choice, literal points, and blend remain static saved settings. Linked
+target and pole transforms use ordinary animation channels. Both solvers share
+the current-frame **Match FK to IK and key** workflow above. Joint orientation/axis
+editing, angular limits, stretch, blend animation, and range-based IK-to-FK pose baking
 remain unavailable. Matching a target position alone does not reproduce every
 possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
@@ -472,7 +533,7 @@ constraints instead add their positional offset in world space. The evaluation
 converts world results back into the driven object's parent space.
 
 The **Scene constraints** list provides Enabled and Delete controls. Disabling
-a constraint reveals its underlying animation/SDK/IK pose; it does not bake the
+a constraint removes its pose override; it does not bake the
 constrained pose into keys. Creation, enable/disable, and deletion support undo
 and archive persistence. Recreate a relationship to change its source, type, or
 captured offset.
@@ -489,15 +550,16 @@ the chosen axis therefore need not point directly at the source.
 Aim changes rotation only. Its source and driven object must occupy distinct
 world positions (separation greater than 0.00000001 scene units). Coincident
 points are rejected; if animation reaches them, playback stops with an explanation
-and the entire constraint stage falls back to its underlying pose. When the aim
+and the entire rig stage falls back to its input time/preview/SDK pose. When the aim
 direction is parallel to world up, Three.js supplies a deterministic fallback
 basis. This avoids undefined orientation but can produce a roll change near the
 pole; it is not a continuity-preserving roll solver. There is no object-up mode,
 animated up object, or multi-source aim weighting. Recreate the constraint to
 change its captured offset or axis settings.
 
-Constraints evaluate after animation, SDK, and IK, overriding their assigned
-channel groups. They do not feed values back into those earlier stages. Each
+Constraints needed by linked IK inputs evaluate after time/preview/SDK and before
+IK; the rest evaluate after IK, overriding their assigned channel groups. The
+remaining constraints do not feed back into IK, and SDK is not reevaluated. Each
 position, rotation, or scale group has one constraint source; Parent owns both
 position and rotation, and Aim owns rotation. Cycles involving constraints and the hierarchy are
 rejected, including disabled constraints, so enabling a record cannot introduce
@@ -511,8 +573,9 @@ supports arbitrary finite, invertible parent transforms. Non-finite values and
 singular driven-parent transforms are rejected.
 
 If animation reaches an unsupported constraint pose, playback stops and a notice
-identifies the limitation. Constraint evaluation falls back atomically to the
-underlying animation/SDK/IK pose rather than leaving some constraints applied.
+identifies the limitation. Prerequisite constraints, IK, and remaining constraints
+evaluate atomically: failure restores the input time/preview/SDK pose, with no
+partial prerequisite or IK results retained.
 Disabled constraints remain editable, so the offending relationship can be
 disabled or deleted before repairing the hierarchy or animation.
 
@@ -527,6 +590,15 @@ WebGL/Spark rendering, skinning/binding uploads, elasticity, UI rendering,
 source-asset loading, and device/browser variation. Large weighted curves and
 large splat scenes still require representative profiling.
 
+The linked-control benchmark (`node scripts/benchmark-ik-controls.mjs`) used
+Node 22.16, 50 warmups, and 300 measured samples. Full time → SDK → prerequisite
+constraints → IK → remaining-constraints evaluation measured **0.0448 ms median /
+0.0944 ms p95 for one chain**, and **0.2472 ms median / 0.4230 ms p95 for 16 chains**.
+For 16 chains, historical sampling on uncached frames measured **0.281 ms median /
+0.651 ms p95**; primed cache hits were about **0.0001 ms**. These CPU-only timings
+exclude browser scheduling, rendering, skinning, and editor callbacks, and are
+not an end-to-end playback frame-rate claim.
+
 Run `npm test` for focused model, command, archive, and regression tests. Run
 `npm run build` for TypeScript checking and the production bundle. No separate
 lint script is configured. Tests cover weighted curves, full-turn rotations,
@@ -538,18 +610,18 @@ small-scene playback results.
 
 ## Remaining work, in priority order
 
-1. Local joint axes/orientation, rotation limits, stretch, target/pole/blend
-   animation, and range-based IK/FK baking.
+1. Local joint axes/orientation, rotation limits, stretch, blend animation,
+   and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
 3. Influence management, weight smoothing/locks and mirrored transfer,
    joint/pose mirroring, and conventional deformers.
 4. Animation layers, camera/custom-property animation, Euler filtering, richer
    clipboard/retargeting, and SDK Graph Editor integration.
-5. Polygon primitives and editable topology, component selection, modeling
-   operations, materials/UVs, and mesh import/export.
-6. Deterministic particle emitters and fields, lifetime controls/caches, and a
-   dedicated FX workspace.
+5. Additional polygon tools, materials/UVs, mesh skinning, and mesh import/export;
+   see the [modeling guide](MODELING.md) for the implemented subset.
+6. Particle collisions, trails, animated emitter properties, and cache export;
+   see the [particle guide](PARTICLES.md) for the implemented subset.
 
 ## References and licenses
 
@@ -563,7 +635,8 @@ Autodesk's [IK/FK Keys menu](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-A
 distinguishes moving an IK target to an FK endpoint from keying the handle and
 joint chain. Its [IK/FK blending workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-8B0B343A-B00A-427C-8C79-E2B9008C4A88.htm)
 also animates blend values across frames. Musubi's matching commands cover target
-alignment and a current-frame rotation capture; animated blend transitions remain
+alignment with linked-control position keys and a current-frame rotation capture;
+animated blend transitions remain
 future work.
 Curve terminology follows Autodesk's [NURBS curve components](https://help.autodesk.com/cloudhelp/ENU/MayaCRE-Modeling/files/GUID-3C709643-E723-4518-84B7-45EB07778AD2.htm)
 and [curve degree overview](https://help.autodesk.com/cloudhelp/2023/ENU/Maya-Modeling/files/GUID-0C6DD36E-E336-4DE2-ADA1-86665998EF77.htm).

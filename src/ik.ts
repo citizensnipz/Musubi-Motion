@@ -3,12 +3,14 @@ import { CCDIKSolver, type IK } from "three/addons/animation/CCDIKSolver.js";
 import { baseChannels, evaluateSceneAnimation, setKeys, type AnimationPose } from "./animation.ts";
 import { unwrapEuler } from "./animation-edit.ts";
 import { evaluateDrivenKeys } from "./driven-keys.ts";
-import { evaluateConstraints } from "./constraints.ts";
+import { constraintWorldMatrices, evaluateConstraints } from "./constraints.ts";
+import { ikInputConstraintTargets, validateIKControlDependencies } from "./ik-control-plan.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 import { createSceneStore, type SceneStore } from "./scene-store.ts";
 import type { Joint } from "./skeleton.ts";
 import { solveTwoBoneCorrections } from "./two-bone-ik.ts";
 
+export type IKControlLink = { objectId: string; offset: Vec3 };
 export type IKHandle = {
   id: string;
   name: string;
@@ -23,10 +25,13 @@ export type IKHandle = {
   solver?: "ccd" | "two-bone";
   /** World-space pole position; required by the analytic two-bone solver. */
   poleTarget?: Vec3;
+  /** Linked transform origins plus world-space offsets replace literal targets. */
+  targetControl?: IKControlLink;
+  poleControl?: IKControlLink;
 };
-export type IKHandleSettings = Pick<IKHandle, "solver" | "poleTarget">;
+export type IKHandleSettings = Pick<IKHandle, "solver" | "poleTarget" | "targetControl" | "poleControl">;
 
-const vector = (value: unknown): value is Vec3 => Array.isArray(value) && value.length === 3 && value.every(n => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e6);
+const vector = (value: unknown): value is Vec3 => Array.isArray(value) && value.length === 3 && [0, 1, 2].every(index => typeof value[index] === "number" && Number.isFinite(value[index]) && Math.abs(value[index]) <= 1e6);
 const validId = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value);
 
 /** Ordered root to effector, including both endpoints. */
@@ -57,6 +62,11 @@ export function validateIKHandles(value: unknown, doc: SceneDocument): asserts v
     const chain = ikChain(doc, handle.rootId, handle.endId);
     if (handle.solver !== undefined && !["ccd", "two-bone"].includes(handle.solver)) throw Error("Unknown IK solver.");
     if (handle.poleTarget !== undefined && !vector(handle.poleTarget)) throw Error("IK pole target must contain finite world coordinates within ±1,000,000.");
+    for (const link of [handle.targetControl, handle.poleControl]) if (link !== undefined) {
+      if (!link || typeof link !== "object" || Array.isArray(link) || !validId(link.objectId) || doc.nodes[link.objectId]?.type !== "transform" || !vector(link.offset)) {
+        throw Error("IK control links need an existing transform and finite world offsets within ±1,000,000.");
+      }
+    }
     if (handle.solver === "two-bone" && (chain.length !== 3 || !vector(handle.poleTarget))) throw Error("Two-bone IK needs exactly three joints and a world-space pole target.");
     for (let index = 0; index < chain.length; index++) {
       const id = chain[index];
@@ -78,6 +88,7 @@ export function validateIKHandles(value: unknown, doc: SceneDocument): asserts v
       parent = joints.get(parent)?.parentId;
     }
   }
+  validateIKControlDependencies({ ...doc, ikHandles: value });
 }
 
 type Rig = { mesh: SkinnedMesh; bones: Map<string, Bone>; indices: Map<string, number>; target: Bone };
@@ -140,9 +151,53 @@ export function defaultPoleTarget(doc: SceneDocument, rootId: string, endId: str
   return root.addScaledVector(bend.normalize(), length).toArray() as Vec3;
 }
 
-/** Evaluate after animation/driven keys, before skinning. No scene edits/history. */
+export type IKTargetPoints = { target: Vec3; poleTarget?: Vec3 };
+/** Resolve already-evaluated transform origins once for all handles. Constraint
+ * staging belongs to evaluateRigStages; this helper does not solve constraints. */
+export function getIKTargetPoints(doc: SceneDocument, poses: ReadonlyMap<string, AnimationPose>): Map<string, IKTargetPoints> {
+  const handles = doc.ikHandles ?? [];
+  const worlds = handles.some(handle => handle.targetControl || handle.poleControl) ? constraintWorldMatrices(doc, poses) : undefined;
+  function resolve(link: IKControlLink | undefined, fallback: Vec3 | undefined): Vec3 | undefined {
+    if (!link) {
+      if (fallback === undefined) return undefined;
+      if (!vector(fallback)) throw Error("IK target points must be finite and within ±1,000,000 world units.");
+      return [...fallback] as Vec3;
+    }
+    if (!vector(link.offset)) throw Error("IK control offsets must be finite and within ±1,000,000 world units.");
+    const world = worlds?.get(link.objectId);
+    if (!world || doc.nodes[link.objectId]?.type !== "transform") throw Error("An IK control transform no longer exists.");
+    const point = new Vector3().setFromMatrixPosition(world).add(new Vector3(...link.offset)).toArray() as Vec3;
+    if (!vector(point)) throw Error("The evaluated IK control target must stay finite and within ±1,000,000 world units.");
+    return point;
+  }
+  return new Map(handles.map(handle => {
+    const target = resolve(handle.targetControl, handle.target);
+    if (!target) throw Error("An IK handle needs a target point.");
+    return [handle.id, { target,
+      ...(handle.poleTarget || handle.poleControl ? { poleTarget: resolve(handle.poleControl, handle.poleTarget) } : {}),
+    }];
+  }));
+}
+
+/** Atomic rig stage shared by viewport, matching and historical evaluation.
+ * Input poses already include time animation, previews and driven keys. */
+export function evaluateRigStages(doc: SceneDocument, poses: Map<string, AnimationPose>, captureStages = false): {
+  fkPoses?: Map<string, AnimationPose>; solvedPoses?: Map<string, AnimationPose>;
+} {
+  const candidate = new Map(poses), inputTargets = ikInputConstraintTargets(doc);
+  if (inputTargets.size) evaluateConstraints(doc, candidate, { includeTargets: inputTargets });
+  const fkPoses = captureStages ? new Map(candidate) : undefined;
+  evaluateIK(doc, candidate);
+  const solvedPoses = captureStages ? new Map(candidate) : undefined;
+  evaluateConstraints(doc, candidate, { excludeTargets: inputTargets });
+  for (const [id, pose] of candidate) poses.set(id, pose);
+  return { fkPoses, solvedPoses };
+}
+
+/** Low-level solver. Call evaluateRigStages for linked constrained controls. */
 export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>): void {
   const handles = doc.ikHandles?.filter(handle => handle.enabled && handle.blend > 0) ?? [];
+  const targetPoints = getIKTargetPoints(doc, poses);
   if (!handles.length) return;
   const rig = resetRig(doc, poses);
   const targetPosition = new Vector3(), rootPosition = new Vector3(), endPosition = new Vector3(), localAxis = new Vector3();
@@ -153,11 +208,12 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
     if (chain.slice(1).some(id => rig.bones.get(id)!.position.lengthSq() < 1e-12)) continue;
     const links = chain.slice(0, -1).reverse(), end = rig.bones.get(handle.endId)!;
     const originals = new Map(links.map(id => [id, rig.bones.get(id)!.quaternion.clone()]));
-    targetPosition.fromArray(handle.target);
+    const points = targetPoints.get(handle.id)!;
+    targetPosition.fromArray(points.target);
     if (handle.solver === "two-bone") {
-      if (chain.length !== 3 || !handle.poleTarget) throw Error("Two-bone IK needs exactly three joints and a world-space pole target.");
+      if (chain.length !== 3 || !points.poleTarget) throw Error("Two-bone IK needs exactly three joints and a world-space pole target.");
       const root = rig.bones.get(chain[0])!, middle = rig.bones.get(chain[1])!;
-      const correction = solveTwoBoneCorrections(root.matrixWorld, middle.matrixWorld, end.matrixWorld, targetPosition, new Vector3(...handle.poleTarget));
+      const correction = solveTwoBoneCorrections(root.matrixWorld, middle.matrixWorld, end.matrixWorld, targetPosition, new Vector3(...points.poleTarget));
       root.quaternion.multiply(correction.root).normalize(); middle.quaternion.multiply(correction.middle).normalize();
       rig.mesh.updateMatrixWorld(true);
     } else {
@@ -211,9 +267,10 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
 
 function saveHandles(store: SceneStore, handles: IKHandle[], editLabel: string) {
   const doc = store.getState().document;
-  validateIKHandles(handles, doc);
+  const next = { ...doc, ikHandles: handles };
+  validateIKHandles(handles, next);
   if (JSON.stringify(doc.ikHandles ?? []) === JSON.stringify(handles)) return;
-  store.setState({ document: { ...doc, ikHandles: handles }, editLabel });
+  store.setState({ document: next, editLabel });
 }
 export function createIKHandle(store: SceneStore, rootId: string, endId: string, target?: Vec3, settings: IKHandleSettings = {}): string {
   const doc = store.getState().document;
@@ -223,6 +280,8 @@ export function createIKHandle(store: SceneStore, rootId: string, endId: string,
   const handle: IKHandle = { id, name: `ikHandle${(doc.ikHandles?.length ?? 0) + 1}`, rootId, endId,
     target: target ? [...target] : endpoint.toArray() as Vec3, enabled: true, iterations: 64, blend: 1,
     ...(settings.solver !== undefined ? { solver: settings.solver } : {}),
+    ...(settings.targetControl !== undefined ? { targetControl: structuredClone(settings.targetControl) } : {}),
+    ...(settings.poleControl !== undefined ? { poleControl: structuredClone(settings.poleControl) } : {}),
     ...(settings.poleTarget !== undefined ? { poleTarget: [...settings.poleTarget] as Vec3 } : settings.solver === "two-bone" ? { poleTarget: defaultPoleTarget(doc, rootId, endId) } : {}) };
   saveHandles(store, [...doc.ikHandles ?? [], handle], "Create IK handle");
   return id;
@@ -238,6 +297,7 @@ export function deleteIKHandle(store: SceneStore, id: string) {
 export function matchIKToFK(store: SceneStore, id: string, poses?: ReadonlyMap<string, AnimationPose>) {
   const doc = store.getState().document, handle = doc.ikHandles?.find(handle => handle.id === id);
   if (!handle) throw Error("IK handle does not exist.");
+  if (handle.targetControl || handle.poleControl) throw Error("This IK handle uses linked controls. Use Match IK controls to FK and key, or unlink the controls before matching literal targets.");
   const target = new Vector3().setFromMatrixPosition(jointWorldMatrices(doc, poses).get(handle.endId)!).toArray() as Vec3;
   updateIKHandle(store, id, { target, ...(handle.solver === "two-bone" ? { poleTarget: defaultPoleTarget(doc, handle.rootId, handle.endId, poses) } : {}) });
 }
@@ -261,11 +321,10 @@ export function matchFKToIK(
     throw Error("A joint in this chain has an active rotation constraint. Disable its orient, aim or parent constraint before matching FK to IK.");
   }
   const base = evaluateSceneAnimation(doc, frame); evaluateDrivenKeys(doc, base);
-  const reference = new Map(base);
-  for (const [jointId, pose] of fkPoses ?? []) reference.set(jointId, pose);
-  let solved: ReadonlyMap<string, AnimationPose>;
-  if (poses) solved = poses;
-  else { const evaluated = new Map(reference); evaluateIK(doc, evaluated); solved = evaluated; }
+  for (const [jointId, pose] of fkPoses ?? []) base.set(jointId, pose);
+  const sourceStages = evaluateRigStages(doc, base, true);
+  const reference = sourceStages.fkPoses!;
+  const solved = poses ?? sourceStages.solvedPoses!;
   const keyed = new Map<string, AnimationPose>();
   for (const jointId of chain) {
     const current = solved.get(jointId), previous = reference.get(jointId);
@@ -282,7 +341,8 @@ export function matchFKToIK(
   const next: SceneDocument = { ...staging.getState().document,
     ikHandles: doc.ikHandles!.map(candidate => candidate.id === id ? { ...candidate, blend: 0 } : candidate) };
   validateIKHandles(next.ikHandles, next);
-  const check = evaluateSceneAnimation(next, frame); evaluateDrivenKeys(next, check); evaluateIK(next, check);
+  const check = evaluateSceneAnimation(next, frame); evaluateDrivenKeys(next, check);
+  const checkStages = evaluateRigStages(next, check, true);
   const expected = new Map(reference); for (const [jointId, pose] of solved) expected.set(jointId, pose);
   function verifyPose(expected: ReadonlyMap<string, AnimationPose>, actual: ReadonlyMap<string, AnimationPose>) {
     const expectedWorld = jointWorldMatrices(doc, expected), matchedWorld = jointWorldMatrices(next, actual);
@@ -297,13 +357,13 @@ export function matchFKToIK(
       }
     }
   }
-  verifyPose(expected, check);
+  verifyPose(expected, checkStages.solvedPoses!);
   // A chain rotation can also drive an external control whose point constraint
   // moves this chain later. Verify the final constrained result, not just IK.
   if (doc.constraints?.some(constraint => constraint.enabled)) {
-    const constrainedExpected = new Map(expected), constrainedActual = new Map(check);
-    evaluateConstraints(doc, constrainedExpected); evaluateConstraints(next, constrainedActual);
-    verifyPose(constrainedExpected, constrainedActual);
+    const constrainedExpected = new Map(expected);
+    evaluateConstraints(doc, constrainedExpected, { excludeTargets: ikInputConstraintTargets(doc) });
+    verifyPose(constrainedExpected, check);
   }
   store.setState({ document: next, editLabel: "Match FK to IK and key" });
 }

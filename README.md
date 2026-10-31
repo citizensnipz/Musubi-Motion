@@ -30,6 +30,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
 - **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture the current solved joint rotations and switch to FK in one undoable edit. Blend is not animated; matching captures one frame.
 - **Two-bone IK:** select the analytic solver for a root/middle/end chain and move its pole target to control the bend plane. Target and pole markers support viewport dragging, numeric editing, undo, and saving. Unreachable targets preserve bone lengths; existing handles keep their CCD behavior.
+- **Animated IK controls:** link existing transforms or create editable curve controls for targets and poles, preserving their world positions with optional offsets. Animate the controls with ordinary position keys, the Graph Editor, or Set Driven Key; supported upstream constraints run before IK. Linked markers select their controls, and viewport drags preview the chain live. **Match controls to FK and key** captures control positions at the current frame in one undo step.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
 - **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, add/subtract selections, inspect weights, restore automatic weights, and view sampled colors. Edits support undo and persistence; the elasticity pipeline inherits them.
@@ -90,6 +91,8 @@ Use **Animation → Graph Editor / Dope Sheet / Set Driven Key** for dedicated a
 
 Open [examples/animation-study.msb](examples/animation-study.msb) for a procedural bounce/spin animation, a driven rotation, and a keyed three-joint FK chain. Rebuild it with `node scripts/create-animation-example.mjs`.
 
+Open [examples/animated-ik-controls.msb](examples/animated-ik-controls.msb) for an analytic chain with animated target/pole controls and a moving constrained root. Rebuild it with `node scripts/create-ik-controls-example.mjs`. The generator checks 241 half-frame samples before and after archive readback, with endpoint error below 1.7 × 10⁻⁸ scene units; this is model verification, not a browser performance result.
+
 Drag a **panel title tab** toward another panel's edge to split the space, or toward its center to combine them as tabs. The floating tool panel is separate: click its lock icon to unlock it, then drag the grip. An unlocked grip also supports arrow-key nudging, with Shift for larger steps.
 
 ## Scene files
@@ -125,7 +128,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 ## Remaining priorities
 
-1. Joint orientation/limits, target/pole/blend animation, twist controls, and range-based IK/FK baking.
+1. Joint orientation/limits, blend animation, twist controls, and range-based IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
 3. Influence management, weight smoothing and locks, surface-only component selection, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.

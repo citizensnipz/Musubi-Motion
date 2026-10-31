@@ -2,6 +2,7 @@ import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from "three";
 import type { AnimationPose } from "./animation.ts";
 import type { SceneDocument, TransformChannels, Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
+import { validateIKControlDependencies } from "./ik-control-plan.ts";
 
 export type ConstraintType = "point" | "orient" | "scale" | "parent" | "aim";
 export type SignedAxis = "+X" | "-X" | "+Y" | "-Y" | "+Z" | "-Z";
@@ -94,6 +95,7 @@ export function validateConstraints(value: unknown, doc: SceneDocument): asserts
     const parentId = plan.nodes.get(constraint.targetId)!.parentId;
     checkConstraintPose(constraint, world.get(constraint.sourceId)!, parentId ? world.get(parentId)! : new Matrix4());
   }
+  validateIKControlDependencies(doc.constraints === value ? doc : { ...doc, constraints: value });
 }
 
 function poseFor(node: Node, poses?: ReadonlyMap<string, AnimationPose>): AnimationPose {
@@ -176,15 +178,20 @@ function aimRotation(constraint: AimOptions & { name: string }, source: Vector3,
   return worldFrame.multiply(localFrame.invert()).normalize();
 }
 
-/** Final pose stage after time animation, SDK and IK. Constraints override their
- * output groups; SDK/IK are not re-evaluated from these results (no feedback). */
-export function evaluateConstraints(doc: SceneDocument, poses: Map<string, AnimationPose>): void {
-  if (!doc.constraints?.some(constraint => constraint.enabled)) return;
+/** Evaluate selected constraints atomically. Unselected nodes still contribute
+ * their supplied local poses to world matrices. The default evaluates all
+ * constraints; linked IK controls use complementary early and final subsets. */
+export function evaluateConstraints(doc: SceneDocument, poses: Map<string, AnimationPose>, options: {
+  includeTargets?: ReadonlySet<string>;
+  excludeTargets?: ReadonlySet<string>;
+} = {}): void {
+  const selected = (id: string) => (!options.includeTargets || options.includeTargets.has(id)) && !options.excludeTargets?.has(id);
+  if (!doc.constraints?.some(constraint => constraint.enabled && selected(constraint.targetId))) return;
   const plan = getPlan(doc), world = new Map<string, Matrix4>(), updates = new Map<string, AnimationPose>();
   for (const id of plan.order) {
     const node = plan.nodes.get(id)!, parent = node.parentId ? world.get(node.parentId)! : new Matrix4();
     let pose = poseFor(node, poses);
-    const constraints = plan.byTarget.get(id)?.filter(constraint => constraint.enabled) ?? [];
+    const constraints = selected(id) ? plan.byTarget.get(id)?.filter(constraint => constraint.enabled) ?? [] : [];
     if (constraints.length) {
       const parentInverse = parent.clone().invert(), parentComponents = decompose(parent);
       for (const constraint of constraints) {
@@ -220,9 +227,10 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
 
 function saveConstraints(store: SceneStore, constraints: Constraint[], editLabel: string) {
   const doc = store.getState().document;
-  validateConstraints(constraints, doc);
+  const next = { ...doc, constraints };
+  validateConstraints(constraints, next);
   if (JSON.stringify(doc.constraints ?? []) === JSON.stringify(constraints)) return;
-  store.setState({ document: { ...doc, constraints }, editLabel });
+  store.setState({ document: next, editLabel });
 }
 export function createConstraint(store: SceneStore, type: ConstraintType, sourceId: string, targetId: string, maintainOffset = true, poses?: ReadonlyMap<string, AnimationPose>, aimOptions: AimOptions = {}): string {
   validateAimOptions(aimOptions);
