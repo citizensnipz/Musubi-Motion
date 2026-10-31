@@ -1,4 +1,5 @@
 import { CubicBezierCurve, Vector2 } from "three";
+import { validateParticleEmitters } from "./particle-emitter.ts";
 import type { SceneDocument, TransformChannels } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
@@ -251,6 +252,7 @@ function evaluateVisibility(keys: CurveKey[], frame: number): number | undefined
 function saveAnimation(store: SceneStore, animation: AnimationData, editLabel: string) {
   const doc = store.getState().document;
   validateAnimation(animation, doc);
+  validateParticleEmitters({ ...doc, animation });
   if (JSON.stringify(doc.animation ?? defaultAnimation()) === JSON.stringify(animation)) return;
   store.setState({ document: { ...doc, animation }, editLabel });
 }

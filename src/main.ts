@@ -10,6 +10,7 @@ import type {
   SplatShapeNode,
   CurveShapeNode,
   MeshShapeNode,
+  ParticleShapeNode,
   TransformChannels,
   Vec3,
 } from "./scene-document.ts";
@@ -73,6 +74,9 @@ import { createMeshRenderable } from "./mesh-renderer.ts";
 import { createMeshComponentPreview, type MeshComponentMode } from "./mesh-component-preview.ts";
 import { createModelingPanel } from "./modeling-panel.ts";
 import { pickMeshComponents } from "./mesh-component-selection.ts";
+import { createParticleRuntime } from "./particle-runtime.ts";
+import { createParticlePoseSampler } from "./particle-pose-sampler.ts";
+import { createParticlePanel } from "./particle-panel.ts";
 import { createTerminal } from "./terminal-panel.ts";
 import { elasticityDefaults, elasticEdges, validateElasticity } from "./elasticity";
 import { createElasticityPanel } from "./elasticity-panel";
@@ -149,7 +153,15 @@ type RuntimeObject = RuntimeBase & (
   | { kind: "splat"; mesh: SplatMesh; assetId: string }
   | { kind: "curve"; mesh: ReturnType<typeof createControllerRenderable>["mesh"]; controller: ReturnType<typeof createControllerRenderable>; shape: CurveShapeNode }
   | { kind: "mesh"; mesh: ReturnType<typeof createMeshRenderable>["mesh"]; polygon: ReturnType<typeof createMeshRenderable>; shape: MeshShapeNode }
+  | { kind: "particle"; mesh: ReturnType<typeof createParticleRuntime>["mesh"]; particles: ReturnType<typeof createParticleRuntime>; shape: ParticleShapeNode }
 );
+
+function particleObjectRuntime(shape: ParticleShapeNode): RuntimeObject {
+  const particles = createParticleRuntime(shape), root = new THREE.Group(), preview = new THREE.Group();
+  preview.add(particles.mesh); root.add(preview);
+  const box = new THREE.Box3Helper(new THREE.Box3(), 0x999999); box.visible = false;
+  return { kind: "particle", root, preview, mesh: particles.mesh, particles, shape, box, bounds: particles.bounds, centers: particles.centers, count: 0 };
+}
 
 function meshRuntime(shape: MeshShapeNode): RuntimeObject {
   const polygon = createMeshRenderable(shape), root = new THREE.Group(), preview = new THREE.Group();
@@ -179,6 +191,7 @@ async function start() {
     return;
   }
   const webgl = renderer;
+  const maximumParticlePointSize = Number(webgl.getContext().getParameter(webgl.getContext().ALIASED_POINT_SIZE_RANGE)[1]);
   webgl.setPixelRatio(Math.min(devicePixelRatio, 2));
   webgl.domElement.setAttribute(
     "aria-label",
@@ -241,6 +254,8 @@ async function start() {
   let skinPaintTool: ReturnType<typeof createSkinWeightPaintTool> | undefined;
   let paintSettings: SkinWeightBrushSettings | undefined;
   let modelingPanel: ReturnType<typeof createModelingPanel> | undefined;
+  let particlePanel: ReturnType<typeof createParticlePanel> | undefined;
+  let particlePoseDoc: SceneDocument | undefined, particlePoseSampler: ReturnType<typeof createParticlePoseSampler> | undefined;
   let meshComponentRequest: { shapeId: string; mode: MeshComponentMode } | undefined;
   let meshComponentIds: string[] = [];
   const meshComponentPreview = createMeshComponentPreview();
@@ -545,6 +560,7 @@ async function start() {
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
     refreshGizmo();
+    particlePanel?.refresh();
   });
   riggingPanel.addEventListener("rigging-error", event => { notice.textContent = (event as CustomEvent<string>).detail; });
   function readChannels(object: THREE.Object3D): TransformChannels {
@@ -616,7 +632,8 @@ async function start() {
     const ids = [...selected, ...skeleton.selectedIds];
     const curves = new Set(Object.values(doc.nodes).filter(node => node.type === "curveShape").map(node => node.parentId));
     const meshes = new Set(Object.values(doc.nodes).filter(node => node.type === "meshShape").map(node => node.parentId));
-    panel.update([...transformNodes(doc).map(node => ({ ...node, curve: curves.has(node.id), mesh: meshes.has(node.id) })), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
+    const emitters = new Set(Object.values(doc.nodes).filter(node => node.type === "particleShape").map(node => node.parentId));
+    panel.update([...transformNodes(doc).map(node => ({ ...node, curve: curves.has(node.id), mesh: meshes.has(node.id), particle: emitters.has(node.id) })), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
     elasticityPanel.update(shape?.type === "splatShape" ? shape : undefined, new Map((doc.joints??[]).map(j=>[j.id,j.name])));
     channelKeys?.refresh();
   }
@@ -654,9 +671,15 @@ async function start() {
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
+    particlePanel?.refresh();
   }
   function syncScene() {
     const doc = store.getState().document;
+    for (const shape of Object.values(doc.nodes)) if (shape.type === "particleShape") {
+      let object = runtime.get(shape.parentId);
+      if (!object) { object = particleObjectRuntime(shape); runtime.set(shape.parentId, object); world.add(object.box); }
+      if (object.kind === "particle") object.shape = shape;
+    }
     for (const shape of Object.values(doc.nodes)) if (shape.type === "meshShape") {
       let object = runtime.get(shape.parentId);
       if (!object) { object = meshRuntime(shape); runtime.set(shape.parentId, object); world.add(object.box); }
@@ -676,6 +699,7 @@ async function start() {
     for (const [id, object] of runtime) {
       const node = doc.nodes[id];
       if (node?.type !== "transform") {
+        if (object.kind === "particle") object.particles.suspend();
         object.root.removeFromParent();
         object.box.visible = false;
         continue;
@@ -713,9 +737,11 @@ async function start() {
       0,
     );
     const meshes = Object.values(doc.nodes).filter(node => node.type === "meshShape");
+    const emitters = Object.values(doc.nodes).filter(node => node.type === "particleShape");
     element("asset-detail").textContent =
       `${nodes.length} object${nodes.length === 1 ? "" : "s"} · ${count.toLocaleString()} splats`
-      + (meshes.length ? ` · ${meshes.reduce((sum, mesh) => sum + mesh.faces.length, 0).toLocaleString()} polygon faces` : "");
+      + (meshes.length ? ` · ${meshes.reduce((sum, mesh) => sum + mesh.faces.length, 0).toLocaleString()} polygon faces` : "")
+      + (emitters.length ? ` · ${emitters.length} emitter${emitters.length === 1 ? "" : "s"}` : "");
     play.disabled =
       rewind.disabled =
       timeline.disabled =
@@ -882,6 +908,16 @@ async function start() {
     },
   });
   workspace.registerPanel("modeling", "Mesh Tools", modelingPanel.element);
+  particlePanel = createParticlePanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection,
+    onSelectObject: id => selectObjects([id]),
+    getRuntimeStatus: shapeId => {
+      const shape = store.getState().document.nodes[shapeId], object = shape && runtime.get(shape.parentId!);
+      return object?.kind === "particle" ? object.particles.status : undefined;
+    },
+  });
+  workspace.registerPanel("particles", "Particle Emitters", particlePanel.element);
   for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action='Paint weights']")),
     ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action='Paint weights']"))])) {
     control.disabled = false; control.title = "Open Paint Skin Weights";
@@ -1228,7 +1264,12 @@ async function start() {
       if (targetHit) { selectIKTarget(targetHit.id, targetHit.kind); return; }
       const jointHit = skeleton.pick(raycaster);
       if (jointHit) { if (!start.additive) selected.clear(); skeleton.selectMany([jointHit], start.additive); return; }
-      const hits=objects.map(({id,object})=>({id,distance:boundSelection(object)?.pick(raycaster)??raycaster.intersectObject(object.mesh,false)[0]?.distance??Infinity})).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
+      // Emitter markers draw above surfaces, so pick them with the same priority.
+      const emitterHit = gizmosVisible ? objects.filter(({ object }) => object.kind === "particle")
+        .map(({ id, object }) => ({ id, distance: raycaster.intersectObject(object.mesh, false)[0]?.distance ?? Infinity }))
+        .filter(hit => Number.isFinite(hit.distance)).sort((a, b) => a.distance - b.distance)[0] : undefined;
+      if (emitterHit) { selectObjects([emitterHit.id], start.additive); return; }
+      const hits=objects.filter(({object})=>object.kind!=="particle").map(({id,object})=>({id,distance:boundSelection(object)?.pick(raycaster)??raycaster.intersectObject(object.mesh,false)[0]?.distance??Infinity})).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
       const hit=hits[0];
       selectObjects(hit ? [hit.id] : [], start.additive);
     } else {
@@ -1371,6 +1412,7 @@ async function start() {
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
     updateWeightPreview();
+    particlePanel?.refresh();
     channelKeys?.refresh();
   }
   function applyAnimationPose() {
@@ -1411,6 +1453,7 @@ async function start() {
   }
   function updateTime(apply = true) {
     if (apply) { applyAnimationPose(); updateBindings(); }
+    updateParticles();
     timelinePanel?.refresh();
     const turntable = timelinePanel?.turntable;
     timeline.value = turntable ? time : getFrame();
@@ -1420,6 +1463,19 @@ async function start() {
     if (!playing) drivenPanel?.refresh();
     ikPanel?.refresh();
     constraintsPanel?.refresh();
+    particlePanel?.refresh();
+  }
+  function updateParticles() {
+    if (loading) return;
+    const doc = store.getState().document;
+    if (particlePoseDoc !== doc) { particlePoseDoc = doc; particlePoseSampler = createParticlePoseSampler(doc); }
+    for (const object of runtime.values()) if (object.kind === "particle" && doc.nodes[object.shape.id]?.type === "particleShape") {
+      object.particles.request(doc, object.shape, getFrame(), particlePoseSampler!, () => {
+        const error = object.particles.status.error;
+        if (error) { setPlaying(false); notice.textContent = `Particle simulation: ${error}`; }
+        particlePanel?.refresh();
+      });
+    }
   }
   const sceneInput = element<HTMLInputElement>("scene-file");
   function closeFileMenu() {
@@ -1449,6 +1505,7 @@ async function start() {
     (object.box.material as THREE.Material).dispose();
     if (object.kind === "curve") object.controller.dispose();
     else if (object.kind === "mesh") object.polygon.dispose();
+    else if (object.kind === "particle") object.particles.dispose();
     else object.mesh.dispose();
   }
   function replaceScene(
@@ -1465,6 +1522,7 @@ async function start() {
     skinWeightsPanel?.resetScene();
     skinPaintPanel?.resetScene();
     modelingPanel?.resetScene(); meshComponentPreview.clear(); meshComponentIds = [];
+    particlePanel?.resetScene(); particlePoseDoc = undefined; particlePoseSampler = undefined;
     const previousObjects = [...runtime.values()];
     runtime.clear();
     assetFiles.clear();
@@ -1563,6 +1621,8 @@ async function start() {
         new Uint8Array(await file.arrayBuffer()),
       );
       for (const node of transformNodes(project.scene)) {
+        const emitter = Object.values(project.scene.nodes).find((shape): shape is ParticleShapeNode => shape.type === "particleShape" && shape.parentId === node.id);
+        if (emitter) { staged.set(node.id, particleObjectRuntime(emitter)); continue; }
         const polygon = Object.values(project.scene.nodes).find((shape): shape is MeshShapeNode => shape.type === "meshShape" && shape.parentId === node.id);
         if (polygon) { staged.set(node.id, meshRuntime(polygon)); continue; }
         const curve = Object.values(project.scene.nodes).find((shape): shape is CurveShapeNode => shape.type === "curveShape" && shape.parentId === node.id);
@@ -1823,6 +1883,13 @@ async function start() {
       updateTime();
     }
     controls.update();
+    const drawingHeight = webgl.domElement.height;
+    for (const object of runtime.values()) if (object.kind === "particle" && object.root.parent) {
+      object.root.updateWorldMatrix(true, false);
+      object.particles.setWorldTransform(object.root.matrixWorld);
+      object.particles.setViewport(drawingHeight, maximumParticlePointSize);
+      object.particles.setMarkerVisible(gizmosVisible);
+    }
     for (const id of selected) {
       const object = runtime.get(id);
       if (object) {

@@ -61,6 +61,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `SplatShape.elasticity` | Stretch/spacing/expansion, allocation budget, optional density/distribution, selected connection scope |
 | `CurveShape` | `type: "curveShape"`, ID/name/parent ID, `degree`, weighted `points`, `knots`, `closed`, `color` |
 | `MeshShape` | `type: "meshShape"`, ID/name/parent ID, `vertices` with stable IDs/local positions, `faces` with stable IDs/ordered vertex IDs, `color`, `shading`, `wireframe` |
+| `ParticleShape` | `type: "particleShape"`, identity/parent, emission type/source, seed/timing, rate/lifetime, motion and fields, size/color/opacity endpoints |
 | `animation` | `fps`, `start`, `end`, `loop`, `tracks` |
 | Animation track | `id`, `targetId`, `channel`, ordered `keys` |
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
@@ -68,7 +69,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend` |
 | `constraints` | `id`, `name`, `type`, `sourceId`, `targetId`, `enabled`, `maintainOffset`, stored `offset`, optional `aimAxis`/`worldUpAxis` |
 
-Each transform owns exactly one splat, controller curve, or polygon mesh shape. Curve shapes
+Each transform owns exactly one splat, controller curve, polygon mesh, or particle emitter shape. Curve shapes
 need no asset record or binary entry; their parent transforms use the existing
 animation and constraint channels. Curve degree is 1, 2, or 3. Each control point
 is `[x, y, z, weight]`; there must be at least degree + 1 and at most 128 points.
@@ -91,6 +92,14 @@ surfaces and empty meshes are valid. Intersections between separate faces are no
 checked. `shading` is `flat` or `smooth`, `wireframe` is boolean, and `color` is a
 six-digit hex string. Derived edges, triangulation, normals, selections, and GPU
 buffers are rebuilt rather than stored. Older applications may reject mesh shapes.
+
+Particle shapes store authored settings only, without live particles, GPU buffers,
+solver state or replay caches. Surface emitters reference a mesh shape and must
+be parented under its transform. Validation checks all references, finite field
+settings, uint32 seeds, emission timing, and scene-wide particle budgets. Changes
+to FPS must retain the maximum 300-second emission duration. See the exact bounds
+in [the particle guide](docs/PARTICLES.md#limits). Reopening deterministically
+replays to the saved timeline time. Older builds may reject the new shape type.
 
 Optional `binding.weights` stores `{ count, overrides }`. `count` is the
 nonnegative safe-integer count of original splat components, excluding generated

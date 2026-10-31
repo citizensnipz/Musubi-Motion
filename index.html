@@ -103,8 +103,12 @@
             <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Modeling</wa-button>
             <wa-dropdown-item id="view-modeling">Mesh Tools</wa-dropdown-item>
           </wa-dropdown>
+          <wa-dropdown id="fx-menu" size="s" placement="bottom-start">
+            <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">FX</wa-button>
+            <wa-dropdown-item id="view-particles">Particle Emitters</wa-dropdown-item>
+          </wa-dropdown>
           <select id="workspace-preset" aria-label="Workspace preset" title="Arrange panels for a workflow">
-            <option value="general">General</option><option value="animation">Animation</option><option value="rigging">Rigging</option><option value="modeling">Modeling</option>
+            <option value="general">General</option><option value="animation">Animation</option><option value="rigging">Rigging</option><option value="modeling">Modeling</option><option value="fx">FX</option>
           </select>
           <span class="nav-spacer"></span>
           <wa-button

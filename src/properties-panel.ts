@@ -102,7 +102,7 @@ export function createPropertiesPanel(
   const collapsed = new Set<string>();
   return {
     update(
-      nodes: (TransformNode & { joint?: boolean; curve?: boolean; mesh?: boolean })[],
+      nodes: (TransformNode & { joint?: boolean; curve?: boolean; mesh?: boolean; particle?: boolean })[],
       selected: Set<string>,
       shapeName: string | undefined,
       preview?: TransformChannels,
@@ -111,7 +111,7 @@ export function createPropertiesPanel(
         selected.size === 1 ? nodes.find((n) => selected.has(n.id)) : undefined;
       activeId = single?.id;
       const listKey = JSON.stringify(
-        [nodes.map((n) => [n.id, n.name, n.parentId, n.joint, n.curve, n.mesh]), [...collapsed]],
+        [nodes.map((n) => [n.id, n.name, n.parentId, n.joint, n.curve, n.mesh, n.particle]), [...collapsed]],
       );
       if (lastList !== listKey) {
         lastList = listKey;
@@ -228,7 +228,7 @@ export function createPropertiesPanel(
       }
       host.querySelector("#object-id")!.textContent = single.id;
       host.querySelector("#object-shape")!.textContent = shapeName ?? "—";
-      host.querySelector(".node-details dd")!.textContent = single.joint ? "Joint" : single.curve ? "Transform / NURBS curve shape" : single.mesh ? "Transform / Polygon mesh shape" : "Transform / Gaussian splat shape";
+      host.querySelector(".node-details dd")!.textContent = single.joint ? "Joint" : single.curve ? "Transform / NURBS curve shape" : single.mesh ? "Transform / Polygon mesh shape" : single.particle ? "Transform / Particle emitter shape" : "Transform / Gaussian splat shape";
     },
   };
 }

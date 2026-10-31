@@ -1,4 +1,5 @@
 export type Vec3 = [number, number, number];
+export type { ParticleShapeNode } from "./particle-emitter.ts";
 export type TransformChannels = {
   position: Vec3;
   rotation: Vec3; // Euler degrees; XYZ order, local to parent.
@@ -64,7 +65,7 @@ export type SceneDocument = {
   upAxis: "Y";
   units: "unitless";
   rootIds: string[];
-  nodes: Record<string, TransformNode | SplatShapeNode | CurveShapeNode | MeshShapeNode>;
+  nodes: Record<string, TransformNode | SplatShapeNode | CurveShapeNode | MeshShapeNode | import("./particle-emitter.ts").ParticleShapeNode>;
   assets: Record<string, AssetRecord>;
 };
 

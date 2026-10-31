@@ -13,7 +13,7 @@ A browser-based Gaussian splat animation engine and editor, built on **Three.js 
 
 Musubi Motion treats Gaussian splats as named, selectable scene objects with their own transforms and asset references. The goal is a focused browser workspace for composing and animating splat scenes, with familiar Maya-style controls and a minimal monochrome interface.
 
-**Current status: working editor prototype.** The editor supports transform and joint animation, a Graph Editor and Dope Sheet, Set Driven Keys, FK joints, CCD and analytic two-bone inverse kinematics, constraints, splat binding, elasticity, and polygon mesh editing. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU and particle FX are not implemented.
+**Current status: working editor prototype.** The editor supports transform and joint animation, a Graph Editor and Dope Sheet, Set Driven Keys, FK joints, CCD and analytic two-bone inverse kinematics, constraints, splat binding, elasticity, polygon mesh editing, and deterministic particle FX. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU is not implemented.
 
 **Topics:** `gaussian-splatting` · `3d-animation` · `3d-editor` · `threejs` · `sparkjs` · `webgl2` · `typescript` · `dockview`
 
@@ -21,7 +21,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 
 - **Splat scenes:** import local PLY, SPZ, SPLAT, KSPLAT, and SOG files; add multiple named objects; start with the included grayscale knot. Format variants depend on Spark's decoder support.
 - **Selection and transforms:** click or marquee selection, an Outliner, editable position/rotation/scale properties, and full X/Y/Z transform gizmos, including non-uniform scaling.
-- **Customizable workspace:** General, Animation, Rigging, and Modeling presets arrange relevant panels. Drag Dockview tabs to split or combine panels, resize with dividers, and reopen editors from their menus. Layouts are remembered in local browser storage.
+- **Customizable workspace:** General, Animation, Rigging, Modeling, and FX presets arrange relevant panels. Drag Dockview tabs to split or combine panels, resize with dividers, and reopen editors from their menus. Layouts and the selected preset are remembered in local browser storage.
 - **Floating tools:** icon-only selection and transform controls sit inside the viewport. Unlock the panel to move it by its grip, then lock it in place.
 - **Monochrome UI:** light/dark themes, Web Awesome menus and fields, and Lucide icons. Theme and panel layouts are remembered locally.
 - **Animation:** frame-based timeline, configurable frame rate and playback range, looping, manual keys with **S**, and auto-key for channels that already have keys. Transform and joint curves evaluate from the requested frame without writing playback into scene history.
@@ -35,9 +35,10 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, add/subtract selections, inspect weights, restore automatic weights, and view sampled colors. Edits support undo and persistence; the elasticity pipeline inherits them.
 - **Paint Skin Weights:** a separate Rigging panel provides Replace, Add, and Subtract brushes with adjustable radius, strength, and smooth falloff. Color previews remain outside the scene until release; each stroke applies deformation with one undo step. Escape cancels a stroke.
 - **Polygon modeling:** create cubes, planes, spheres, and cylinders alongside splats. **Modeling → Mesh Tools** provides vertex/edge/face selection, local vertex edits and component offsets, connected face-region extrusion, face deletion, color, flat/smooth shading, and polygon wire display. Shared vertices and stable component IDs persist through undo and saving. See [the modeling guide](docs/MODELING.md).
+- **Particle FX:** **FX → Particle Emitters** creates omni, directional, box/sphere volume, and polygon-surface emitters. Edit rate, lifetime, seeded variation, gravity/acceleration, drag, curl noise, attraction/repulsion, and lifetime size/color/opacity. Fixed-step replay supports backward scrubbing; particles retain their historical birth positions when emitters animate. Settings support undo and saving. See [the particle guide](docs/PARTICLES.md).
 - **Undo/redo:** editing operations use shared document commands. History retains up to 100 edits without copying splat buffers; playback and scrubbing create no history entries.
 - **Turntable preview:** the Timeline's separate playback mode retains the original 12-second rotation preview.
-- **Portable scenes:** save and reopen `.msb` packages with source assets, joints, binding/elasticity settings, animation curves, driven relationships, IK handles, and constraints.
+- **Portable scenes:** save and reopen `.msb` packages with source assets, meshes, controllers, particle settings, joints, binding/elasticity settings, animation curves, driven relationships, IK handles, and constraints.
 
 Splat files are decoded in the browser, not uploaded to a server. The interface and included demo are grayscale; transform gizmos and the red X / blue Z grid origin lines retain axis colors. Imported splats retain their source colors.
 
@@ -95,7 +96,7 @@ Drag a **panel title tab** toward another panel's edge to split the space, or to
 
 Use **File → New scene / Open scene / Save / Save as**. An asterisk beside the scene name indicates unsaved edits.
 
-An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, polygon topology and appearance, controller curves, joints and binding, elasticity, animation/SDK/IK data, constraints, the viewport camera, and the timeline position. It does not store undo history, unkeyed animation previews, or the UI panel arrangement.
+An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, polygon topology and appearance, controller curves, particle settings, joints and binding, elasticity, animation/SDK/IK data, constraints, the viewport camera, and the timeline position. It does not store undo history, unkeyed animation previews, live particle buffers, or the UI panel arrangement.
 
 Supported browsers can save back to a selected file through native file pickers. Other browsers download an `.msb` copy. New/Open asks before discarding unsaved edits; opening stages the scene before replacing the current one. Undo history starts fresh after opening.
 
@@ -109,6 +110,7 @@ Packages are built in memory and currently capped at **512 MiB**. Autosave and r
 | Cubic curve primitives and CCD IK solver | Existing Three.js dependency, MIT licensed |
 | Analytic two-bone IK | Scalar Three.js adaptation of ozz-animation's MIT-licensed IKTwoBoneJob; attribution in `public/licenses/ozz-animation.txt` |
 | Polygon primitives and triangulation | Existing Three.js geometry/welding utilities (MIT) and bundled Earcut (ISC); retained notice in `public/licenses/earcut.txt` |
+| Particle simulation | Pinned three-nebula 13.3.0 (MIT), with validated timeline scheduling and a Three.js rendering adapter |
 | Gaussian splat rendering and decoding | Spark 2.4, using WebGL2 |
 | Docking and resizable panels | Dockview |
 | Menus, dialogs, and property controls | Web Awesome web components |
@@ -128,10 +130,10 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 3. Influence management, weight smoothing and locks, surface-only component selection, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.
 5. Component gizmos, inset/bevel/subdivision, merge/bridge and edge deletion, materials/UVs, mesh skinning, and mesh import/export.
-6. Deterministic particle emitters, fields, lifetime properties, and an FX workspace.
+6. Particle collisions, trails, animated emitter properties/field objects, cache export, and splat-particle rendering.
 7. Object grouping/reparenting tools, recovery snapshots, and saving strategies for large projects.
 
-General, Animation, Rigging, and Modeling workspace presets are available. An FX workspace will accompany functioning particle tools. Existing disabled rigging entries describe work still to come; they are not implemented commands.
+General, Animation, Rigging, Modeling, and FX workspace presets are available. Existing disabled rigging entries describe work still to come; they are not implemented commands.
 
 Local CPU measurements were approximately **0.56 ms for 1,000 animation tracks**, **2.62 ms for 20 IK chains**, and **0.44 ms for 100 parent constraints**. These development measurements exclude WebGL/Spark rendering, binding, elasticity, editor drawing, and large asset loads; they are not a browser frame-rate or production performance guarantee. See [the animation guide](docs/ANIMATION.md#performance-and-verification).
 
@@ -145,3 +147,4 @@ Capture reconstruction, model training, and recorded 4D splat playback are outsi
 
 The adapted two-bone solver retains [ozz-animation's MIT notice](public/licenses/ozz-animation.txt), also included in production builds.
 Polygon validation and triangulation retain [Earcut's ISC notice](public/licenses/earcut.txt), also included in production builds.
+Particle simulation retains [Nebula's MIT notice](public/licenses/three-nebula.txt) and notices for its bundled [Lodash](public/licenses/nebula-lodash.txt), [potpack](public/licenses/nebula-potpack.txt), and [uuid](public/licenses/nebula-uuid.txt) utilities in production builds.

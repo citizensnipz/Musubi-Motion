@@ -1,8 +1,8 @@
 # Validation record — 2026-10-31
 
 This records the local development checkpoint, not a production rollout or a
-cross-browser certification. No deployment, push, new package dependency, or paid
-service was introduced by this work.
+cross-browser certification. No deployment, push, or paid service was introduced.
+The particle checkpoint adds one pinned package, described below.
 
 ## Automated checks
 
@@ -19,6 +19,7 @@ service was introduced by this work.
 | Skin-paint checkpoint | 224 tests passed across 24 files |
 | Analytic two-bone IK checkpoint | 236 tests passed across 26 files |
 | Polygon modeling checkpoint | 271 tests passed across 30 files |
+| Particle FX checkpoint | 325 tests passed across 36 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -277,3 +278,60 @@ Mesh skinning, component gizmos, inset/bevel/subdivision, merge/bridge, edge del
 UVs and mesh import/export remain future work. Cross-face geometric intersections
 are not detected by the topology validator. No new package dependency was added;
 the reused/adapted Earcut ISC notice ships alongside the existing MIT notices.
+
+## Particle FX checkpoint
+
+The 54 added tests cover emitter commands and budgets, historical fractional-frame
+poses through animation/SDK/IK/constraints, seeded 120 Hz forward/backward replay,
+request-order independence, emission/lifetime boundaries, gravity/drag/noise and
+attraction, lifetime appearance, uniform volumes, and world-area-weighted mesh
+surface sampling under animated nonuniform scale. Tests also cover cancellation
+during surface preparation, bounded output caches, renderer bounds/resources,
+stale asynchronous results, constructor-failure recovery, mixed archives/source
+bytes, atomic FPS validation, and surface-emitter subtree deletion.
+
+Browser checks created a directional emitter beside the existing knot. At frame 48,
+rate 60 produced 120 particles; changing to 120 produced 240. Undo restored 120 and
+redo 240. Scrubbing backward to frame 24 produced 120, then forward to 48 restored 240.
+Acceleration Y=-1, drag 0.4 and turbulence 0.2 were entered through the panel. A real
+download/reopen retained those settings, rate 120, frame 48 and 240 particles, with
+empty undo history. The selected emitter's fields also reenable after pausing.
+
+The mixed example opened seven objects: three emitters, 353 polygon faces,
+11,629 splats and a curve controller. At frame 48 the moving emitter's keyed X
+was -0.8 and its cloud contained 200 particles. Creating a surface emitter from the
+selected mesh produced 120 particles; undo/redo restored the three/four-emitter
+counts. Playback kept the saved scene clean. Ninety requestAnimationFrame intervals
+after ten warmups measured 16.7 ms median and 16.8 ms p95 in the local browser; this is
+small-scene scheduling evidence, not GPU timing or a large-scene guarantee. The
+browser reported no console errors. Seeking past emission and lifetime emptied
+the cloud. Disabling an emitter cleared it; Edit → Undo restored its particles.
+
+`node scripts/benchmark-particles.mjs` includes asynchronous replay yields and
+historical pose sampling for an unanimated directional emitter. One local run:
+
+| Live particles at 2 s | Initial 2 s replay | Backward 1 s replay | Forward frame median / p95 |
+| --- | --- | --- | --- |
+| 1,000 | 83.78 ms | 30.13 ms | 1.29 / 2.35 ms |
+| 5,000 | 393.42 ms | 60.28 ms | 13.74 / 18.93 ms |
+
+Forward samples advance five 120 Hz steps per 24 fps frame; thirty samples follow
+five warmups. These wall times exclude browser UI, GPU upload/rendering, surface
+sampling and animated rig evaluation. Budgets are safety limits, not a promise
+that their maximum fits a frame. Long replays yield and can be superseded.
+
+The new package is exactly `three-nebula@13.3.0` (MIT); Three remains 0.180.0. npm
+reported one added package and zero audit vulnerabilities at installation. The
+published bundle contains utility code, so Nebula, Lodash, potpack and uuid notices
+ship in `public/licenses`. The adapter handles upstream fractional-burst scheduling,
+the damping reference interval, zero initial size, and renderer resource ownership.
+An asynchronous constructor-failure path was fixed and directly regression tested.
+Visible emitter markers now take picking priority over the mesh beneath them;
+a viewport click selected the surface emitter rather than its source sphere.
+The FX workspace preset and panel layout also survived reload together.
+
+Current limitations include 120 Hz quantization, static emitter-property settings,
+replay after edits/backward seeks, device-limited point sizes and approximate
+transparent sorting. Collisions, trails, animated field objects, cache export,
+and splat-particle rendering remain unimplemented. The existing Vite large-bundle
+warning remains; the production bundle grew by approximately 88 kB before compression.

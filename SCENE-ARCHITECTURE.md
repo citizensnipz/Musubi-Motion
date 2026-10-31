@@ -17,6 +17,7 @@ SceneDocument v1
     SplatShape: name, parentId, assetId, offset, optional binding/elasticity
     CurveShape: name, parentId, degree, weighted points, knots, closed, color
     MeshShape: name, parentId, vertices[id, position], faces[id, vertex IDs], color, shading, wireframe
+    ParticleShape: name, parentId, emission/seed/timing, motion/fields, lifetime appearance, optional mesh source
   assets[id]: procedural generator or original file metadata
   joints?: local position/rotation, name, ID, parentId
   animation?: fps, start, end, loop, tracks
@@ -35,7 +36,7 @@ SceneDocument v1
 - Joint hierarchy parenting preserves the authored world pose and rejects
   cycles. General transform grouping, interactive object parenting, and DAG
   instancing remain future work. Archive transforms require one shape, either a
-  splat shape, controller curve shape, or polygon mesh shape.
+  splat shape, controller curve shape, polygon mesh shape, or particle emitter shape.
 - Binding records influence joint IDs, rest matrices and optional sparse component
   weight overrides. Shared skin-weight commands validate and normalize authored
   rows; unedited components retain nearest-four distance weights. Spark receives
@@ -218,6 +219,30 @@ Zundo imports Zustand's root entry point. Vite aliases that exact entry to
 same alias and inline Zundo.
 
 ## Persistence and verification
+
+Particle settings are validated by `particle-emitter.ts`; creation and updates
+replace immutable shapes in one history step. Surface emitters are children of
+their source mesh's transform, so subtree deletion also removes the emitter.
+The scene-wide validator checks source references, parent links, duration at the
+current FPS, and particle budgets. Animation settings enforce those budgets too.
+
+`particle-pose-sampler.ts` evaluates authored animation→SDK→IK→constraints at
+historical birth times, excluding viewport drafts and turntable rotation. Its
+cache is limited to 256 frames and approximately 32,768 matrices (one frame is
+always retained). `particle-simulation.ts` uses pinned Nebula integration and
+behaviors with isolated seeded streams, integer birth scheduling, fixed 120 Hz
+steps, bounded output caching, and cancellable chunked backward replay. Output
+buffers do not enter the document/history. A new document revision rebuilds the
+simulation; changing selection or camera does not. There is no resumable exported
+solver snapshot: backward replay rebuilds the seeded library state.
+
+`particle-runtime.ts` rejects stale async results across seeks, edits, suspension,
+and disposal. `particle-renderer.ts` renders world-space buffers under a local
+emitter marker, compensating for the current emitter hierarchy transform. This
+keeps old particles stationary when the emitter moves; the separate turntable
+presentation can rotate the cloud. Bounds include the current cloud, while
+viewport clicking and marquee selection use the emitter marker. Shader points
+respect opaque geometry depth; transparent cross-object sorting is approximate.
 
 Portable `.msb` ZIP packages store the scene and original asset bytes. Camera
 and current time in seconds are stored separately from scene animation settings.

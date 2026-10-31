@@ -15,7 +15,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   );
   contents.set("rigging", riggingContent);
   contents.set("terminal", terminalContent);
-  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools" };
+  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools", particles: "Particle Emitters" };
   for (const id of Object.keys(animationPanels)) {
     const wrapper = document.createElement("div"); wrapper.className = "animation-dock-host";
     contents.set(id, wrapper);
@@ -113,10 +113,16 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     api.getPanel("properties")!.api.setActive();
   }
   const layoutKey = "musubi-workspace-v1";
+  const presetControl = document.getElementById("workspace-preset") as HTMLSelectElement;
+  const presetKey = "musubi-workspace-preset-v1";
   let restored = false;
   try {
     const saved = localStorage.getItem(layoutKey);
-    if (saved) { api.fromJSON(JSON.parse(saved)); restored = true; customized = true; }
+    if (saved) {
+      api.fromJSON(JSON.parse(saved)); restored = true; customized = true;
+      const preset = localStorage.getItem(presetKey);
+      if (preset && Array.from(presetControl.options).some(option => option.value === preset)) presetControl.value = preset;
+    }
   } catch { /* Fall back to the default if storage is unavailable or incompatible. */ }
   if (!restored) arrange();
   // Keep closed content mounted so scene updates can still find its elements.
@@ -124,7 +130,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     if (!host.contains(content)) parking.append(content);
   }
   function saveLayout() {
-    try { localStorage.setItem(layoutKey, JSON.stringify(api.toJSON())); }
+    try { localStorage.setItem(layoutKey, JSON.stringify(api.toJSON())); localStorage.setItem(presetKey, presetControl.value); }
     catch { /* Restricted storage must not interrupt editing. */ }
   }
   api.onDidLayoutChange(() => { customized = true; saveLayout(); });
@@ -166,7 +172,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     customized = true;
     const existing = api.getPanel(id);
     if (existing) { existing.api.setActive(); return; }
-    const attributeIds = ["driven-keys", "ik-handles", "constraints", "controllers", "skin-weights", "paint-skin-weights", "modeling"];
+    const attributeIds = ["driven-keys", "ik-handles", "constraints", "controllers", "skin-weights", "paint-skin-weights", "modeling", "particles"];
     const attribute = attributeIds.includes(id);
     const sidePanel = attribute ? ["properties", "outliner", "rigging", ...attributeIds].find(candidate => api.getPanel(candidate)) : undefined;
     const reference = sidePanel ?? (api.getPanel("viewport") ? "viewport" : api.panels[0]?.id);
@@ -183,6 +189,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     if (preset === "animation") showAnimationPanel("graph");
     if (preset === "rigging") document.getElementById("rigging-open")!.click();
     if (preset === "modeling") showAnimationPanel("modeling");
+    if (preset === "fx") showAnimationPanel("particles");
     saveLayout();
   });
   return {

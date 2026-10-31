@@ -5,6 +5,7 @@ import { validateAnimation } from "./animation.ts";
 import { validateDrivenKeys } from "./driven-keys.ts";
 import { validateIKHandles } from "./ik.ts";
 import { validateMeshShape } from "./mesh-modeling.ts";
+import { validateParticleShape, validateParticleEmitters } from "./particle-emitter.ts";
 import { validateConstraints } from "./constraints.ts";
 import { validateCurveShape } from "./controller-curves.ts";
 import { validateSkinWeights } from "./skin-weights.ts";
@@ -162,12 +163,16 @@ export function validateScene(value: unknown): SceneDocument {
       if (parent === null) fail("Mesh shape has no transform.");
       validateMeshShape(node);
       shapeCounts.set(parent as string, (shapeCounts.get(parent as string) ?? 0) + 1);
+    } else if (node.type === "particleShape") {
+      if (parent === null) fail("Particle shape has no transform.");
+      validateParticleShape(node);
+      shapeCounts.set(parent as string, (shapeCounts.get(parent as string) ?? 0) + 1);
     } else fail("Unsupported node type.");
   }
   const visited = new Set<string>();
   for (const key of parents.keys()) {
     if (shapeCounts.get(key) !== 1)
-      fail("Each transform must have exactly one renderable shape (splat, curve or mesh).");
+      fail("Each transform must have exactly one renderable shape (splat, curve, mesh or particles).");
     const path = new Set<string>();
     let current: string | null = key;
     while (current !== null && !visited.has(current)) {
@@ -194,6 +199,7 @@ export function validateScene(value: unknown): SceneDocument {
   if (doc.drivenKeys !== undefined) validateDrivenKeys(doc.drivenKeys, value as SceneDocument);
   if (doc.ikHandles !== undefined) validateIKHandles(doc.ikHandles, value as SceneDocument);
   if (doc.constraints !== undefined) validateConstraints(doc.constraints, value as SceneDocument);
+  validateParticleEmitters(value as SceneDocument);
   return value as SceneDocument;
 }
 function validateEditor(value: unknown): EditorSnapshot {
