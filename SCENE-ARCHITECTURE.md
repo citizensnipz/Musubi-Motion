@@ -19,7 +19,7 @@ SceneDocument v1
     MeshShape: name, parentId, vertices[id, position], faces[id, vertex IDs], color, shading, wireframe
     ParticleShape: name, parentId, emission/seed/timing, motion/fields, lifetime appearance, optional mesh source
   assets[id]: procedural generator or original file metadata
-  joints?: local position/rotation, name, ID, parentId
+  joints?: local position/rotation, preferredAngle, name, ID, parentId
   animation?: fps, start, end, loop, tracks
     track: ID, targetId, channel, keys
   drivenKeys?: driver property, driven property, response curve
@@ -181,6 +181,21 @@ field retains CCD compatibility. Analytic handles require a finite world-space
 quaternions, preserving bone lengths and leaving the endpoint's local rotation
 unchanged. It adds deterministic fallback planes for singular inputs. Its license
 and pinned source revision ship in `public/licenses/ozz-animation.txt`.
+Optional joint `preferredAngle` triples provide an explicit local XYZ starting
+pose. Each handle first snapshots its evaluated FK link rotations, then seeds
+only root-through-pre-effector joints that have preferences. Both existing
+solvers run unchanged and blend their result against the original FK snapshot.
+Ancestors, end-joint orientation, blend-zero poses, and joints without preferences
+keep their prior behavior. No previous-frame state is used. This stabilizes the
+analytic hinge inference when animated FK rotations cross through a straight
+pose, provided the stored preferred pose supplies a suitable bend.
+
+`src/joint-preferred.ts` owns atomic metadata capture/edit/clear and explicit
+rotation keying; the Joint Settings panel uses prepared FK poses before IK.
+Preference-only metadata edits retain temporary FK input drafts, including
+through undo/redo. Changes to authored rotations, hierarchy, animation or other
+rig inputs retain the normal draft invalidation policy. Preferred angles are
+static rig settings, separate from joint orientation and rotation limits.
 Optional `targetControl` and `poleControl` records reference an ordinary transform
 by `objectId` with an XYZ world-space `offset`. The resolved point is its evaluated
 world origin plus that offset. Literal `target`/`poleTarget` values remain saved

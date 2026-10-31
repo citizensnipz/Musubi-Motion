@@ -4,6 +4,65 @@ This records the local development checkpoint, not a production rollout or a
 cross-browser certification. No deployment, push, or paid service was introduced.
 The particle checkpoint adds one pinned package, described below.
 
+## Preferred-angle IK checkpoint
+
+The full suite passed **585 tests across 54 files**, TypeScript, and the Vite
+production build. Full browser checks used `index-JAZRTsep.js`; the final panel
+copy/layout smoke check used `index-QkyGmEH8.js`. No dependency was added;
+the existing bundle-size warning remains.
+
+Investigation isolated the previous example's abrupt motion to current-FK hinge
+inference. At elbow-Z zero crossings 50.6521193316 and 70.8977247327, the inferred
+middle-local normal reverses. Full-IK shoulder/wrist orientations jump about
+180 degrees despite nearly continuous endpoint positions. With partial blend,
+the endpoint also jumps. These are orientation changes, not Euler display wraps.
+
+Optional joint `preferredAngle` metadata now supplies an explicit solver seed.
+The existing CCD and analytic mathematics are unchanged. Original evaluated FK
+rotations remain the blend origins; preferences affect only solved links.
+Ancestors and the effector retain their inputs, and absent preferences preserve
+legacy behavior. Fourteen solver tests cover zero/disabled/partial/full blend,
+arbitrary axes, partial preferences, target reach and lengths, CCD, deterministic
+frame order, crossing continuity, invalid metadata, and archive validation.
+Eighteen command tests cover atomic capture/edit/clear/key operations, ownership,
+copying, no-ops, history, and persistence. Six draft tests cover retaining FK
+input previews through preference-only edits while still invalidating other rig
+or animation changes.
+
+Local Chromium verification confirmed:
+
+- **Rigging → Joint Settings** opens a dedicated panel. Focusing and leaving an
+  unchanged unset field does not dirty the scene.
+- Capturing Shoulder with descendants at frame 0 stores Shoulder Z = -35°, Elbow
+  Z = 20°, and Wrist Z = 0°. One undo restores the clean original; redo restores
+  preferences. Native download/reopen retains the values.
+- Editing Shoulder preference to -25° and clearing the hierarchy each undo in
+  one step. Clearing disables Key because all scoped joints need preferences.
+- **Key preferred FK angles** writes three joints at frame 12 and undoes to the
+  clean saved state in one step, without disabling IK.
+- An unkeyed Shoulder FK-Z edit to 45° remains at 45° after capture. Undoing
+  capture restores preference -35° while keeping that input preview at 45°;
+  undoing the original pose edit restores the clean scene and FK-Z = -35°.
+- Escape cancels a preference field edit without dirtying the scene. The final
+  preferred example opened at frame 50; the browser reported zero console errors.
+
+`node scripts/create-preferred-ik-example.mjs` creates the 12,231-byte
+`examples/preferred-ik-motion.msb`. Before/after archive readback, 241 half-frame
+samples reached the full-IK target within **3.2e-15 scene units** and matched
+historical evaluation exactly. Across ±0.0001 frame at each problematic crossing:
+
+| Crossing frame | Legacy shoulder change | Preferred shoulder change | Legacy wrist movement | Preferred wrist movement |
+| --- | --- | --- | --- | --- |
+| 50.6521193316 | 2.66796 rad | 0.00001806 rad | 0.29316 | 0.00001461 |
+| 70.8977247327 | 2.61102 rad | 0.00001042 rad | 0.36666 | 0.00001409 |
+
+The preferred example's half-frame bake matched sampled matrices exactly. Its
+largest measured quarter-frame endpoint error was **0.0006542 scene units**,
+compared with **1.63** for the legacy seed. A half-frame motion sweep had a
+maximum adjacent joint-world rotation change of 0.04847 radians. These are
+fixture results. Pole/target singularities, shortest-arc blend branch changes,
+and general continuity across arbitrary rigs remain outside this guarantee.
+
 ## Sampled IK-to-FK bake checkpoint
 
 The full suite passed **547 tests across 52 files**, TypeScript, and the Vite

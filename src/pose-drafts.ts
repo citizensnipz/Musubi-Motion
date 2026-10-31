@@ -51,13 +51,28 @@ function changesOnlyIKBlend(next: SceneDocument, previous: SceneDocument): boole
   return changed;
 }
 
+function changesOnlyPreferredAngles(next: SceneDocument, previous: SceneDocument) {
+  const { joints, ...inputs } = next, { joints: oldJoints, ...oldInputs } = previous;
+  const keys = Object.keys(inputs) as (keyof typeof inputs)[];
+  if (keys.length !== Object.keys(oldInputs).length || keys.some(key => inputs[key] !== oldInputs[key])
+    || !joints || !oldJoints || joints.length !== oldJoints.length) return false;
+  let changed = false;
+  for (let index = 0; index < joints.length; index++) {
+    if (joints[index] === oldJoints[index]) continue;
+    const { preferredAngle, ...joint } = joints[index], { preferredAngle: oldAngle, ...oldJoint } = oldJoints[index];
+    if (JSON.stringify(joint) !== JSON.stringify(oldJoint)) return false;
+    changed ||= JSON.stringify(preferredAngle) !== JSON.stringify(oldAngle);
+  }
+  return changed;
+}
+
 function retainsDraft(next: SceneDocument, previous: SceneDocument, label: string) {
   // Joint renames replace their array but do not change the evaluated pose.
   return label.startsWith("Rename") || (
     next.animation === previous.animation && next.joints === previous.joints &&
     next.drivenKeys === previous.drivenKeys && next.ikHandles === previous.ikHandles &&
     next.constraints === previous.constraints
-  ) || changesOnlyIKBlend(next, previous);
+  ) || changesOnlyIKBlend(next, previous) || changesOnlyPreferredAngles(next, previous);
 }
 
 /**

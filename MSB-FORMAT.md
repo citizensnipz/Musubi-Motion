@@ -56,7 +56,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 
 | Field | Stored data |
 | --- | --- |
-| `joints` | Joint IDs/names, parent IDs, local position, optional XYZ Euler rotation in degrees |
+| `joints` | Joint IDs/names, parent IDs, local position, optional XYZ Euler `rotation` and `preferredAngle` in degrees |
 | `SplatShape.binding` | Influence joint IDs, matching rest matrices, optional sparse `weights` |
 | `SplatShape.elasticity` | Stretch/spacing/expansion, allocation budget, optional density/distribution, selected connection scope |
 | `CurveShape` | `type: "curveShape"`, ID/name/parent ID, `degree`, weighted `points`, `knots`, `closed`, `color` |
@@ -152,6 +152,13 @@ Stored driven scale keys must be positive (at least 0.001), and visibility keys
 must be within 0–1. The runtime also clamps interpolated scale/visibility outputs.
 SDK supports only transform/joint pose properties; neither driver nor output
 may reference `ik.blend` or an IK handle.
+
+Joint `preferredAngle` is an optional dense finite XYZ Euler triple in degrees,
+validated like `rotation`. Missing preferences preserve existing FK-based IK
+seeding. Stored preferences seed solved links for both solvers; they do not change
+authored FK channels, bind matrices, joint orientation, or the effector's local
+rotation. This additive field needs no archive version change. The
+[preferred-pose study](examples/preferred-ik-motion.msb) exercises persistence.
 
 IK validation requires a root-to-descendant joint chain with nonzero authored
 segment lengths, finite targets, blend within 0–1, and 1–128 iterations. It caps

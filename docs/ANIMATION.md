@@ -393,6 +393,43 @@ remain unavailable. Matching a target position alone does not reproduce every
 possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
 
+## Preferred joint angles
+
+Open **Rigging → Joint Settings** and choose a joint, or use the current viewport
+selection. **Capture FK angles** stores local XYZ rotations from the prepared FK
+pose, before IK. With **Include descendants** enabled, capture applies to the
+whole joint hierarchy beneath that joint. Pose a useful elbow/knee bend before
+capturing; a straight preferred pose still needs the solver's singular fallback.
+
+The XYZ fields edit the selected joint's stored preference. **Clear preferred
+angles** restores FK-based solver initialization for the chosen scope. Both CCD
+and analytic two-bone IK seed their solved links from stored preferences, while
+partial IK blend still starts from the current animated or previewed FK pose.
+The end joint keeps its FK local orientation. Preferences are static settings;
+they do not change bone positions, joint orientation, rotation limits, or bind
+matrices. Existing scenes without preferences keep their previous behavior.
+
+**Key preferred FK angles** writes rotation X/Y/Z at the current frame for the
+selected scope, in one undo step. Every joint in scope must have preferences, and
+normal SDK/channel ownership rules apply. Keying leaves IK enabled; use blend 0
+to view the keyed FK pose. Capture, manual editing, clearing, and keying all
+support undo and saving. Metadata-only preference edits retain unkeyed FK input
+previews; scrubbing, keying, and changes to other rig inputs still invalidate them.
+
+The [preferred-pose study](../examples/preferred-ik-motion.msb) captures shoulder
+and elbow angles at frame 0 in the animated-blend example. Without preferences,
+the inferred hinge reverses when the FK elbow crosses zero near frames 50.6521
+and 70.8977. With preferences, the same solver starts on a consistent branch.
+`node scripts/create-preferred-ik-example.mjs` verifies those crossings, target
+reach, historical evaluation, archive readback, and the resulting half-frame bake.
+The maximum measured quarter-frame bake endpoint error drops from 1.63 to
+0.000655 scene units. Pole/target singularities and shortest-arc quaternion blend
+discontinuities can still occur in other poses; this feature is not a universal
+continuity solver.
+
+This follows Maya's [preferred-angle workflow](https://help.autodesk.com/cloudhelp/2025/ENU/Maya-CharacterAnimation/files/GUID-5A8BB621-96E0-4CE8-9792-085EC8F07164.htm),
+adapted to the existing Three.js and ozz-based solvers without new solver math.
+
 ## Bake IK to FK
 
 Open **Animation → Bake IK to FK**, or **Bake frame range…** in IK Handles.
@@ -438,7 +475,8 @@ The example's mixed-blend source already changes pose abruptly near frames 51
 and 71. Its half-frame bake matches sampled matrices within 1.3e-15, but the
 largest measured quarter-frame endpoint difference is 1.63 scene units around
 those changes. A denser sample interval narrows the affected intervals; it does
-not repair a discontinuity in the source rig.
+not repair a discontinuity in the source rig. The preferred-angle workflow above
+removes these particular FK zero-crossing discontinuities before baking.
 
 ## Skin weights
 

@@ -27,6 +27,34 @@ function track(targetId: string, channel: "position.x" | "ik.blend"): AnimationT
 }
 
 describe("temporary pose draft lifecycle", () => {
+  it("retains unkeyed FK inputs through preferred-angle capture, editing, clearing and undo", () => {
+    const initial = rigFixture(), drafts = new PoseDrafts(), input = new Map([["joint", { ...pose(0), rotation: [0, 0, 35] as [number, number, number] }]]);
+    drafts.capture(initial, input);
+    const captured = { ...initial, joints: initial.joints!.map(joint => ({ ...joint, preferredAngle: [0, 0, 35] as [number, number, number] })) };
+    const result = drafts.restore(captured, initial, "Capture preferred angles");
+    expect(result.get("joint")!.rotation).toEqual([0, 0, 35]);
+    result.get("joint")!.rotation[2] = 99;
+    expect(input.get("joint")!.rotation[2]).toBe(35);
+    const edited = { ...captured, joints: captured.joints.map(joint => ({ ...joint, preferredAngle: [0, 0, 50] as [number, number, number] })) };
+    expect(drafts.restore(edited, captured, "Edit preferred angle").get("joint")!.rotation[2]).toBe(35);
+    const cleared = { ...edited, joints: edited.joints.map(({ preferredAngle: _angle, ...joint }) => joint) };
+    expect(drafts.restore(cleared, edited, "Clear preferred angles").get("joint")!.rotation[2]).toBe(35);
+    expect(drafts.restore(captured, cleared, "Undo").get("joint")!.rotation[2]).toBe(35);
+    drafts.clear();
+    expect(drafts.restore(edited, captured, "Redo").size).toBe(0);
+  });
+
+  it.each(["rotation", "position", "parentId", "animation", "constraints"])("invalidates previews when preferred-angle edits also change %s", field => {
+    const initial = rigFixture(), drafts = new PoseDrafts(); drafts.capture(initial, poses(4));
+    const changed: SceneDocument = { ...initial, joints: initial.joints!.map(joint => ({ ...joint, preferredAngle: [0, 0, 20] })) };
+    if (field === "rotation") changed.joints![0].rotation = [0, 0, 5];
+    if (field === "position") changed.joints![0].position = [1, 0, 0];
+    if (field === "parentId") changed.joints![1].parentId = null;
+    if (field === "animation") changed.animation = defaultAnimation();
+    if (field === "constraints") changed.constraints = [];
+    expect(drafts.restore(changed, initial, "Capture preferred angles").size).toBe(0);
+  });
+
   it("restores each revision's own unkeyed pose across undo and redo in one epoch", () => {
     const drafts = new PoseDrafts(), initial = fixture(), first = moved(initial), second = moved(first);
     drafts.capture(first, poses(3));

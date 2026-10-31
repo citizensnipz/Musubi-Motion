@@ -56,6 +56,7 @@ import { evaluateRigStages, getIKTargetPoints, validateIKHandles, updateIKHandle
 import { ikInputConstraintTargets } from "./ik-control-plan.ts";
 import { createIKPanel } from "./ik-panel.ts";
 import { createIKBakePanel } from "./ik-bake-panel.ts";
+import { createJointSettingsPanel } from "./joint-settings-panel.ts";
 import { validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
@@ -255,6 +256,7 @@ async function start() {
   let drivenPanel: ReturnType<typeof createDrivenKeyPanel> | undefined;
   let ikPanel: ReturnType<typeof createIKPanel> | undefined;
   let ikBakePanel: ReturnType<typeof createIKBakePanel> | undefined;
+  let jointSettingsPanel: ReturnType<typeof createJointSettingsPanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
   let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
@@ -709,6 +711,7 @@ async function start() {
     timelinePanel?.refresh();
     animationEditors?.refresh();
     controllerPanel?.refresh();
+    jointSettingsPanel?.refresh();
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
@@ -798,6 +801,7 @@ async function start() {
     timelinePanel?.refresh();
     const history = store.temporal.getState();
     ikBakePanel?.refresh();
+    jointSettingsPanel?.refresh();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
     redoButton.disabled =
@@ -867,6 +871,14 @@ async function start() {
     },
   });
   workspace.registerPanel("ik-bake", "Bake IK to FK", ikBakePanel.element);
+  jointSettingsPanel = createJointSettingsPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection, getFKPoses: () => fkPoses, getFrame,
+    canKey: () => !timelinePanel?.turntable,
+    onSelect: selectAnimationTarget,
+    onStatus: message => { notice.textContent = message; },
+  });
+  workspace.registerPanel("joint-settings", "Joint Settings", jointSettingsPanel.element);
   ikPanel.element.addEventListener("ik-range-bake", event => {
     ikBakePanel?.selectHandle((event as CustomEvent<string>).detail);
     element("view-ik-bake").click();
@@ -1555,6 +1567,7 @@ async function start() {
     controllerPanel?.refresh();
     ikBakePanel?.refresh();
     skinWeightsPanel?.refresh();
+    jointSettingsPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
     updateWeightPreview();
@@ -1614,6 +1627,7 @@ async function start() {
     ikPanel?.refresh();
     constraintsPanel?.refresh();
     particlePanel?.refresh();
+    jointSettingsPanel?.refresh();
   }
   function updateParticles() {
     if (loading) return;
@@ -1689,6 +1703,7 @@ async function start() {
     store.temporal.getState().pause();
     store.setState({ document: doc, editLabel: "Open scene" });
     ikBakePanel?.resetScene();
+    jointSettingsPanel?.resetScene();
     store.temporal.getState().resume();
     store.temporal.getState().clear();
     previousObjects.forEach(disposeObject);

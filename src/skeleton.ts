@@ -2,13 +2,14 @@ import * as THREE from "three";
 import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type WaDropdownItem from "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import type { SceneStore } from "./scene-store.ts";
-export type Joint = { id: string; name: string; parentId: string | null; position: [number, number, number]; rotation?: [number, number, number] };
+export type Joint = { id: string; name: string; parentId: string | null; position: [number, number, number]; rotation?: [number, number, number]; preferredAngle?: [number, number, number] };
 export function validateJoints(joints: Joint[]) {
   if (!Array.isArray(joints) || joints.length > 1000) throw Error("Invalid joints");
   const ids = new Set(joints.map(j => j.id));
   if (ids.size !== joints.length) throw Error("Duplicate joint IDs");
   for (const j of joints) {
-    if (j.rotation !== undefined && (!Array.isArray(j.rotation) || j.rotation.length !== 3 || !j.rotation.every(Number.isFinite))) throw Error("Invalid joint rotation");
+    if (j.rotation !== undefined && (!Array.isArray(j.rotation) || j.rotation.length !== 3 || ![0, 1, 2].every(index => Number.isFinite(j.rotation![index])))) throw Error("Invalid joint rotation");
+    if (j.preferredAngle !== undefined && (!Array.isArray(j.preferredAngle) || j.preferredAngle.length !== 3 || ![0, 1, 2].every(index => Number.isFinite(j.preferredAngle![index])))) throw Error("Invalid joint preferred angle");
     if (typeof j.id !== "string" || typeof j.name !== "string" || !j.name.trim() || !Array.isArray(j.position) || j.position.length !== 3 || !j.position.every(Number.isFinite)) throw Error("Invalid joint");
     const seen = new Set([j.id]);
     let parent = j.parentId;

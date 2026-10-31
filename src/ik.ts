@@ -204,6 +204,7 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
   const targetPoints = getIKTargetPoints(doc, poses);
   if (!handles.length) return;
   const rig = resetRig(doc, poses);
+  const preferences = new Map((doc.joints ?? []).filter(joint => joint.preferredAngle !== undefined).map(joint => [joint.id, joint.preferredAngle!]));
   const targetPosition = new Vector3(), rootPosition = new Vector3(), endPosition = new Vector3(), localAxis = new Vector3();
   const axis = new Vector3(), direction = new Vector3(), delta = new Quaternion(), worldRotation = new Quaternion();
   for (const { handle, blend } of handles) {
@@ -212,6 +213,16 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
     if (chain.slice(1).some(id => rig.bones.get(id)!.position.lengthSq() < 1e-12)) continue;
     const links = chain.slice(0, -1).reverse(), end = rig.bones.get(handle.endId)!;
     const originals = new Map(links.map(id => [id, rig.bones.get(id)!.quaternion.clone()]));
+    // Preferred angles seed only this solver's links. Keep the evaluated FK
+    // quaternions above as blend origins; ancestors and the effector stay FK.
+    let seeded = false;
+    for (const id of links) {
+      const preferred = preferences.get(id);
+      if (!preferred) continue;
+      rig.bones.get(id)!.rotation.set(...preferred.map(MathUtils.degToRad) as Vec3, "XYZ");
+      seeded = true;
+    }
+    if (seeded) rig.mesh.updateMatrixWorld(true);
     const points = targetPoints.get(handle.id)!;
     targetPosition.fromArray(points.target);
     if (handle.solver === "two-bone") {
