@@ -74,6 +74,16 @@ triangle-to-authored-face mappings. Buffers, computed normals, bounds, and polyg
 wire overlays belong to `mesh-renderer.ts`, outside the document/history. Appearance
 changes reuse geometry; topology changes dispose replaced geometry.
 
+`setMeshTopology` validates a complete replacement, defensively copies caller-owned
+vertex positions and face loops, and preserves the shape's owning transform and
+appearance. Merge-to-center rewrites shared corners and rejects pinches/duplicate
+faces. Delete Edge traces directed region boundaries and retains unused vertices;
+holes and unselected interior edges are rejected. Normal reversal changes full
+edge-connected shells to preserve consistent winding. These commands live in
+separate modules and share the same undo/persistence path. Existing valid
+dominant-axis tessellations are preserved; bent n-gons can fall back to an
+orthonormal area-normal projection with the same intersection/triangle checks.
+
 Component gizmos capture the selected components' unique vertices and the mesh's
 world matrix once at gesture start. `mesh-component-transform.ts` applies each
 complete world-space gizmo delta to that immutable baseline, converting it back

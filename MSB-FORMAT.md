@@ -87,7 +87,9 @@ Polygon mesh shapes need no asset entry. They support up to 100,000 vertices and
 100,000 faces, with 3–64 distinct existing vertex IDs per face. Positions are finite
 within ±1,000,000. Component IDs are unique within the shape. Validation rejects
 inconsistent winding, nonmanifold edges/vertex fans, zero-area faces, and polygons
-whose dominant-plane projection self-intersects or cannot be triangulated. Open
+that cannot be triangulated without self-intersection or degenerate triangles.
+Validation first uses the dominant-axis projection, with an orthonormal frame
+around the area-weighted face normal as a fallback for bent n-gons. Open
 surfaces and empty meshes are valid. Intersections between separate faces are not
 checked. `shading` is `flat` or `smooth`, `wireframe` is boolean, and `color` is a
 six-digit hex string. Derived edges, triangulation, normals, selections, and GPU

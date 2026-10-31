@@ -375,3 +375,63 @@ buffers, normals and bounds. They exclude selection overlays, editor callbacks,
 browser scheduling and GPU upload/rendering. Release still runs full validation
 and triangulation synchronously. Pivot/axis customization, snapping, soft
 selection and component animation remain unimplemented.
+
+## Topology editing checkpoint
+
+`npm test` passes 381 tests across 42 files; `npm run build` passes with the
+existing large-bundle warning. Thirty-six added tests cover merge-to-center,
+interior-edge deletion, shell-normal reversal, immutable topology replacement,
+atomic failure, undo/redo and archive round trips. Tests also verify that valid
+existing tessellations remain unchanged, while bent cube n-gons can use the
+area-normal projection fallback. Self-crossing planar faces still reject.
+
+Browser verification used the Modeling workspace and actual controls/shortcuts:
+
+- Delete dissolved one cube edge: 8 vertices / 12 edges / 6 faces became
+  8 vertices / 11 edges / 5 faces, with a selected six-sided face. Undo/redo
+  restored both states. Holding Delete did not delete the resulting faces;
+  Ctrl+Delete was consumed without deleting the object.
+- Merging diagonal corners of a quad was rejected while retaining the original
+  geometry, clean saved state, and redo history. Merging one cube face produced
+  a pyramid with 5 vertices / 8 edges / 5 faces and selected the survivor. Undo
+  restored the original cube.
+- Shell-normal reversal retained the one-face seed selection. Undo/redo worked.
+  A downloaded scene retained eight vertex positions, the dissolved n-gon, and
+  reversed loops on all unaffected original faces. Reopening restored the five
+  faces and started with empty history.
+- Deleting a plane's border edge was rejected. Backspace in Face mode removed
+  the face while keeping the mesh object, and undo restored it. Delete inside a
+  numeric vertex field performed native text editing; Escape restored the field
+  without leaving component mode.
+- `examples/mesh-topology-study.msb` opened three meshes and sixteen faces, with
+  the expected original cube, dissolved cube, and merged pyramid. The browser
+  reported no console errors.
+- Creation controls fold when meshes arrive, while an explicitly reopened
+  section stays open across ordinary selection refreshes. The collapsed local
+  offset section still applies edits and undoes back to a clean saved scene.
+  Merge to Center is visible without scrolling at the tested 1,600 × 1,000 layout.
+
+Review caught a key-repeat hazard: dissolving an edge switches to Face mode, so
+the next repeated Delete event could remove the newly selected faces. The component
+shortcut handler now consumes repeats before performing any command; the held-key
+browser check above verifies the fix.
+
+A further regression test reproduced dissolving five cube faces into a loop
+opposite the sixth face, creating overlapping duplicates. Delete Edge now checks
+canonical face cycles before committing. The test covers all six choices of
+excluded face and verifies unchanged document/history on rejection.
+
+`node scripts/benchmark-mesh-topology.mjs` ran on Node 22.16.0 with two warmups
+and five timed samples per command, each on a fresh store:
+
+| Faces / vertices | Merge median | Delete Edge median | Reverse Normals median |
+| --- | --- | --- | --- |
+| 1,024 / 1,089 | 6.389 ms | 6.939 ms | 5.684 ms |
+| 10,000 / 10,201 | 68.960 ms | 82.538 ms | 63.184 ms |
+
+These timings include shared validation, defensive topology copying and one undo
+commit. They exclude store creation, selection lookup outside the command, editor
+callbacks, renderer rebuilding and GPU work. Commands remain synchronous. No new
+dependencies were added. Merge by distance, bridge, Delete Edge/Vertex cleanup,
+custom normals, inset/bevel/subdivision and other remaining modeling work are
+documented in the modeling guide.

@@ -1,6 +1,9 @@
 import { createMeshPrimitive, findMeshShape, meshEdges, setMeshVertexPositions, updateMeshAppearance, extrudeMeshFaces, deleteMeshFaces } from "./mesh-modeling.ts";
 import type { MeshShapeNode, Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
+import { mergeMeshVerticesToCenter } from "./mesh-merge.ts";
+import { deleteMeshEdges } from "./mesh-edge-delete.ts";
+import { reverseMeshNormals } from "./mesh-normals.ts";
 
 export type MeshComponentMode = "vertex" | "edge" | "face";
 type Options = {
@@ -22,7 +25,8 @@ export function createModelingPanel(store: SceneStore, options: Options) {
     .modeling-panel label{display:grid;gap:5px;margin:8px 0}.modeling-panel input,.modeling-panel select,.modeling-panel textarea,.modeling-panel button{font:inherit;padding:6px;min-width:0;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--text);box-sizing:border-box}
     .modeling-panel input:not([type=checkbox]),.modeling-panel select,.modeling-panel textarea{width:100%}.modeling-panel textarea{font:11px monospace;resize:vertical}.modeling-panel button{cursor:pointer}.modeling-panel button:hover:not(:disabled){background:var(--hover)}.modeling-panel :disabled{opacity:.45;cursor:default}
     .modeling-panel :focus-visible{outline:1px solid var(--strong)}.modeling-panel .modeling-xyz{display:grid;grid-template-columns:repeat(3,minmax(40px,1fr));gap:6px}.modeling-panel .modeling-actions{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
-    .modeling-panel .modeling-check{display:flex;gap:7px;align-items:center}.modeling-panel .modeling-status{min-height:20px;overflow-wrap:anywhere}.modeling-panel .modeling-status[data-error=true]{color:#ce756a}`;
+    .modeling-panel .modeling-check{display:flex;gap:7px;align-items:center}.modeling-panel .modeling-status{min-height:20px;overflow-wrap:anywhere}.modeling-panel .modeling-status[data-error=true]{color:#ce756a}
+    .modeling-panel details{margin:8px 0 12px}.modeling-panel summary{cursor:pointer;padding:5px 0;color:var(--text);font-weight:600}.modeling-panel details>fieldset{margin-top:6px}`;
   function label(text: string, control: HTMLElement) { const node = document.createElement("label"); node.append(document.createTextNode(text), control); return node; }
   function group(text: string) { const node = document.createElement("fieldset"), legend = document.createElement("legend"); legend.textContent = text; node.append(legend); return node; }
   function select(name: string) { const node = document.createElement("select"); node.setAttribute("aria-label", name); return node; }
@@ -35,10 +39,13 @@ export function createModelingPanel(store: SceneStore, options: Options) {
   const status = document.createElement("p"); status.className = "modeling-status"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   let shapeId = "", selectedIds: string[] = [], selectionSignature = "", objectSignature = "", componentSignature = "", modeSignature = "", emittedSelection = "", displayedVertex = "";
   let primitiveSize = 1, primitiveName = "", offset: Vec3 = [0, 0, 0], extrudeDistance = 0.25;
+  let hadMeshes: boolean | undefined;
   let cachedShape: MeshShapeNode | undefined;
   let cachedEdges: ReturnType<typeof meshEdges> = [];
   let cachedRows: Record<MeshComponentMode, { id: string; text: string }[]> = { vertex: [], edge: [], face: [] };
   const creation = group("Create Primitive"), primitive = select("Mesh primitive");
+  const creationDetails = document.createElement("details"), creationSummary = document.createElement("summary"); creationSummary.textContent = "Create Primitive";
+  creation.querySelector("legend")!.hidden = true; creation.setAttribute("aria-label", "Create Primitive"); creationDetails.append(creationSummary, creation);
   for (const value of ["cube", "plane", "sphere", "cylinder"]) primitive.add(new Option(value[0].toUpperCase() + value.slice(1), value));
   const name = document.createElement("input"); name.type = "text"; name.maxLength = 100; name.value = primitiveName; name.placeholder = "Use primitive name"; name.setAttribute("aria-label", "New mesh name");
   const size = number("Mesh primitive size", "1"); size.min = "0.000001"; size.max = "1000000";
@@ -58,7 +65,8 @@ export function createModelingPanel(store: SceneStore, options: Options) {
   const idDetails = document.createElement("details"), idSummary = document.createElement("summary"); idSummary.textContent = "Component IDs"; idDetails.append(idSummary, ids);
   const cap = document.createElement("p");
   const absolute = axes("Vertex local position"), absoluteGroup = document.createElement("div"), absoluteTitle = document.createElement("p"); absoluteTitle.textContent = "Single vertex · absolute local position"; absoluteGroup.append(absoluteTitle, absolute.row);
-  const delta = axes("Component local offset"), deltaTitle = document.createElement("p"); deltaTitle.textContent = "Selected components · local offset";
+  const delta = axes("Component local offset");
+  const offsetDetails = document.createElement("details"), offsetSummary = document.createElement("summary"); offsetSummary.textContent = "Local component offset"; offsetDetails.append(offsetSummary);
   const applyOffset = button("Apply offset", () => run(() => {
     const shape = requiredShape(), affected = selectedVertices(shape);
     if (!affected.size) throw Error("Select vertices, edges, or faces before applying an offset.");
@@ -68,19 +76,36 @@ export function createModelingPanel(store: SceneStore, options: Options) {
   const extrude = button("Extrude selected faces", () => run(() => {
     const shape = requiredShape(); requireFaces(); const next = extrudeMeshFaces(store, shape.id, [...selectedIds], extrudeDistance); selectedIds = [...next];
   }, "Faces extruded. New top faces selected."));
-  const remove = button("Delete selected faces", () => run(() => { const shape = requiredShape(); requireFaces(); deleteMeshFaces(store, shape.id, [...selectedIds]); selectedIds = []; }, "Selected faces deleted."));
+  const remove = button("Delete selected faces", () => deleteSelectedComponents());
   const faceButtons = document.createElement("div"); faceButtons.className = "modeling-actions"; faceButtons.append(extrude, remove);
-  const extrusionHelp = document.createElement("p"); extrusionHelp.textContent = "Extrude one edge-connected face region along its average local normal. Use a nonzero distance within ±1,000,000. A closed whole-mesh selection has no boundary and cannot be extruded. Invalid topology is rejected without a partial edit.";
+  const extrusionHelp = document.createElement("p"); extrusionHelp.textContent = "Extrude one edge-connected face region along its average local normal.";
+  extrusionHelp.title = "Use a nonzero distance within ±1,000,000. A closed whole-mesh selection has no boundary and cannot be extruded. Invalid topology is rejected without a partial edit.";
   faceActions.append(label("Extrude distance · local units", distance), faceButtons, extrusionHelp);
   const componentHelp = document.createElement("p"); componentHelp.textContent = "Choose a component mode to edit in the viewport or select IDs here. Offsets move the unique vertices belonging to the selected components in mesh-local coordinates. Topology and position edits use undo and save with the scene; component selection is temporary.";
+  offsetDetails.append(delta.row, applyOffset, componentHelp);
   const gizmoHelp = document.createElement("p"); gizmoHelp.textContent = "W Move · E Rotate · R Scale. Drag to preview; release to apply. Escape cancels the drag, then exits component mode.";
   gizmoHelp.title = "Gizmos use world axes and the center of the selected vertices. Each drag creates one undo step. Numeric fields below use local axes.";
-  components.append(label("Mode", mode), gizmoHelp, summary, label("Component", picker), selectionActions, cap, idDetails, absoluteGroup, deltaTitle, delta.row, applyOffset, faceActions, componentHelp);
+  components.append(label("Mode", mode), gizmoHelp, summary, label("Component", picker), selectionActions, cap, idDetails, absoluteGroup, offsetDetails);
+  const topology = group("Edit Topology");
+  const merge = button("Merge to center", () => run(() => {
+    const shape = requiredShape(), survivor = mergeMeshVerticesToCenter(store, shape.id, [...selectedVertices(shape)]);
+    mode.value = "vertex"; selectedIds = [survivor];
+  }, "Vertices welded to their average position. The surviving vertex is selected."));
+  merge.title = "Weld the vertices of the selected components to their average local position. Invalid topology is rejected.";
+  const edgeActions = document.createElement("div"), removeEdges = button("Delete selected edges", () => deleteSelectedComponents());
+  const edgeHelp = document.createElement("p"); edgeHelp.textContent = "Delete dissolves interior edges into polygon faces and keeps their vertices. Delete faces to remove border edges.";
+  edgeActions.append(removeEdges, edgeHelp); topology.append(merge, edgeActions, faceActions);
   const appearance = group("Appearance"), color = document.createElement("input"); color.type = "color"; color.setAttribute("aria-label", "Mesh color");
   const shading = select("Mesh shading"); shading.add(new Option("Flat", "flat")); shading.add(new Option("Smooth", "smooth"));
   const wireframe = document.createElement("input"); wireframe.type = "checkbox"; const wireframeLabel = label("Wireframe", wireframe); wireframeLabel.className = "modeling-check";
-  appearance.append(label("Color", color), label("Shading", shading), wireframeLabel);
-  element.append(style, creation, label("Mesh object", objects), empty, components, appearance, status);
+  const reverseAll = button("Reverse all normals", () => run(() => { reverseMeshNormals(store, requiredShape().id); }, "All face normals reversed."));
+  const reverseShells = button("Reverse selected shell normals", () => run(() => {
+    const shape = requiredShape(); requireFaces(); reverseMeshNormals(store, shape.id, [...selectedIds]);
+  }, "Normals reversed on the connected shells of the selected faces."));
+  reverseAll.title = reverseShells.title = "Reverse face winding. Double-sided shading may look unchanged.";
+  const normalActions = document.createElement("div"); normalActions.className = "modeling-actions"; normalActions.append(reverseAll, reverseShells);
+  appearance.append(label("Color", color), label("Shading", shading), wireframeLabel, normalActions);
+  element.append(style, creationDetails, label("Mesh object", objects), empty, components, topology, appearance, status);
 
   function requiredShape(): MeshShapeNode {
     const shape = findMeshShape(store.getState().document, shapeId); if (!shape) throw Error("Choose an editable mesh first."); return shape;
@@ -106,6 +131,18 @@ export function createModelingPanel(store: SceneStore, options: Options) {
     return new Set<string>();
   }
   function requireFaces() { if (componentMode() !== "face" || !selectedIds.length) throw Error("Select faces before using this operation."); }
+  function deleteSelectedComponents(): boolean {
+    const kind = componentMode();
+    if (kind === "face") {
+      run(() => { const shape = requiredShape(); requireFaces(); deleteMeshFaces(store, shape.id, [...selectedIds]); selectedIds = []; }, "Selected faces deleted.");
+      return true;
+    }
+    if (kind === "edge") {
+      run(() => { const shape = requiredShape(); const faces = deleteMeshEdges(store, shape.id, [...selectedIds]); mode.value = "face"; selectedIds = faces; }, "Edges dissolved. Resulting faces selected.");
+      return true;
+    }
+    return false;
+  }
   function run(action: () => void, message = "") {
     if (!options.available()) { status.textContent = "Pause playback and finish the current operation before editing meshes."; status.dataset.error = "true"; return; }
     try { action(); status.textContent = message; status.dataset.error = "false"; }
@@ -146,7 +183,7 @@ export function createModelingPanel(store: SceneStore, options: Options) {
   }
   function resetScene() {
     stopEditing(); shapeId = ""; selectionSignature = JSON.stringify(options.getSelection()); selectedIds = []; componentSignature = ""; displayedVertex = ""; emittedSelection = "";
-    offset = [0, 0, 0]; status.textContent = ""; status.dataset.error = "false"; refresh();
+    hadMeshes = undefined; offset = [0, 0, 0]; status.textContent = ""; status.dataset.error = "false"; refresh();
   }
   function setComponentSelection(targetShapeId: string, kind: MeshComponentMode, nextIds: string[]) {
     if (!["vertex", "edge", "face"].includes(kind)) throw Error("Unknown mesh component mode.");
@@ -161,6 +198,8 @@ export function createModelingPanel(store: SceneStore, options: Options) {
   function refresh() {
     const doc = store.getState().document, available = options.available(), selection = options.getSelection(), selectionKey = JSON.stringify(selection);
     const shapes = Object.values(doc.nodes).filter((node): node is MeshShapeNode => node.type === "meshShape");
+    const hasMeshes = shapes.length > 0;
+    if (hadMeshes !== hasMeshes) { hadMeshes = hasMeshes; creationDetails.open = !hasMeshes; }
     if (selectionKey !== selectionSignature) {
       selectionSignature = selectionKey; const selected = selection.length === 1 ? findMeshShape(doc, selection[0]) : undefined;
       if (shapeId !== (selected?.id ?? "")) { shapeId = selected?.id ?? ""; selectedIds = []; mode.value = "object"; }
@@ -187,7 +226,12 @@ export function createModelingPanel(store: SceneStore, options: Options) {
     absolute.inputs.forEach((input, axis) => { input.disabled = !available || !singleVertex; if (singleVertex) setValue(input, String(singleVertex.position[axis]), force); });
     for (const input of delta.inputs) input.disabled = !available || !kind || !selectedIds.length;
     applyOffset.disabled = !available || !kind || !selectedIds.length;
+    topology.hidden = !shape || !kind;
+    merge.disabled = !available || !kind || !selectedIds.length || (kind === "vertex" && selectedIds.length < 2);
+    edgeActions.hidden = kind !== "edge"; removeEdges.disabled = !available || kind !== "edge" || !selectedIds.length;
     faceActions.hidden = kind !== "face"; extrude.disabled = remove.disabled = !available || kind !== "face" || !selectedIds.length;
+    reverseAll.disabled = !available || !shape?.faces.length;
+    reverseShells.hidden = kind !== "face"; reverseShells.disabled = !available || kind !== "face" || !selectedIds.length;
     if (shape) { setValue(color, shape.color); shading.value = shape.shading; wireframe.checked = shape.wireframe; }
     const requestedMode = shape && kind ? JSON.stringify([shape.id, kind]) : "";
     const retainActiveMode = !!requestedMode && requestedMode === modeSignature && options.keepComponentMode?.();
@@ -197,5 +241,5 @@ export function createModelingPanel(store: SceneStore, options: Options) {
     if (nextSelection !== emittedSelection) { emittedSelection = nextSelection; if (shape && kind) options.onComponentSelection(shape.id, kind, [...selectedIds]); }
   }
   store.subscribe(() => refresh()); refresh();
-  return { element, refresh, resetScene, stopEditing, setComponentSelection };
+  return { element, refresh, resetScene, stopEditing, setComponentSelection, deleteSelectedComponents };
 }

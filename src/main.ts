@@ -1407,6 +1407,13 @@ async function start() {
     }
     const editing = isEditing(event);
     if (editing) return; // Preserve native text editing undo inside fields.
+    if (meshComponentRequest && ["delete", "backspace"].includes(key)) {
+      event.preventDefault();
+      if (event.repeat || event.altKey || loading || dragId || playing) return;
+      if (event.ctrlKey || event.metaKey) notice.textContent = "Use Delete to dissolve edges. Deleting associated vertices is not supported yet.";
+      else if (!modelingPanel?.deleteSelectedComponents()) notice.textContent = "Switch to Edge or Face mode to delete components.";
+      return;
+    }
     if ((componentPickShape || paintSettings || meshComponentRequest) && ["delete", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
       event.preventDefault(); notice.textContent = "Exit component editing before deleting or keying an object."; return;
     }

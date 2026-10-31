@@ -9,7 +9,7 @@ export type MeshEdge = { id: string; vertices: [string, string]; faceIds: string
 export type MeshTriangulation = { positions: Float32Array; indices: number[]; triangleFaceIds: string[]; vertexIds: string[] };
 const MAX_COMPONENTS = 100_000;
 const validId = (id: unknown): id is string => typeof id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(id) && !["__proto__", "constructor", "prototype"].includes(id);
-const validPosition = (position: unknown): position is Vec3 => Array.isArray(position) && position.length === 3 && position.every(value => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e6);
+const validPosition = (position: unknown): position is Vec3 => Array.isArray(position) && position.length === 3 && [0, 1, 2].every(index => typeof position[index] === "number" && Number.isFinite(position[index]) && Math.abs(position[index]) <= 1e6);
 const edgeKey = (a: string, b: string) => JSON.stringify(a < b ? [a, b] : [b, a]);
 
 export function findMeshShape(doc: SceneDocument, id: string): MeshShapeNode | undefined {
@@ -59,9 +59,22 @@ function faceTriangles(face: MeshFace, vertices: ReadonlyMap<string, MeshVertex>
   if (normal.length() <= areaTolerance) throw Error("Mesh faces must have nonzero area.");
   const axis = Math.abs(normal.x) > Math.abs(normal.y) ? Math.abs(normal.x) > Math.abs(normal.z) ? 0 : 2 : Math.abs(normal.y) > Math.abs(normal.z) ? 1 : 2;
   const projected = points.map(point => axis === 0 ? new Vector2(point.y - points[0].y, point.z - points[0].z) : axis === 1 ? new Vector2(point.x - points[0].x, point.z - points[0].z) : new Vector2(point.x - points[0].x, point.y - points[0].y));
+  try { return triangulateProjection(projected, points, normal, areaTolerance); }
+  catch {
+    // Keep existing valid tessellations. Bent n-gons (for example, two cube
+    // faces after deleting their shared edge) can collapse in a coordinate-axis
+    // projection. Retry in an orthonormal frame around the area-weighted normal.
+    const unit = normal.clone().normalize(), absolute = [Math.abs(unit.x), Math.abs(unit.y), Math.abs(unit.z)];
+    const reference = new Vector3().setComponent(absolute.indexOf(Math.min(...absolute)), 1);
+    const u = reference.cross(unit).normalize(), v = unit.clone().cross(u);
+    const fallback = points.map(point => { const relative = point.clone().sub(points[0]); return new Vector2(relative.dot(u), relative.dot(v)); });
+    return triangulateProjection(fallback, points, normal, areaTolerance);
+  }
+}
+function triangulateProjection(projected: Vector2[], points: Vector3[], normal: Vector3, areaTolerance: number): number[][] {
   for (let a = 0; a < projected.length; a++) for (let b = a + 1; b < projected.length; b++) {
     if (b === a + 1 || (a === 0 && b === projected.length - 1)) continue;
-    if (intersects(projected[a], projected[(a + 1) % projected.length], projected[b], projected[(b + 1) % projected.length])) throw Error("Mesh face folds or self-intersects in its dominant-plane projection.");
+    if (intersects(projected[a], projected[(a + 1) % projected.length], projected[b], projected[(b + 1) % projected.length])) throw Error("Mesh face folds or self-intersects in its projection.");
   }
   const triangles = ShapeUtils.triangulateShape(projected, []);
   if (triangles.length !== points.length - 2) throw Error("Mesh face cannot be triangulated without degenerate corners.");
@@ -119,11 +132,19 @@ export function validateMeshShape(value: unknown): asserts value is MeshShapeNod
 function pruneVertices(shape: MeshShapeNode): MeshShapeNode {
   const used = new Set(shape.faces.flatMap(face => face.vertices)); return { ...shape, vertices: shape.vertices.filter(vertex => used.has(vertex.id)) };
 }
-function commitShape(store: SceneStore, shape: MeshShapeNode, editLabel: string) {
+function commitShape(store: SceneStore, shape: MeshShapeNode, editLabel: string, copyTopology = false) {
   validateMeshShape(shape);
   const doc = store.getState().document;
   if (JSON.stringify(shape) === JSON.stringify(doc.nodes[shape.id])) return;
+  if (copyTopology) shape = { ...shape, vertices: shape.vertices.map(vertex => ({ ...vertex, position: [...vertex.position] })), faces: shape.faces.map(face => ({ ...face, vertices: [...face.vertices] })) };
   store.setState({ document: { ...doc, nodes: { ...doc.nodes, [shape.id]: shape } }, editLabel });
+}
+/** Shared topology command: preserve the owning shape and copy caller-owned arrays
+ * only after validating the complete replacement. Failure never changes history. */
+export function setMeshTopology(store: SceneStore, shapeId: string, topology: { vertices: MeshVertex[]; faces: MeshFace[] }, label = "Edit mesh topology"): void {
+  const shape = selectedShape(store, shapeId);
+  if (!topology || !Array.isArray(topology.vertices) || !Array.isArray(topology.faces)) throw Error("Mesh topology requires vertex and face arrays.");
+  commitShape(store, { ...shape, vertices: topology.vertices, faces: topology.faces }, label, true);
 }
 function selectedShape(store: SceneStore, id: string): MeshShapeNode {
   const shape = store.getState().document.nodes[id]; if (shape?.type !== "meshShape") throw Error("Choose a polygon mesh shape."); return shape;

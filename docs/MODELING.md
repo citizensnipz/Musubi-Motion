@@ -2,13 +2,16 @@
 
 Choose the **Modeling** workspace or open **Modeling → Mesh Tools**. The panel
 provides polygon primitives, component selection, transform gizmos, numeric position edits,
-connected face extrusion, face deletion, and basic appearance settings.
+connected face extrusion, vertex merging, edge/face deletion, shell-normal
+reversal, and basic appearance settings.
 
 ## Create and select a mesh
 
-In **Create Primitive**, choose Cube, Plane, Sphere, or Cylinder, enter a Name
+Expand **Create Primitive**, choose Cube, Plane, Sphere, or Cylinder, enter a Name
 and Size, then click **Create mesh primitive**. Creation places the object at
-the origin and selects it. Size is the overall width; for a sphere it is the
+the origin and selects it. The creation section starts open for an empty mesh
+scene and folds when the first mesh arrives, leaving the editing tools in view.
+Size is the overall width; for a sphere it is the
 diameter, and for a cylinder it is both diameter and height. The plane lies in
 the XZ plane. The panel accepts sizes from 0.000001 to 1,000,000 scene units.
 
@@ -74,8 +77,8 @@ gesture back into mesh-local vertex positions.
 Select exactly one vertex to reveal **Single vertex · absolute local position**.
 Edit its X, Y, or Z coordinate to set that vertex's mesh-local position.
 
-For any nonempty Vertex, Edge, or Face selection, enter a **Selected components ·
-local offset** and click **Apply offset**. An edge or face selection expands to
+For any nonempty Vertex, Edge, or Face selection, expand **Local component
+offset**, enter the offset, and click **Apply offset**. An edge or face selection expands to
 its unique vertices, so shared vertices move once. Offsets use mesh-local axes;
 the object's rotation and scale still affect the resulting world-space motion.
 The offset remains available for another application.
@@ -109,11 +112,56 @@ face uses. It can leave an open boundary or an empty mesh. A result that violate
 the topology rules below is rejected. Each successful position, extrusion, or
 deletion command is one undo step.
 
+## Merge to center
+
+In Vertex, Edge, or Face mode, select components and choose **Edit Topology →
+Merge to center**. Their unique vertices are welded into one vertex at their
+average position. The first selected vertex in the mesh's authored order supplies
+the surviving ID; it becomes the selected vertex. This changes shared topology,
+not just overlapping positions. It follows Autodesk's
+[Merge to Center workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-Modeling/files/GUID-2DF066DD-4C1C-462E-9F8C-FA52FA9D9B16.htm).
+
+Faces reduced below three corners are removed. Unrelated vertices and surviving
+face IDs remain intact. A pinched face, duplicate face, disconnected face fan, or
+other invalid result rejects the entire edit. Merging a cube's top face makes a
+pyramid; merging diagonal corners of a quad is rejected. Merging an entire plane
+can leave one isolated editable vertex. Merge by proximity threshold and target
+welding are not implemented.
+
+## Delete edges
+
+In Edge mode, select interior edges and choose **Edit Topology → Delete selected
+edges**, or press **Delete** / **Backspace**. The surrounding faces become one
+n-gon per connected region, retaining the first face's authored ID. The resulting
+faces are selected. As in Autodesk's
+[Delete Edge workflow](https://help.autodesk.com/cloudhelp/2027/ENU/Maya-Modeling/files/GUID-689C75D9-88C8-4F55-91B9-02E5C60DF6AC.htm),
+the endpoint vertices remain; this includes interior vertices that no longer
+belong to a face. Delete Edge/Vertex cleanup is not implemented.
+
+Border edges require deleting their adjacent faces. Regions with holes, repeated
+boundary vertices, no boundary, duplicate result faces, or more than 64 corners
+are rejected. Select all
+interior edges of each intended merged region; the command will not silently
+remove additional unselected edges. Disconnected regions can be processed in one
+undo step. Nonplanar result faces are triangulated again and can change the
+surface between their corners. In Face mode, Delete / Backspace removes selected faces instead.
+Held-key repeats and Ctrl/Cmd-modified deletion do not delete the newly selected
+result or the whole object. Text fields retain their normal editing shortcuts.
+
 ## Appearance and scene integration
 
 **Appearance** provides Color, Flat/Smooth Shading, and Wireframe. Smooth shading
 changes computed normals, not topology; it is not subdivision. Wireframe draws
 authored polygon edges without displaying the internal rendering triangulation.
+
+**Reverse all normals** reverses face winding across the mesh. In Face mode,
+**Reverse selected shell normals** expands the selected faces to their complete
+edge-connected shells, preserving consistent winding along shared edges. The
+original face selection stays selected. This follows Autodesk's
+[all-faces-in-shell option](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-Modeling/files/GUID-CFAA1589-3ACA-4140-8FB7-641B74587156.htm).
+Vertices and face IDs stay unchanged; computed vertex normals are regenerated.
+Double-sided shading may look unchanged after reversal. Custom/locked normals
+and hard-edge smoothing groups are not implemented.
 
 Meshes use the shared transform, hierarchy, animation, Set Driven Key, and
 constraint systems. Their shape positions and topology are static document data;
@@ -129,9 +177,11 @@ A mesh supports at most 100,000 vertices and 100,000 faces. Each face references
 at most two faces per edge, and connected incident face fans around each vertex.
 Nonmanifold edges or vertices are rejected.
 
-Nonplanar polygons are allowed when their dominant-plane projection remains
-simple and can be triangulated without degenerate or folded triangles. Faces
-that self-cross in that projection, collapse to zero area, or contain unsupported
+Nonplanar polygons are allowed when a supported projection remains simple and
+can be triangulated without degenerate or folded triangles. The original
+dominant-axis projection is retained when valid; an orthonormal frame around the
+area-weighted normal is tried if needed, allowing bent n-gons such as two joined
+cube faces. Faces that self-cross in both projections, collapse to zero area, or contain unsupported
 degeneracy are rejected. Rendering triangulates polygons while retaining their
 authored IDs and shared topology. Validation is not a general solid-intersection
 test: intersections between separate faces are not automatically repaired, and
@@ -150,6 +200,11 @@ Open [examples/modeling-study.msb](../examples/modeling-study.msb) for an extrud
 animated cube, a smooth sphere, a ground plane, a curve controller, and a procedural
 splat reference in one scene. Rebuild it with
 `node scripts/create-modeling-example.mjs`.
+
+Open [examples/mesh-topology-study.msb](../examples/mesh-topology-study.msb) to
+compare an original cube, a cube with one dissolved edge and reversed normals,
+and a pyramid made by merging the top face. Rebuild it with
+`node scripts/create-mesh-topology-example.mjs`.
 
 Primitive generation, vertex welding, rendering, and triangulation reuse the
 existing Three.js 0.180 dependency under its [MIT license](https://github.com/mrdoob/three.js/blob/r180/LICENSE).
