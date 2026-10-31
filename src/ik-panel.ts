@@ -1,6 +1,6 @@
 import { Vector3 } from "three";
 import type { AnimationPose } from "./animation.ts";
-import { createIKHandle, deleteIKHandle, ikChain, jointWorldMatrices, matchIKToFK, matchFKToIK, updateIKHandle, type IKHandle } from "./ik.ts";
+import { createIKHandle, defaultPoleTarget, deleteIKHandle, ikChain, jointWorldMatrices, matchIKToFK, matchFKToIK, updateIKHandle, type IKHandle } from "./ik.ts";
 import type { Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
@@ -63,42 +63,63 @@ export function createIKPanel(store: SceneStore, options: Options) {
   }
   const creation = document.createElement("fieldset"), createLegend = document.createElement("legend"); createLegend.textContent = "Create handle";
   const root = select("IK root joint"), end = select("IK end joint");
+  function solverSelect(name: string) {
+    const node = select(name); node.add(new Option("CCD", "ccd")); node.add(new Option("Analytic two-bone", "two-bone")); return node;
+  }
+  const creationSolver = solverSelect("New IK handle solver");
+  const creationHelp = document.createElement("p");
   const useSelection = button("Use selected joints", () => {
     const doc = store.getState().document, selected = options.getSelection().filter(id => doc.joints?.some(joint => joint.id === id));
     if (selected.length !== 2) { status.textContent = "Select exactly two joints: the root and a descendant end joint."; return; }
     for (const [a, b] of [selected, [...selected].reverse()]) {
-      try { ikChain(doc, a, b); root.value = a; updateEnds(b); status.textContent = ""; return; }
+      try { ikChain(doc, a, b); root.value = a; updateEnds(b); status.textContent = ""; refresh(); return; }
       catch { /* Try the other selection order. */ }
     }
     status.textContent = "The selected end joint must be a descendant of the root joint.";
   });
   const create = button("Create IK handle", () => run(() => {
     const doc = store.getState().document;
-    ikChain(doc, root.value, end.value);
+    const chain = ikChain(doc, root.value, end.value);
+    const solver = creationSolver.value as "ccd" | "two-bone";
+    if (solver === "two-bone" && chain.length !== 3) throw Error("Analytic two-bone IK requires exactly three joints: root, middle, and end.");
     const matrix = jointWorldMatrices(doc, options.getPoses()).get(end.value);
     if (!matrix) throw Error("Choose an end joint.");
-    selectedHandleId = createIKHandle(store, root.value, end.value, new Vector3().setFromMatrixPosition(matrix).toArray() as Vec3);
+    selectedHandleId = createIKHandle(store, root.value, end.value, new Vector3().setFromMatrixPosition(matrix).toArray() as Vec3,
+      { solver, ...(solver === "two-bone" ? { poleTarget: defaultPoleTarget(doc, root.value, end.value, options.getFKPoses?.() ?? options.getPoses()) } : {}) });
     refresh();
   }, "IK handle created at the displayed end joint."));
   const createActions = document.createElement("div"); createActions.className = "ik-actions"; createActions.append(useSelection, create);
-  creation.append(createLegend, label("Root joint", root), label("End joint", end), createActions); element.append(creation);
+  creation.append(createLegend, label("Root joint", root), label("End joint", end), label("Solver", creationSolver), creationHelp, createActions); element.append(creation);
 
   const handles = select("Selected IK handle"); element.append(label("IK handles", handles));
   let selectedHandleId = "";
   const details = document.createElement("fieldset"), detailsLegend = document.createElement("legend"); detailsLegend.textContent = "Handle properties";
   const name = document.createElement("input"); name.type = "text"; name.maxLength = 100; name.setAttribute("aria-label", "IK handle name");
   const chainDescription = document.createElement("p"); chainDescription.className = "ik-chain";
+  const solver = solverSelect("IK handle solver");
   const enabled = document.createElement("input"); enabled.type = "checkbox"; enabled.setAttribute("aria-label", "Enable IK handle");
   const enabledLabel = label("Enabled", enabled); enabledLabel.className = "ik-enabled";
   const targets = ["X", "Y", "Z"].map(axis => number(`IK target ${axis}`, "0.1"));
   const targetRow = document.createElement("div"); targetRow.className = "ik-target";
   targets.forEach((input, index) => targetRow.append(label(`Target ${"XYZ"[index]}`, input)));
   const targetHeading = document.createElement("p"); targetHeading.textContent = "World-space target";
+  const poleControls = document.createElement("div");
+  const poleHeading = document.createElement("p"); poleHeading.textContent = "World-space pole target";
+  const poleRow = document.createElement("div"); poleRow.className = "ik-target";
+  const poles = ["X", "Y", "Z"].map(axis => number(`IK pole target ${axis}`, "0.1"));
+  poles.forEach((input, index) => poleRow.append(label(`Pole ${"XYZ"[index]}`, input)));
+  const selectPole = button("Select pole target", () => {
+    if (selectedHandleId && current()?.solver === "two-bone" && options.available())
+      element.dispatchEvent(new CustomEvent<string>("ik-pole-select", { detail: selectedHandleId }));
+  });
+  const poleHelp = document.createElement("p"); poleHelp.textContent = "The static world-space pole determines the two-bone chain's bend plane. Move it beside the root-to-target line to choose the elbow or knee direction. Pole targets are saved with undo but cannot be animated yet.";
+  poleControls.append(poleHeading, poleRow, selectPole, poleHelp);
   const blendRow = document.createElement("div"); blendRow.className = "ik-blend";
   const blendSlider = document.createElement("input"); blendSlider.type = "range"; blendSlider.min = "0"; blendSlider.max = "1"; blendSlider.step = "0.01"; blendSlider.setAttribute("aria-label", "IK FK blend slider");
   const blend = number("IK FK blend", "0.01"); blend.min = "0"; blend.max = "1"; blendRow.append(blendSlider, blend);
   const blendLabel = document.createElement("div"); blendLabel.textContent = "FK / IK blend · 0 = FK, 1 = IK";
   const iterations = number("IK solver iterations", "1"); iterations.min = "1"; iterations.max = "128";
+  const iterationsLabel = label("Solver iterations", iterations);
   const match = button(options.getFKPoses ? "Match target to FK" : "Match target to authored FK", () => run(() => {
     if (!selectedHandleId) return;
     matchIKToFK(store, selectedHandleId, options.getFKPoses?.());
@@ -120,9 +141,9 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-target-select", { detail: selectedHandleId }));
   });
   const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, matchFK, remove);
-  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, targetHeading, targetRow, blendLabel, blendRow, label("Solver iterations", iterations), actions, matchHelp);
+  details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, label("Solver", solver), targetHeading, targetRow, poleControls, blendLabel, blendRow, iterationsLabel, actions, matchHelp);
   const empty = document.createElement("p"); empty.className = "ik-empty"; empty.textContent = "No IK handles. Create a joint chain, then choose its root and end above.";
-  const note = document.createElement("p"); note.textContent = "CCD solves position with fixed bone lengths. Unreachable targets extend toward the target. This version has no pole vectors or joint limits; overlapping chains are rejected. Targets are saved but are not yet keyframe channels.";
+  const note = document.createElement("p"); note.textContent = "CCD solves multi-joint chains iteratively. Analytic two-bone IK requires exactly three joints and uses a pole target to choose its bend plane. Both preserve bone lengths; unreachable targets are limited by the chain's reach. Joint limits are not supported; overlapping chains are rejected. Targets, poles, and solver settings are saved but are not yet keyframe channels.";
   element.append(details, empty, status, note);
 
   function current(): IKHandle | undefined { return store.getState().document.ikHandles?.find(handle => handle.id === selectedHandleId); }
@@ -132,6 +153,10 @@ export function createIKPanel(store: SceneStore, options: Options) {
   }
   commitField(name, () => patch({ name: name.value.trim() }));
   targets.forEach(input => commitField(input, () => patch({ target: targets.map(finiteInput) as Vec3 })));
+  poles.forEach(input => commitField(input, () => {
+    if (current()?.solver !== "two-bone") throw Error("Choose Analytic two-bone before editing a pole target.");
+    patch({ poleTarget: poles.map(finiteInput) as Vec3 });
+  }));
   commitField(blend, () => patch({ blend: finiteInput(blend) }));
   commitField(iterations, () => patch({ iterations: finiteInput(iterations) }));
   enabled.onchange = () => run(() => patch({ enabled: enabled.checked }));
@@ -140,6 +165,19 @@ export function createIKPanel(store: SceneStore, options: Options) {
   handles.onchange = () => { selectedHandleId = handles.value; status.textContent = ""; refresh(); };
   root.onchange = () => { updateEnds(); status.textContent = ""; refresh(); };
   end.onchange = () => { status.textContent = ""; refresh(); };
+  creationSolver.onchange = () => { status.textContent = ""; refresh(); };
+  solver.onchange = () => {
+    const requested = solver.value as "ccd" | "two-bone";
+    solver.value = current()?.solver ?? "ccd";
+    run(() => {
+      const handle = current(); if (!handle) throw Error("Select an IK handle first.");
+      if (requested === "two-bone") {
+        const doc = store.getState().document;
+        if (ikChain(doc, handle.rootId, handle.endId).length !== 3) throw Error("Analytic two-bone IK requires exactly three joints: root, middle, and end.");
+        patch({ solver: requested, poleTarget: handle.poleTarget ?? defaultPoleTarget(doc, handle.rootId, handle.endId, options.getFKPoses?.() ?? options.getPoses()) });
+      } else patch({ solver: requested });
+    });
+  };
 
   function updateEnds(preferred = end.value) {
     const doc = store.getState().document;
@@ -176,15 +214,28 @@ export function createIKPanel(store: SceneStore, options: Options) {
     const selected = current(), force = displayedHandleId !== selectedHandleId;
     displayedHandleId = selectedHandleId; details.hidden = !selected; empty.hidden = !!selected;
     for (const control of Array.from(element.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button"))) control.disabled = !available;
-    create.disabled = !available || !root.value || !end.value;
+    let creationChainLength = 0;
+    try { creationChainLength = ikChain(doc, root.value, end.value).length; } catch { /* No eligible chain chosen. */ }
+    const analyticCreation = creationSolver.value === "two-bone";
+    creationHelp.textContent = analyticCreation
+      ? "Requires exactly three joints: root, middle, and end. The initial pole is derived from the FK pose; edit its world-space position after creation."
+      : "CCD supports a root and descendant end joint with iterative position solving.";
+    create.disabled = !available || !root.value || !end.value || (analyticCreation && creationChainLength !== 3);
+    create.title = analyticCreation && creationChainLength !== 3 ? "Choose a chain containing exactly three joints for analytic two-bone IK." : "Create an IK handle at the displayed end joint.";
     handles.disabled = !available || !doc.ikHandles?.length;
     matchFK.disabled = !available || !selected?.enabled || selected.blend <= 0 || (options.canKey !== undefined && !options.canKey());
     matchFK.title = options.canKey && !options.canKey()
       ? "Switch the timeline to Animation mode to match and key FK."
       : "Key the selected chain's solved rotations at the current frame and switch its static blend to 0 (FK), in one undo step.";
     if (!selected) return;
+    const analytic = selected.solver === "two-bone";
+    solver.value = selected.solver ?? "ccd";
+    poleControls.hidden = !analytic; iterationsLabel.hidden = analytic; iterations.disabled = !available || analytic;
+    for (const input of poles) input.disabled = !available || !analytic;
+    selectPole.disabled = !available || !analytic;
     setValue(name, selected.name, force);
     targets.forEach((input, index) => setValue(input, String(Number(selected.target[index].toFixed(6))), force));
+    poles.forEach((input, index) => setValue(input, selected.poleTarget ? String(Number(selected.poleTarget[index].toFixed(6))) : "", force));
     if (force || (document.activeElement !== blend && document.activeElement !== blendSlider)) { blend.value = String(selected.blend); blendSlider.value = String(selected.blend); }
     setValue(iterations, String(selected.iterations), force); enabled.checked = selected.enabled;
     const names = new Map((doc.joints ?? []).map(joint => [joint.id, joint.name]));

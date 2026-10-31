@@ -2,8 +2,8 @@
 
 Musubi implements a practical subset of Maya-style animation workflows. The
 current editor has a frame timeline, editable transform/joint curves, driven
-keys, FK/CCD IK, numeric and painted skin weights, and point/orient/aim/scale/parent
-constraints. Animation layers, pole vectors, polygon modeling,
+keys, FK, CCD and analytic two-bone IK with pole targets, numeric and painted skin
+weights, and point/orient/aim/scale/parent constraints. Animation layers, polygon modeling,
 and particle FX remain future work.
 
 ## Start with the example
@@ -204,14 +204,31 @@ The **Elasticity** tool applies to bound parent–child connections; its propert
 control deformation and the bounded allocation of fill splats. These existing
 systems consume the final animated joint pose.
 
-IK controls select a **Root joint** and descendant **End joint**, then click
-**Create IK handle**. **Use selected joints** loads a root/end pair from the scene.
-Its target is a world-space XYZ position. Change the target to solve the chain;
-use the FK/IK blend to retain FK at zero or apply the solution at one. The
-**Match target to FK** places the IK target at the current FK endpoint. It only
-moves the target; it does not key joints or change the blend.
-Enable/disable, target, blend, solver iteration count, and handle removal are
-document edits with undo and serialization.
+In **Rigging → IK Handles**, select a **Root joint** and descendant **End joint**,
+choose a **Solver**, then click **Create IK handle**. **Use selected joints** loads
+a root/end pair from the scene. **CCD** is the default and supports multi-joint
+chains. **Analytic two-bone** requires exactly three joints: root, middle, and
+end. Creation is disabled for a different chain length. The selected handle's
+**Solver** can also be changed afterward; an invalid two-bone chain is rejected.
+Older files without a solver setting continue to use CCD.
+
+The target is a world-space XYZ position. Change it to solve the chain; both
+solvers use the FK/IK blend to retain FK at zero or apply the solution at one.
+**Match target to FK** places the target at the current FK endpoint. For an
+analytic handle it also derives the pole from that FK pose, preserving the
+current bend direction when defined. This matching command does not key joints
+or change the blend. Enable/disable, targets, poles, solver choice, blend, CCD
+iteration count, and handle removal are document edits with undo and serialization.
+
+Analytic handles expose **World-space pole target** with **Pole X**, **Pole Y**,
+and **Pole Z** fields. The pole determines the bend plane and which side the
+middle joint bends toward. Initial creation or a switch from CCD derives a pole
+from the current FK pose unless that handle already has one. Edit the coordinates
+numerically, or click **Select pole target** and move its viewport marker with
+the translation gizmo. Pole markers are also directly selectable. As with target
+drags, release commits one edit and **Escape** cancels the drag. Numeric fields
+commit on Enter or blur, and Escape cancels the pending field edit. CCD hides the
+pole controls; analytic mode hides **Solver iterations**, which it does not use.
 
 To keep the current solved pose as FK, select an enabled handle with blend above
 zero and click **Match FK to IK and key**. The command captures XYZ local rotation
@@ -243,15 +260,22 @@ history. **Escape** cancels the drag, and **Delete** removes the selected handle
 The marker is a viewport control for the handle's stored world-space target,
 not a separate scene transform node or animation channel.
 
-The solver reuses Three.js `CCDIKSolver`. It supports two-bone and longer chains,
-with deterministic handling around straight-chain singularities. Unreachable
-targets produce a bounded iterative approximation. Chains may not overlap or
-control ancestors of another chain. This prevents order-dependent results.
+CCD reuses Three.js `CCDIKSolver`; unreachable targets produce a bounded iterative
+approximation. The analytic two-bone solver preserves both bone lengths and
+places unreachable targets at the nearest reachable distance, without stretching.
+Pole directions that coincide with the root or align with the root-to-target
+direction use a deterministic fallback. Straight or folded chains and crossing
+these singular directions can still flip the bend plane; the solver does not
+track bend continuity across frames. Position the pole clearly beside the target
+line to choose an unambiguous bend. Chains may not overlap or control ancestors
+of another chain, preventing order-dependent results.
 
-Current IK limitations are significant: no pole vector, joint orientation/axis
-editing, angular limits, analytic two-bone solution, target transform node,
-target/blend keyframing, or range-based IK-to-FK pose baking. Matching a target position
-does not reproduce every possible elbow/knee bend. There is no animation layer
+Solver choice, pole, target, and blend are static saved settings, not animation
+channels. Both solvers share the current-frame **Match FK to IK and key** workflow
+above. Joint orientation/axis editing, angular limits, stretch, separate target
+transform nodes, target/pole/blend animation, and range-based IK-to-FK pose baking
+remain unavailable. Matching a target position alone does not reproduce every
+possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
 
 ## Skin weights
@@ -514,8 +538,8 @@ small-scene playback results.
 
 ## Remaining work, in priority order
 
-1. Pole vectors, analytic two-bone IK, local joint axes/orientation, rotation
-   limits, target/blend animation, and range-based IK/FK baking.
+1. Local joint axes/orientation, rotation limits, stretch, target/pole/blend
+   animation, and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
 3. Influence management, weight smoothing/locks and mirrored transfer,
@@ -550,6 +574,12 @@ proprietary artwork, or file formats.
 
 Curve primitives, NURBS sampling, line rendering, and CCD solving reuse the existing Three.js dependency. Its
 [MIT license](https://github.com/mrdoob/three.js/blob/r180/LICENSE) is compatible
-with this Apache-2.0 project. No new package dependencies or paid services were
+with this Apache-2.0 project. Analytic two-bone solving adapts Guillaume Blanc's
+MIT-licensed [ozz-animation `IKTwoBoneJob`](https://github.com/guillaumeblanc/ozz-animation/blob/744eb9d99f606eda849acb0b1204f7a3dc20bca1/src/animation/runtime/ik_two_bone_job.cc),
+pinned to commit `744eb9d99f606eda849acb0b1204f7a3dc20bca1`. The port uses full
+reach (soften = 1), zero twist, and deterministic fallback adaptations at singular
+configurations. Its copyright and MIT notice are retained in
+[public/licenses/ozz-animation.txt](../public/licenses/ozz-animation.txt), included
+in the built distribution. No new package dependencies or paid services were
 introduced for these animation/rigging additions. Other dependencies retain
 their existing licenses.

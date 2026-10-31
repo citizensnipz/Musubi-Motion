@@ -7,6 +7,7 @@ import { evaluateConstraints } from "./constraints.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 import { createSceneStore, type SceneStore } from "./scene-store.ts";
 import type { Joint } from "./skeleton.ts";
+import { solveTwoBoneCorrections } from "./two-bone-ik.ts";
 
 export type IKHandle = {
   id: string;
@@ -19,7 +20,11 @@ export type IKHandle = {
   iterations: number;
   /** Zero retains FK; one applies the full solution. */
   blend: number;
+  solver?: "ccd" | "two-bone";
+  /** World-space pole position; required by the analytic two-bone solver. */
+  poleTarget?: Vec3;
 };
+export type IKHandleSettings = Pick<IKHandle, "solver" | "poleTarget">;
 
 const vector = (value: unknown): value is Vec3 => Array.isArray(value) && value.length === 3 && value.every(n => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e6);
 const validId = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value);
@@ -50,6 +55,9 @@ export function validateIKHandles(value: unknown, doc: SceneDocument): asserts v
       || !Number.isInteger(handle.iterations) || handle.iterations < 1 || handle.iterations > 128
       || typeof handle.blend !== "number" || !Number.isFinite(handle.blend) || handle.blend < 0 || handle.blend > 1) throw Error("Invalid IK handle settings.");
     const chain = ikChain(doc, handle.rootId, handle.endId);
+    if (handle.solver !== undefined && !["ccd", "two-bone"].includes(handle.solver)) throw Error("Unknown IK solver.");
+    if (handle.poleTarget !== undefined && !vector(handle.poleTarget)) throw Error("IK pole target must contain finite world coordinates within ±1,000,000.");
+    if (handle.solver === "two-bone" && (chain.length !== 3 || !vector(handle.poleTarget))) throw Error("Two-bone IK needs exactly three joints and a world-space pole target.");
     for (let index = 0; index < chain.length; index++) {
       const id = chain[index];
       if (occupied.has(id)) throw Error("IK chains cannot share joints. Remove the overlapping handle first.");
@@ -114,6 +122,24 @@ export function jointWorldMatrices(doc: SceneDocument, poses?: ReadonlyMap<strin
   return new Map([...rig.bones].map(([id, bone]) => [id, bone.matrixWorld.clone()]));
 }
 
+/** Places the pole in the displayed FK bend plane, with a stable straight-chain fallback. */
+export function defaultPoleTarget(doc: SceneDocument, rootId: string, endId: string, poses?: ReadonlyMap<string, AnimationPose>): Vec3 {
+  const chain = ikChain(doc, rootId, endId);
+  if (chain.length !== 3) throw Error("Two-bone IK needs exactly three joints.");
+  const worlds = jointWorldMatrices(doc, poses), root = new Vector3().setFromMatrixPosition(worlds.get(rootId)!);
+  const middle = new Vector3().setFromMatrixPosition(worlds.get(chain[1])!), end = new Vector3().setFromMatrixPosition(worlds.get(endId)!);
+  const direction = end.clone().sub(root), upper = middle.clone().sub(root), length = Math.max(upper.length() + end.distanceTo(middle), 1);
+  if (direction.lengthSq() < 1e-12) direction.copy(upper);
+  if (direction.lengthSq() < 1e-12) direction.set(0, 1, 0);
+  direction.normalize();
+  const bend = upper.clone().addScaledVector(direction, -upper.dot(direction));
+  if (bend.lengthSq() < 1e-12) {
+    bend.set(...(Math.abs(direction.x) < 0.8 ? [1, 0, 0] : [0, 1, 0]) as Vec3);
+    bend.addScaledVector(direction, -bend.dot(direction));
+  }
+  return root.addScaledVector(bend.normalize(), length).toArray() as Vec3;
+}
+
 /** Evaluate after animation/driven keys, before skinning. No scene edits/history. */
 export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>): void {
   const handles = doc.ikHandles?.filter(handle => handle.enabled && handle.blend > 0) ?? [];
@@ -128,6 +154,13 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
     const links = chain.slice(0, -1).reverse(), end = rig.bones.get(handle.endId)!;
     const originals = new Map(links.map(id => [id, rig.bones.get(id)!.quaternion.clone()]));
     targetPosition.fromArray(handle.target);
+    if (handle.solver === "two-bone") {
+      if (chain.length !== 3 || !handle.poleTarget) throw Error("Two-bone IK needs exactly three joints and a world-space pole target.");
+      const root = rig.bones.get(chain[0])!, middle = rig.bones.get(chain[1])!;
+      const correction = solveTwoBoneCorrections(root.matrixWorld, middle.matrixWorld, end.matrixWorld, targetPosition, new Vector3(...handle.poleTarget));
+      root.quaternion.multiply(correction.root).normalize(); middle.quaternion.multiply(correction.middle).normalize();
+      rig.mesh.updateMatrixWorld(true);
+    } else {
     rig.target.position.copy(targetPosition); rig.target.updateMatrixWorld(true);
     rootPosition.setFromMatrixPosition(rig.bones.get(handle.rootId)!.matrixWorld);
     endPosition.setFromMatrixPosition(end.matrixWorld);
@@ -163,6 +196,7 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
       endPosition.setFromMatrixPosition(end.matrixWorld);
       if (endPosition.distanceToSquared(targetPosition) < 1e-10) break;
     }
+    }
     for (const id of links) {
       const bone = rig.bones.get(id)!, original = originals.get(id)!;
       if (!bone.quaternion.toArray().every(Number.isFinite)) bone.quaternion.copy(original);
@@ -181,13 +215,15 @@ function saveHandles(store: SceneStore, handles: IKHandle[], editLabel: string) 
   if (JSON.stringify(doc.ikHandles ?? []) === JSON.stringify(handles)) return;
   store.setState({ document: { ...doc, ikHandles: handles }, editLabel });
 }
-export function createIKHandle(store: SceneStore, rootId: string, endId: string, target?: Vec3): string {
+export function createIKHandle(store: SceneStore, rootId: string, endId: string, target?: Vec3, settings: IKHandleSettings = {}): string {
   const doc = store.getState().document;
   ikChain(doc, rootId, endId);
   const endpoint = new Vector3().setFromMatrixPosition(jointWorldMatrices(doc).get(endId)!);
   const id = crypto.randomUUID();
   const handle: IKHandle = { id, name: `ikHandle${(doc.ikHandles?.length ?? 0) + 1}`, rootId, endId,
-    target: target ? [...target] : endpoint.toArray() as Vec3, enabled: true, iterations: 64, blend: 1 };
+    target: target ? [...target] : endpoint.toArray() as Vec3, enabled: true, iterations: 64, blend: 1,
+    ...(settings.solver !== undefined ? { solver: settings.solver } : {}),
+    ...(settings.poleTarget !== undefined ? { poleTarget: [...settings.poleTarget] as Vec3 } : settings.solver === "two-bone" ? { poleTarget: defaultPoleTarget(doc, rootId, endId) } : {}) };
   saveHandles(store, [...doc.ikHandles ?? [], handle], "Create IK handle");
   return id;
 }
@@ -203,7 +239,7 @@ export function matchIKToFK(store: SceneStore, id: string, poses?: ReadonlyMap<s
   const doc = store.getState().document, handle = doc.ikHandles?.find(handle => handle.id === id);
   if (!handle) throw Error("IK handle does not exist.");
   const target = new Vector3().setFromMatrixPosition(jointWorldMatrices(doc, poses).get(handle.endId)!).toArray() as Vec3;
-  updateIKHandle(store, id, { target });
+  updateIKHandle(store, id, { target, ...(handle.solver === "two-bone" ? { poleTarget: defaultPoleTarget(doc, handle.rootId, handle.endId, poses) } : {}) });
 }
 
 /** Key the solved local chain rotations at one frame, then switch this handle

@@ -118,14 +118,23 @@ their horizontal coordinate is the driver value rather than a frame.
 IK affects the pose map before binding, leaving authored FK values intact.
 Handles have independent world-space targets and an FK/IK blend. Overlapping or
 ancestor-dependent chains are rejected so array ordering cannot change the result.
-Two-bone chains use the same CCD solver; there is no analytic solver or pole vector.
+An optional `solver` field selects `two-bone` for exactly three joints; an absent
+field retains CCD compatibility. Analytic handles require a finite world-space
+`poleTarget`. `src/two-bone-ik.ts` adapts ozz-animation's MIT IKTwoBoneJob to Three
+quaternions, preserving bone lengths and leaving the endpoint's local rotation
+unchanged. It adds deterministic fallback planes for singular inputs. Its license
+and pinned source revision ship in `public/licenses/ozz-animation.txt`.
+Endpoint and pole markers share the viewport adapter and translation history;
+the pole's line connects to the evaluated middle joint. Drag previews remain
+outside the document until release. Pole positions are static scene properties.
 
 `matchFKToIK` captures post-IK, pre-constraint local rotations for every joint
 from root through end, unwraps them against the evaluated pre-IK FK pose, keys
 the current frame, and sets the handle blend to zero in one document command.
 It retains existing key settings and leaves position/scale channels untouched.
 SDK-owned joint rotations and enabled rotation constraints reject the command
-atomically. The target-to-FK command only aligns the endpoint target. Matching
+atomically. The target-to-FK command aligns the endpoint target and, for analytic
+handles, the pole with the displayed FK bend plane. Matching
 does not add a blend animation channel or bake a frame range; the stored blend
 change applies at every frame. Both matching operations use existing animation
 tracks and handle fields, with no additional archive schema.

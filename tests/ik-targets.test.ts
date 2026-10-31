@@ -13,6 +13,25 @@ function fixture(): SceneDocument {
 }
 
 describe("IK viewport target adapter",()=>{
+  it("keeps pole and endpoint markers distinct, connects the pole to the middle joint, and removes a disabled solver's pole",()=>{
+    const world=new Scene(),targets=createIKTargets(world),doc=fixture();
+    doc.ikHandles![0] = {...doc.ikHandles![0],solver:"two-bone",poleTarget:[-2,1,1]};
+    targets.sync(doc,evaluateSceneAnimation(doc,0));
+    const pole=targets.getObject("handle","pole")!,endpoint=targets.getObject("handle")!;
+    expect(pole).not.toBe(endpoint);expect(pole.position.toArray()).toEqual([-2,1,1]);
+    targets.setSelected("handle","pole");
+    expect(pole.userData.selected).toBe(true);expect(endpoint.userData.selected).toBe(false);
+    const ray=new Raycaster(new Vector3(-2,1,3),new Vector3(0,0,-1));
+    expect(targets.pickControl(ray)).toEqual({id:"handle",kind:"pole"});
+    let link:Line|undefined;world.traverse(node=>{if(node instanceof Line&&node.userData.ikControlKind==="pole")link=node;});
+    const points=link!.geometry.getAttribute("position");
+    expect(points.getX(1)).toBeCloseTo(1);expect(points.getY(1)).toBeCloseTo(0);expect(points.getZ(1)).toBeCloseTo(0);
+    doc.ikHandles![0]={...doc.ikHandles![0],poleTarget:[-3,2,1]};
+    targets.sync(doc,evaluateSceneAnimation(doc,0));expect(targets.getObject("handle","pole")).toBe(pole);
+    doc.ikHandles![0]={...doc.ikHandles![0],solver:"ccd"};targets.sync(doc,evaluateSceneAnimation(doc,0));
+    expect(targets.getObject("handle","pole")).toBeUndefined();expect(pole.parent).toBeNull();
+    expect(targets.getObject("handle")).toBe(endpoint);targets.dispose();expect(world.children).toHaveLength(0);
+  });
   it("keeps target identity across document updates, reflects saved positions, and removes deleted handles",()=>{
     const world=new Scene(),targets=createIKTargets(world),doc=fixture();
     targets.sync(doc,evaluateSceneAnimation(doc,0));

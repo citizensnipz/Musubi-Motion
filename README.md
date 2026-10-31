@@ -13,7 +13,7 @@ A browser-based Gaussian splat animation engine and editor, built on **Three.js 
 
 Musubi Motion treats Gaussian splats as named, selectable scene objects with their own transforms and asset references. The goal is a focused browser workspace for composing and animating splat scenes, with familiar Maya-style controls and a minimal monochrome interface.
 
-**Current status: working editor prototype.** The editor supports transform and joint animation, a Graph Editor and Dope Sheet, Set Driven Keys, FK joints, CCD inverse kinematics, constraints, splat binding, and elasticity. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU, polygon modeling, and particle FX are not implemented.
+**Current status: working editor prototype.** The editor supports transform and joint animation, a Graph Editor and Dope Sheet, Set Driven Keys, FK joints, CCD and analytic two-bone inverse kinematics, constraints, splat binding, and elasticity. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU, polygon modeling, and particle FX are not implemented.
 
 **Topics:** `gaussian-splatting` · `3d-animation` · `3d-editor` · `threejs` · `sparkjs` · `webgl2` · `typescript` · `dockview`
 
@@ -29,6 +29,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Graph Editor and Dope Sheet:** dockable curve/channel editing, key multiselection and box selection, Bezier tangent handles, linear/stepped interpolation, tangent presets, shape-preserving key insertion, copy/paste, retiming, and time scaling.
 - **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
 - **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture the current solved joint rotations and switch to FK in one undoable edit. Blend is not animated; matching captures one frame.
+- **Two-bone IK:** select the analytic solver for a root/middle/end chain and move its pole target to control the bend plane. Target and pole markers support viewport dragging, numeric editing, undo, and saving. Unreachable targets preserve bone lengths; existing handles keep their CCD behavior.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
 - **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, add/subtract selections, inspect weights, restore automatic weights, and view sampled colors. Edits support undo and persistence; the elasticity pipeline inherits them.
@@ -105,6 +106,7 @@ Packages are built in memory and currently capped at **512 MiB**. Autosave and r
 | --- | --- |
 | Scene, camera, and rendering integration | Three.js |
 | Cubic curve primitives and CCD IK solver | Existing Three.js dependency, MIT licensed |
+| Analytic two-bone IK | Scalar Three.js adaptation of ozz-animation's MIT-licensed IKTwoBoneJob; attribution in `public/licenses/ozz-animation.txt` |
 | Gaussian splat rendering and decoding | Spark 2.4, using WebGL2 |
 | Docking and resizable panels | Dockview |
 | Menus, dialogs, and property controls | Web Awesome web components |
@@ -119,7 +121,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 ## Remaining priorities
 
-1. Pole vectors, analytic two-bone IK, joint orientation/limits, target/blend animation, and range-based IK/FK baking.
+1. Joint orientation/limits, target/pole/blend animation, twist controls, and range-based IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
 3. Influence management, weight smoothing and locks, surface-only component selection, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.
@@ -138,3 +140,5 @@ Capture reconstruction, model training, and recorded 4D splat playback are outsi
 ## License
 
 [Apache License 2.0](LICENSE).
+
+The adapted two-bone solver retains [ozz-animation's MIT notice](public/licenses/ozz-animation.txt), also included in production builds.

@@ -56,7 +56,7 @@ import { evaluateConstraints, validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
 import { PoseDrafts } from "./pose-drafts.ts";
-import { createIKTargets } from "./ik-targets.ts";
+import { createIKTargets, type IKControlKind } from "./ik-targets.ts";
 import { createControllerRenderable } from "./controller-renderer.ts";
 import { createControllerPanel } from "./controller-panel.ts";
 import { controllerPlacement } from "./controller-placement.ts";
@@ -184,6 +184,7 @@ async function start() {
   const assetFiles = new Map<string, File>();
   let selected = new Set<string>();
   let selectedIKId = "";
+  let selectedIKKind: IKControlKind = "target";
   const ikTargets = createIKTargets(world);
   let sceneName = "Untitled.msb";
   let sceneHandle: SceneFileHandle | undefined;
@@ -383,6 +384,12 @@ async function start() {
   webgl.domElement.addEventListener(
     "pointerdown",
     (event) => {
+      // TransformControls suppresses native focus changes. Commit IK drafts before a drag makes the panel busy.
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && focused.closest(".ik-panel")) {
+        focused.blur();
+        transform.getHelper().updateMatrixWorld(true);
+      }
       if (componentPickShape && !skinWeightsPanel?.element.checkVisibility()) skinWeightsPanel?.stopPicking();
       if (paintSettings && !skinPaintPanel?.element.checkVisibility()) skinPaintPanel?.stopPainting();
       controls.enabled = event.pointerType === "touch" || event.altKey;
@@ -426,7 +433,7 @@ async function start() {
     if (componentPickShape || paintSettings) { transform.detach(); transform.enabled = false; return; }
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
     if (selectedIKId) {
-      const target = ikTargets.getObject(selectedIKId);
+      const target = ikTargets.getObject(selectedIKId, selectedIKKind);
       if (target && currentMode === "translate" && !loading && jointsVisible) {
         transform.attach(target); transform.setMode("translate"); transform.enabled = true; transform.getHelper().visible = true;
       } else { transform.detach(); transform.enabled = false; }
@@ -600,12 +607,13 @@ async function start() {
   function refreshSelection() {
     const doc = store.getState().document;
     if (!doc.ikHandles?.some(h => h.id === selectedIKId)) selectedIKId = "";
-    ikTargets.setSelected(selectedIKId || undefined);
+    if (selectedIKKind === "pole" && doc.ikHandles?.find(h => h.id === selectedIKId)?.solver !== "two-bone") selectedIKKind = "target";
+    ikTargets.setSelected(selectedIKId || undefined, selectedIKKind);
     selected = new Set(
       [...selected].filter((id) => doc.nodes[id]?.type === "transform"),
     );
     for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
-    selectionLabel.textContent = selectedIKId ? `IK target: ${doc.ikHandles?.find(h => h.id === selectedIKId)?.name}` : selected.size && skeleton.selectedIds.size ? `${selected.size} objects · ${skeleton.selectedIds.size} joints selected` : skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
+    selectionLabel.textContent = selectedIKId ? `IK ${selectedIKKind === "pole" ? "pole" : "target"}: ${doc.ikHandles?.find(h => h.id === selectedIKId)?.name}` : selected.size && skeleton.selectedIds.size ? `${selected.size} objects · ${skeleton.selectedIds.size} joints selected` : skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
       ? `${selected.size} object${selected.size === 1 ? "" : "s"} selected`
       : "Nothing selected";
     refreshGizmo();
@@ -735,18 +743,27 @@ async function start() {
   workspace.registerPanel("dope-sheet", "Dope Sheet", animationEditors.dopeSheet);
   workspace.registerPanel("driven-keys", "Set Driven Key", drivenPanel.element);
   workspace.registerPanel("ik-handles", "IK Handles", ikPanel.element);
-  function selectIKTarget(id: string) {
-    if (loading || dragId || !ikTargets.getObject(id)) return;
+  function selectIKTarget(id: string, kind: IKControlKind = "target") {
+    if (loading || dragId || !ikTargets.getObject(id, kind)) return;
     setPlaying(false);
+    skinWeightsPanel?.stopPicking(); skinPaintPanel?.stopPainting();
     selected.clear(); skeleton.select("");
-    selectedIKId = id; ikTargets.setSelected(id); ikPanel?.select(id);
+    selectedIKId = id; selectedIKKind = kind; ikTargets.setSelected(id, kind); ikPanel?.select(id);
     choose("translate"); refreshSelection();
     element("view-ik-handles").click();
   }
   ikPanel.element.addEventListener("ik-target-select", event => selectIKTarget((event as CustomEvent<string>).detail));
+  ikPanel.element.addEventListener("ik-pole-select", event => selectIKTarget((event as CustomEvent<string>).detail, "pole"));
   workspace.registerPanel("constraints", "Constraints", constraintsPanel.element);
   workspace.registerPanel("controllers", "Curve Controls", controllerPanel.element);
   for (const control of Array.from(document.querySelectorAll<WaButton>("[data-rig-action]"))) {
+    if (control.dataset.rigAction === "Pole target") {
+      control.disabled = false; control.title = "Open two-bone pole target controls";
+      control.addEventListener("click", () => {
+        if (selectedIKId && ikTargets.getObject(selectedIKId, "pole")) selectIKTarget(selectedIKId, "pole");
+        else element("view-ik-handles").click();
+      });
+    }
     if (["Create IK chain", "Move IK target", "IK / FK blend"].includes(control.dataset.rigAction!)) {
       control.disabled = false; control.title = "Open IK Handles";
       control.addEventListener("click", () => element("view-ik-handles").click());
@@ -833,10 +850,10 @@ async function start() {
     } else if (dragId) {
       const id = dragId;
       if (selectedIKId && id === `ik:${selectedIKId}`) {
-        const target = ikTargets.getObject(selectedIKId)?.position.toArray() as Vec3 | undefined;
+        const target = ikTargets.getObject(selectedIKId, selectedIKKind)?.position.toArray() as Vec3 | undefined;
         dragId = undefined;
         if (!cancelDrag && target) {
-          try { updateIKHandle(store, selectedIKId, { target }); }
+          try { updateIKHandle(store, selectedIKId, selectedIKKind === "pole" ? { poleTarget: target } : { target }); }
           catch (error) { notice.textContent = (error as Error).message; }
         }
         syncScene(); updateHistoryButtons(); return;
@@ -1114,8 +1131,8 @@ async function start() {
       const height = camera === orthographic ? (orthographic.top - orthographic.bottom) / orthographic.zoom
         : 2 * camera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(perspective.fov / 2));
       raycaster.params.Line.threshold = Math.max(0.001, height * 6 / Math.max(1, rect.height));
-      const targetHit = ikTargets.pick(raycaster);
-      if (targetHit) { selectIKTarget(targetHit); return; }
+      const targetHit = ikTargets.pickControl(raycaster);
+      if (targetHit) { selectIKTarget(targetHit.id, targetHit.kind); return; }
       const jointHit = skeleton.pick(raycaster);
       if (jointHit) { if (!start.additive) selected.clear(); skeleton.selectMany([jointHit], start.additive); return; }
       const hits=objects.map(({id,object})=>({id,distance:boundSelection(object)?.pick(raycaster)??raycaster.intersectObject(object.mesh,false)[0]?.distance??Infinity})).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
@@ -1265,8 +1282,9 @@ async function start() {
     if (dragId && !draggingTarget) return;
     let doc = store.getState().document;
     if (draggingTarget) {
-      const target = ikTargets.getObject(selectedIKId)!.position.toArray() as Vec3;
-      doc = { ...doc, ikHandles: doc.ikHandles?.map(handle => handle.id === selectedIKId ? { ...handle, target } : handle) };
+      const target = ikTargets.getObject(selectedIKId, selectedIKKind)!.position.toArray() as Vec3;
+      const patch = selectedIKKind === "pole" ? { poleTarget: target } : { target };
+      doc = { ...doc, ikHandles: doc.ikHandles?.map(handle => handle.id === selectedIKId ? { ...handle, ...patch } : handle) };
     }
     evaluated = evaluateSceneAnimation(doc, getFrame());
     for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, pose);

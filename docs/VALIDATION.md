@@ -17,6 +17,7 @@ service was introduced by this work.
 | Skin-weight checkpoint | 190 tests passed across 21 files |
 | Viewport component-selection checkpoint | 202 tests passed across 22 files |
 | Skin-paint checkpoint | 224 tests passed across 24 files |
+| Analytic two-bone IK checkpoint | 236 tests passed across 26 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -102,6 +103,7 @@ the browser retest now cover preservation of the opposite handle.
 | Browser joint animation with 512 authored overrides on 11,629 splats, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms; preview hidden during playback |
 | Node projection and posed-center scan of 11,629 components at frame 24 | 10.29 ms; no GPU rendering or browser scheduling |
 | Node brush index from 11,629 posed centers / 606-component stroke | Median 3.28 ms / 0.48 ms across 20 samples after five warmups; frame 0, no GPU rendering, browser scheduling, commit, or binding rebuild |
+| Node IK comparison, 20 three-joint chains, 100 samples after ten warmups | CCD median 2.526 ms / p95 3.064 ms; analytic median 0.180 ms / p95 0.356 ms; excludes animation evaluation, skinning and rendering |
 
 CPU microbenchmarks exclude rendering, editor drawing, asset decoding, Spark
 sorting, binding uploads, and elasticity. The browser sample is a small local
@@ -109,10 +111,13 @@ scene and measures frame scheduling intervals; it is not isolated GPU time and
 does not establish performance for production-size assets. Device, browser,
 graphics driver, scene density, and active editor panels can change the result.
 The brush measurement is reproducible with `node scripts/benchmark-skin-brush.mjs`.
+The IK comparison is reproducible with `node scripts/benchmark-ik.mjs`.
 
 The representative scenes are [animation-study.msb](../examples/animation-study.msb)
 and [controller-study.msb](../examples/controller-study.msb), plus
 [skin-weights-study.msb](../examples/skin-weights-study.msb).
+The analytic IK checkpoint adds [two-bone-study.msb](../examples/two-bone-study.msb),
+generated with `node scripts/create-two-bone-example.mjs`.
 It uses procedural knots and a short rig, not a large imported capture. Cross-
 browser compatibility, large-asset memory/load times, and long-session editing
 remain outside this checkpoint's evidence. Imported multi-million-splat scenes
@@ -129,6 +134,7 @@ were not benchmarked.
 - `ff82b7c` — Add editable NURBS curve controllers to shared scene workflows.
 - `f532bf7` — Add normalized skin weight editing and posed component previews.
 - `ae5444b` — Add posed viewport component selection for skin weight editing.
+- `8797a43` — Add viewport skin weight painting with atomic stroke history.
 
 The curve-insertion commit adds verified shape-preserving key insertion,
 preserves the animation frame during import, and restores Save/Open shortcuts
@@ -187,5 +193,37 @@ Painting currently affects X-ray component centers and previews colors only;
 deformation updates on release. Smoothing, influence locks, mirrored brushes,
 pressure input and surface occlusion remain unimplemented. Multi-million-component
 brush latency and memory have not been measured.
+
+The analytic IK checkpoint adds 12 tests, including 48 varied authored FK hinge
+orientations inside the solver sweep. Coverage includes reachable, reversed,
+too-close and too-far targets; root/pole coincidences; collinear poles; rotated
+parents; arbitrary bone axes; collapsed animated segments; deterministic evaluation;
+blending; FK matching; archive rejection; and pole-marker picking/resource lifetime.
+Legacy CCD tests still pass. The solver adapts ozz-animation's MIT implementation;
+the pinned source and retained notice ship in `public/licenses/ozz-animation.txt`.
+
+Browser checks used an 11,629-splat object bound to a three-joint chain. A pole
+X-axis drag preview kept the file clean; release saved X=0.407491 in one edit.
+Undo restored X=0 and the clean state; redo restored the edit. Escape during a
+second drag restored X=0 without adding history. Numeric pole Z edits also
+supported undo. Switching the selected pole's solver to CCD removed the pole
+fields/marker, exposed iteration controls, and safely selected the endpoint;
+undo restored analytic mode. Match FK to IK created joint rotation keys and
+blend=0 in one command; undo restored blend=1. Save/reopen retained the analytic
+solver, pole X=0.4 and blend=1. Creating a new analytic handle through the panel
+placed its target at the current FK endpoint and generated a perpendicular pole.
+The browser reported no console errors.
+
+The numeric-to-gizmo check exposed a focus-order bug: typing a pole value and
+dragging immediately could discard the draft once the panel became busy. Canvas
+capture now commits IK fields and refreshes the gizmo before TransformControls
+begins a drag. The retest preserved the typed X=0.2 as its own edit; undoing the
+drag restored 0.2 and a second undo restored the clean X=0 baseline.
+
+Two-bone targets and poles remain static properties; joint limits, stretch,
+soft reach, user-authored hinge axes, twist channels and range baking are not
+implemented. Degenerate target/pole directions use deterministic fallbacks and
+may still flip when crossing a singular configuration. The CPU comparison is
+not a production frame-rate guarantee.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.
