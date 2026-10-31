@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Matrix4 } from "three";
+import { Euler, MathUtils, Matrix4, Vector3 } from "three";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { addSplat, deleteSceneItems, emptyScene, type SceneDocument } from "../src/scene-document.ts";
 import { createSceneStore } from "../src/scene-store.ts";
@@ -43,6 +43,25 @@ function evaluate(doc: SceneDocument, frame: number) {
 }
 
 describe("complete rig persistence and deletion", () => {
+  it("round-trips aim axes and rejects malformed aim metadata in packed archives", async () => {
+    const store = createSceneStore(fixture());
+    createConstraint(store, "aim", "independent", "source", false, evaluate(store.getState().document, 10), { aimAxis: "-X", worldUpAxis: "+Z" });
+    const doc = store.getState().document, packed = await encodeProject(doc, new Map(), editor);
+    const opened = await decodeProject(packed);
+    expect(opened.scene).toEqual(doc);
+    const poses = evaluate(opened.scene, 10), rotation = poses.get("source")!.rotation;
+    const aim = new Vector3(-1, 0, 0).applyEuler(new Euler(...rotation.map(MathUtils.degToRad) as [number, number, number], "XYZ"));
+    expect(aim.dot(new Vector3(1, 0, 0))).toBeCloseTo(1, 8);
+    for (const field of ["aimAxis", "worldUpAxis"]) {
+      const entries = unzipSync(packed), manifest = JSON.parse(strFromU8(entries["scene.json"]));
+      manifest.scene.constraints.at(-1)[field] = "+W";
+      entries["scene.json"] = strToU8(JSON.stringify(manifest));
+      await expect(decodeProject(zipSync(entries))).rejects.toThrow(/axes/i);
+    }
+    const removed = deleteSceneItems(doc, ["independent"]);
+    expect(removed.constraints!.some(constraint => constraint.type === "aim")).toBe(false);
+    expect(() => validateScene(removed)).not.toThrow();
+  });
   it("round-trips combined animation, SDK, IK, constraints, binding and elasticity", async () => {
     const doc = fixture(), opened = await decodeProject(await encodeProject(doc, new Map(), editor));
     expect(opened.scene).toEqual(doc);

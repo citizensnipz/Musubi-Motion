@@ -64,7 +64,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
 | `drivenKeys` | Relationship `id`, `driver` and `driven` property references, and curve `keys` |
 | `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend` |
-| `constraints` | `id`, `name`, `type`, `sourceId`, `targetId`, `enabled`, `maintainOffset`, stored `offset` |
+| `constraints` | `id`, `name`, `type`, `sourceId`, `targetId`, `enabled`, `maintainOffset`, stored `offset`, optional `aimAxis`/`worldUpAxis` |
 
 Property references contain `targetId` and `channel`. Channels are
 `position.x/y/z`, `rotation.x/y/z`, `scale.x/y/z`, and `visibility`; joints do not
@@ -100,7 +100,7 @@ controlled by another handle's ancestor. Deleting targets removes affected
 animation/driven relationships; deleting relevant joints also removes affected
 IK handles. History restores those records together on undo.
 
-Constraint types are `point`, `orient`, `scale`, and `parent`. Offsets contain
+Constraint types are `point`, `orient`, `aim`, `scale`, and `parent`. Offsets contain
 position and scale XYZ tuples plus a normalized XYZW rotation quaternion.
 Offsets and endpoints are captured at creation; enabled/name may be changed
 later. There may be at most 10,000 constraints. Validation rejects missing
@@ -110,11 +110,21 @@ still participate in cycle/ownership validation. Parent owns position and
 rotation; it does not own scale. Removing a source or target removes its
 constraints, and undo restores them with the scene.
 
-Creation and archive validation reject unsupported enabled constraints in the
-authored pose. Runtime affine checks are also necessary because valid data can animate
-into unsupported transforms. Orient/parent/scale require uniformly scaled
-driven-parent transforms and nonsheared sources; point permits arbitrary finite
-invertible parents. Singular or non-finite transforms are rejected. A runtime
+Aim records may specify `aimAxis` and `worldUpAxis` as `+X`, `-X`, `+Y`, `-Y`,
+`+Z`, or `-Z`; omitted values default to `+Z` and `+Y` respectively. The local
+up direction is derived: +Y except for a ±Y aim axis, which uses +Z. Aim owns
+rotation and stores a maintained orientation offset in the existing quaternion
+field. It does not add a target node or alter local translation/scale. Enabled
+aim constraints reject coincident world positions within 0.00000001 scene units.
+
+Creation checks the supplied current pose; archive validation checks axes,
+references and affine restrictions in the authored pose. Aim coincidence is
+checked during creation and evaluation, since animation can separate coincident
+authored origins. Runtime affine checks are also necessary because valid data
+can animate into unsupported transforms. Orient/aim/parent/scale require
+uniformly scaled driven parents; orient/parent/scale require nonsheared sources.
+Aim reads only the source position. Point permits arbitrary finite invertible
+parents. Non-finite values and singular driven parents are rejected. A runtime
 failure stops playback with a notice and leaves the underlying pre-constraint
 pose intact. This check does not remove the saved constraint; it can be disabled
 or deleted to repair the scene.

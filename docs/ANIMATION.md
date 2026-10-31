@@ -2,8 +2,8 @@
 
 Musubi implements a practical subset of Maya-style animation workflows. The
 current editor has a frame timeline, editable transform/joint curves, driven
-keys, FK/CCD IK, and point/orient/scale/parent constraints. Animation layers, aim
-constraints, pole vectors, full skin-weight
+keys, FK/CCD IK, and point/orient/aim/scale/parent constraints. Animation layers,
+pole vectors, full skin-weight
 editing, polygon modeling, and particle FX remain future work.
 
 ## Start with the example
@@ -236,12 +236,13 @@ Open **Rigging → Constraints**. Choose **Source · follow this**, **Driven ·
 constrain this**, and a constraint **Type**. The selection-loading buttons fill
 the source/driven selectors from scene selection. Leave **Maintain offset**
 checked to retain the current relationship, or clear it to align the affected
-attributes, then click **Create point/orient/scale/parent constraint**.
+attributes, then click the corresponding **Create … constraint** button.
 
 | Type | Result |
 | --- | --- |
 | Point | Follows world position; a maintained positional offset stays in world space |
 | Orient | Follows world rotation using a stored quaternion offset |
+| Aim | Rotates a selected local axis toward the source's world position, using a selected world-up direction |
 | Scale | Follows world size with an optional multiplicative scale offset; object targets only |
 | Parent | Follows position and rotation; target scale remains its underlying value |
 
@@ -257,19 +258,38 @@ constrained pose into keys. Creation, enable/disable, and deletion support undo
 and archive persistence. Recreate a relationship to change its source, type, or
 captured offset.
 
+For **Aim**, choose **Look-at source · aim toward this** and **Driven · rotate
+this**, then select a signed **Local aim axis** and **World up axis** from ±X,
+±Y, or ±Z. Click **Create aim constraint**. Defaults are local **+Z** and world
+**+Y**. The local up axis
+is +Y, except that aiming ±Y uses local +Z as up. Clear **Maintain offset** for
+the selected axis to point directly toward the source. When offset is maintained,
+the initial world orientation is preserved relative to the initial aim solution;
+the chosen axis therefore need not point directly at the source.
+
+Aim changes rotation only. Its source and driven object must occupy distinct
+world positions (separation greater than 0.00000001 scene units). Coincident
+points are rejected; if animation reaches them, playback stops with an explanation
+and the entire constraint stage falls back to its underlying pose. When the aim
+direction is parallel to world up, Three.js supplies a deterministic fallback
+basis. This avoids undefined orientation but can produce a roll change near the
+pole; it is not a continuity-preserving roll solver. There is no object-up mode,
+animated up object, or multi-source aim weighting. Recreate the constraint to
+change its captured offset or axis settings.
+
 Constraints evaluate after animation, SDK, and IK, overriding their assigned
 channel groups. They do not feed values back into those earlier stages. Each
 position, rotation, or scale group has one constraint source; Parent owns both
-position and rotation. Cycles involving constraints and the hierarchy are
+position and rotation, and Aim owns rotation. Cycles involving constraints and the hierarchy are
 rejected, including disabled constraints, so enabling a record cannot introduce
 a hidden cycle.
 
-This subset has no aim constraint, multi-source weighting, constraint animation,
-or shear support. Joint scale constraints are disabled. Orient, Parent, and
-Scale constraints reject nonuniformly scaled driven-parent transforms and
-sheared source transforms. Point constraints support arbitrary finite,
-invertible parent transforms. Singular or non-finite source/parent transforms
-are rejected for every type.
+This subset has no multi-source weighting or constraint animation. Joint scale
+constraints are disabled. Orient, Aim, Parent, and Scale reject nonuniformly
+scaled driven-parent transforms. Orient, Parent and Scale also reject sheared
+sources. Aim uses only the source position, so source shear is allowed. Point
+supports arbitrary finite, invertible parent transforms. Non-finite values and
+singular driven-parent transforms are rejected.
 
 If animation reaches an unsupported constraint pose, playback stops and a notice
 identifies the limitation. Constraint evaluation falls back atomically to the
@@ -301,8 +321,8 @@ small-scene playback results.
 
 1. Pole vectors, analytic two-bone IK, local joint axes/orientation, rotation
    limits, target animation, and complete IK/FK matching/baking.
-2. Aim constraints, multi-source constraint weighting, constraint animation,
-   and curve-based controller shapes.
+2. Aim object-up/roll controls, multi-source constraint weighting, constraint
+   animation, and curve-based controller shapes.
 3. Editable normalized skin weights, influence management, weight painting,
    joint/pose mirroring, and conventional deformers.
 4. Animation layers, camera/custom-property animation, Euler filtering, richer
@@ -316,6 +336,10 @@ small-scene playback results.
 
 Functional references are Autodesk's [Graph Editor tangents documentation](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Animation/files/GUID-43A4FE2C-4863-4EA6-B6AE-6D2B6757F6C7.htm)
 and [Set Driven Key workflow](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-Animation/files/GUID-F5429279-8EDB-449C-9E8D-4B5C0210757D.htm).
+The aim workflow follows Autodesk's [Aim constraint options](https://help.autodesk.com/cloudhelp/2024/ENU/Maya-CharacterAnimation/files/GUID-D4769D95-EC0E-4C94-AF60-8EB3FC4305E4.htm):
+the local aim direction points toward a target, and a world-up direction controls
+roll. Musubi uses +Z as its default aim axis, while Maya documents +X, and exposes
+only signed-axis vector-up settings rather than Maya's full set of up modes.
 The interface adapts these concepts without using Autodesk code, branding,
 proprietary artwork, or file formats.
 

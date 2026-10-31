@@ -10,7 +10,8 @@ service was introduced by this work.
 | --- | --- |
 | Baseline before animation work | 31 tests passed across 5 files |
 | Development checkpoint recorded at 16:56 | 118 tests passed across 15 files |
-| Final curve-insertion checkpoint at 17:12 | 126 tests passed across 15 files |
+| Curve-insertion checkpoint at 17:12 | 126 tests passed across 15 files |
+| Aim-constraint checkpoint at 17:19 | 137 tests passed across 15 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -43,6 +44,9 @@ latest checked session had no browser console errors.
 | IK viewport target cancellation | After undo, another drag followed by Escape restored −2 without adding history; redo still replayed the prior −0.775372 edit |
 | IK panel docking | Opening the IK tab retained viewport height at 730 px; width changed only from 1,300 to 1,290 px in the checked layout |
 | Point constraint | Maintain-offset preserved X=3 and Y=1.5 at frame 24 |
+| Aim constraint and history | Default +Z/world +Y aimed toward the source with rotation [0, −90, 0]; undo restored [0, 0, 0], redo restored the aim, and frame 24 tracked the moving source |
+| Custom aim axes | Local −X/world +Z produced rotation [90, 0, 0] in the checked scene |
+| Aim offset and disable | Creation at frame 24 preserved the underlying 90° Z rotation; seeking frame 0 changed it to about 116.565°. Disabling restored the underlying 0° rotation |
 | Visibility | Visible at frame 12 and hidden at frame 36 |
 | Auto-key | An edited value of 2 survived seeking away and back |
 | Frame-rate editing | Changing 24→30 FPS preserved current frame 36 |
@@ -70,6 +74,7 @@ the browser retest now cover preservation of the opposite handle.
 | CPU animation evaluation, 1,000 tracks | Approximately 0.56 ms per evaluation |
 | CPU IK evaluation, 20 chains | Approximately 2.62 ms per evaluation |
 | Node CPU constraint evaluation, 100 parent constraints, 100 evaluations | 43.5 ms total, approximately 0.44 ms per evaluation |
+| Node CPU aim evaluation, 100 aim constraints, 100 evaluations after 10 warmups | 27.94 ms total, approximately 0.28 ms per evaluation |
 | Browser animation with binding/elasticity, approximately 23,600 scene splats, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms |
 
 CPU microbenchmarks exclude rendering, editor drawing, asset decoding, Spark
@@ -89,11 +94,17 @@ were not benchmarked.
 - `f9fba29` — Add validated animation curves, driven keys and rig solvers.
 - `962a2f3` — Integrate animation editors and rigging workspaces with scene playback.
 - `1ba021a` — Add viewport IK target manipulation and enforce exact constraint poses.
+- `c7f422e` — Preserve animation curve shape when inserting keys.
 
-The accompanying follow-up commit adds verified shape-preserving key insertion,
+The curve-insertion commit adds verified shape-preserving key insertion,
 preserves the animation frame during import, and restores Save/Open shortcuts
 from rigging fields. Eight additional focused animation tests cover insertion,
 discrete visibility, neighboring segments, history and atomic rejection of
 unrepresentable tangent splits.
+The accompanying Aim commit adds signed aim/up axes, maintained orientation
+offsets, source-position tracking, and serialization validation. Ten focused
+constraint tests and one packed-archive integration test cover it. The browser
+checks above passed with no console errors. The build's existing large-chunk
+warning remains.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.

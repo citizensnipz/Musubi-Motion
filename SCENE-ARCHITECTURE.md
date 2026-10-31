@@ -83,7 +83,7 @@ Handles have independent world-space targets and an FK/IK blend. Overlapping or
 ancestor-dependent chains are rejected so array ordering cannot change the result.
 Two-bone chains use the same CCD solver; there is no analytic solver or pole vector.
 
-`src/constraints.ts` provides point, orient, scale, and parent constraints across
+`src/constraints.ts` provides point, orient, aim, scale, and parent constraints across
 objects and joints. It computes source world poses in dependency order, converts
 results into the driven node's parent space, and overrides the corresponding
 output groups after IK. Parent constraints affect position and rotation while
@@ -92,11 +92,20 @@ transform, including source scale. Point offsets stay in world space. Rotation
 offsets are normalized quaternions. One constraint owns each output group;
 hierarchy/constraint cycles, including disabled links, are rejected. SDK and IK
 are not reevaluated from constrained results. Joint scale constraints are not
-supported. Orient/parent/scale reject nonuniform driven-parent transforms and
-sheared sources; point supports arbitrary finite invertible parents. Unsupported
+supported. Orient/aim/parent/scale reject nonuniform driven-parent transforms.
+Orient/parent/scale reject sheared sources; aim reads only the source position.
+Point supports arbitrary finite invertible parents. Unsupported
 animated poses stop playback with an explicit notice. Evaluation is atomic, so
 the whole constraint stage falls back to its underlying pose when a check fails.
 Disabled constraints remain editable for repair.
+
+Aim owns the target's rotation group and uses Three.js orientation math to
+point a signed local axis toward the source's world position. Optional axis
+settings default to local +Z and world-up +Y; local up is +Y unless aiming ±Y,
+when it is +Z. A maintained quaternion offset preserves initial world orientation.
+Coincident source/target positions are rejected atomically. Up-vector collinearity
+uses Three.js's deterministic fallback, without a previous-frame orientation
+cache; roll continuity near the pole and object-up modes remain future work.
 
 The document and its commands do not depend on a viewport widget. This is the
 integration boundary for future automation/MCP access; no MCP endpoint is

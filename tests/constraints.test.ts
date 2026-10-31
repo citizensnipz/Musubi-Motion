@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from "three";
 import { evaluateSceneAnimation, type AnimationPose } from "../src/animation.ts";
-import { constraintWorldMatrices, createConstraint, deleteConstraint, evaluateConstraints, updateConstraint, validateConstraints, type Constraint } from "../src/constraints.ts";
+import { constraintWorldMatrices, createConstraint, deleteConstraint, evaluateConstraints, updateConstraint, validateConstraints, type Constraint, type SignedAxis } from "../src/constraints.ts";
 import { emptyScene, type SceneDocument, type Vec3 } from "../src/scene-document.ts";
 import { createSceneStore } from "../src/scene-store.ts";
 
@@ -112,6 +112,121 @@ describe("constraint evaluation", () => {
     updateConstraint(store, id, { enabled: false });
     const disabled = evaluateSceneAnimation(store.getState().document, 0); disabled.get("source")!.rotation = [0, 0, 45];
     evaluateConstraints(store.getState().document, disabled); expect(disabled.get("joint")!.rotation).toEqual([0, 0, 0]);
+  });
+});
+
+describe("aim constraints", () => {
+  const axes: SignedAxis[] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
+  const vectors: Record<SignedAxis, Vec3> = { "+X": [1, 0, 0], "-X": [-1, 0, 0], "+Y": [0, 1, 0], "-Y": [0, -1, 0], "+Z": [0, 0, 1], "-Z": [0, 0, -1] };
+  function direction(doc: SceneDocument, poses: Map<string, AnimationPose>) {
+    return position(world(doc, poses, "source")).sub(position(world(doc, poses))).normalize();
+  }
+  it("aims local +Z at the source by default and preserves target position and scale", () => {
+    const doc = fixture(); if (doc.nodes.source.type === "transform") doc.nodes.source.position = [3, 2, -1];
+    const store = createSceneStore(doc); createConstraint(store, "aim", "source", "target", false);
+    const scene = store.getState().document, poses = evaluateSceneAnimation(scene, 0), before = structuredClone(poses.get("target")!);
+    evaluateConstraints(scene, poses);
+    expect(new Vector3(0, 0, 1).transformDirection(world(scene, poses)).angleTo(direction(scene, poses))).toBeLessThan(1e-7);
+    expect(poses.get("target")!.position).toEqual(before.position); expect(poses.get("target")!.scale).toEqual(before.scale);
+    const legacy = { ...scene, constraints: scene.constraints!.map(c => ({ ...c, aimAxis: undefined, worldUpAxis: undefined })) };
+    expect(() => validateConstraints(legacy.constraints, legacy)).not.toThrow();
+    const legacyPoses = evaluateSceneAnimation(legacy, 0); evaluateConstraints(legacy, legacyPoses); expect(legacyPoses).toEqual(poses);
+  });
+  it("supports every signed local aim and world-up axis with consistent local-up conventions", () => {
+    for (const aimAxis of axes) for (const worldUpAxis of axes) {
+      const doc = fixture(); if (doc.nodes.source.type === "transform") doc.nodes.source.position = [3, 2, 4];
+      const store = createSceneStore(doc); createConstraint(store, "aim", "source", "target", false, undefined, { aimAxis, worldUpAxis });
+      const scene = store.getState().document, poses = evaluateSceneAnimation(scene, 0); evaluateConstraints(scene, poses);
+      const targetMatrix = world(scene, poses), aimDirection = direction(scene, poses);
+      expect(new Vector3(...vectors[aimAxis]).transformDirection(targetMatrix).angleTo(aimDirection)).toBeLessThan(1e-7);
+      const expectedUp = new Vector3(...vectors[worldUpAxis]).projectOnPlane(aimDirection).normalize();
+      const localUp = aimAxis[1] === "Y" ? new Vector3(0, 0, 1) : new Vector3(0, 1, 0);
+      expect(localUp.transformDirection(targetMatrix).angleTo(expectedUp)).toBeLessThan(1e-7);
+    }
+  });
+  it("captures maintain-offset rotation and retains the angular relationship as the source moves", () => {
+    const doc = fixture(), poses = evaluateSceneAnimation(doc, 0);
+    poses.get("source")!.position = [3, 2, 1]; poses.get("target")!.rotation = [20, 30, -10];
+    const original = rotation(world(doc, poses)), initialAngle = new Vector3(0, 0, 1).applyQuaternion(original).angleTo(direction(doc, poses));
+    const store = createSceneStore(doc); createConstraint(store, "aim", "source", "target", true, poses);
+    const scene = store.getState().document, offset = [...scene.constraints![0].offset.rotation];
+    evaluateConstraints(scene, poses); expect(rotation(world(scene, poses)).angleTo(original)).toBeLessThan(1e-7);
+    poses.get("source")!.position = [-4, 3, 2]; evaluateConstraints(scene, poses);
+    expect(new Vector3(0, 0, 1).transformDirection(world(scene, poses)).angleTo(direction(scene, poses))).toBeCloseTo(initialAngle, 8);
+    expect(scene.constraints![0].offset.rotation).toEqual(offset);
+  });
+  it("compensates a translated, rotated, uniformly scaled parent", () => {
+    const doc = fixture(); doc.nodes.target.parentId = "parent";
+    const poses = evaluateSceneAnimation(doc, 0);
+    poses.get("parent")!.position = [5, 2, -3]; poses.get("parent")!.rotation = [30, 40, 20]; poses.get("parent")!.scale = [2, 2, 2];
+    poses.get("target")!.position = [1, 2, 0]; poses.get("source")!.position = [-3, 7, 9];
+    const store = createSceneStore(doc); createConstraint(store, "aim", "source", "target", false, poses, { aimAxis: "-X", worldUpAxis: "+Z" });
+    const scene = store.getState().document; evaluateConstraints(scene, poses);
+    expect(new Vector3(-1, 0, 0).transformDirection(world(scene, poses)).angleTo(direction(scene, poses))).toBeLessThan(1e-7);
+    expect(poses.get("target")!.position).toEqual([1, 2, 0]);
+  });
+  it("aims FK joints without modifying their local bone lengths", () => {
+    const doc = fixture(); if (doc.nodes.source.type === "transform") doc.nodes.source.position = [3, 4, 2];
+    doc.joints = [{ id: "jointRoot", name: "jointRoot", parentId: null, position: [1, 0, 0], rotation: [0, 0, 45] },
+      { id: "jointTip", name: "jointTip", parentId: "jointRoot", position: [0, 2, 0] }];
+    const store = createSceneStore(doc); createConstraint(store, "aim", "source", "jointTip", false, undefined, { aimAxis: "+Y", worldUpAxis: "+Z" });
+    const scene = store.getState().document, poses = evaluateSceneAnimation(scene, 0); evaluateConstraints(scene, poses);
+    const matrices = constraintWorldMatrices(scene, poses), target = matrices.get("jointTip")!, source = matrices.get("source")!;
+    expect(new Vector3(0, 1, 0).transformDirection(target).angleTo(position(source).sub(position(target)).normalize())).toBeLessThan(1e-7);
+    expect(poses.get("jointTip")!.position).toEqual([0, 2, 0]); expect(doc.joints[1].rotation).toBeUndefined();
+  });
+  it("uses the driven position after a point constraint regardless of relationship array order", () => {
+    const doc = fixture();
+    if (doc.nodes.source.type === "transform") doc.nodes.source.position = [2, 1, 5];
+    if (doc.nodes.other.type === "transform") doc.nodes.other.position = [2, 1, 0];
+    const store = createSceneStore(doc); createConstraint(store, "point", "other", "target", false);
+    const displayed = evaluateSceneAnimation(store.getState().document, 0); evaluateConstraints(store.getState().document, displayed);
+    createConstraint(store, "aim", "source", "target", false, displayed);
+    const scene = { ...store.getState().document, constraints: [...store.getState().document.constraints!].reverse() };
+    const poses = evaluateSceneAnimation(scene, 0); evaluateConstraints(scene, poses);
+    expect(poses.get("target")!.position).toEqual([2, 1, 0]);
+    expect(new Vector3(0, 0, 1).transformDirection(world(scene, poses)).angleTo(new Vector3(0, 0, 1))).toBeLessThan(1e-7);
+  });
+  it("rejects coincident creation and animated coincidence atomically, while allowing repair", () => {
+    const store = createSceneStore(fixture()), before = store.getState().document;
+    expect(() => createConstraint(store, "aim", "source", "target", false)).toThrow(/coincide/);
+    expect(store.getState().document).toBe(before);
+    const poses = evaluateSceneAnimation(before, 0); poses.get("source")!.position = [0, 0, 4];
+    const id = createConstraint(store, "aim", "source", "target", false, poses), scene = store.getState().document;
+    const coincident = evaluateSceneAnimation(scene, 0), original = structuredClone(coincident);
+    expect(() => evaluateConstraints(scene, coincident)).toThrow(/Separate their positions/); expect(coincident).toEqual(original);
+    updateConstraint(store, id, { enabled: false });
+    expect(() => evaluateConstraints(store.getState().document, coincident)).not.toThrow();
+  });
+  it("uses deterministic finite fallback at the world-up pole", () => {
+    const doc = fixture(); if (doc.nodes.source.type === "transform") doc.nodes.source.position = [0, 5, 0];
+    const store = createSceneStore(doc); createConstraint(store, "aim", "source", "target", false);
+    const scene = store.getState().document, first = evaluateSceneAnimation(scene, 0); evaluateConstraints(scene, first);
+    const other = evaluateSceneAnimation(scene, 0); other.get("source")!.position = [2, 0, 1]; evaluateConstraints(scene, other);
+    const repeated = evaluateSceneAnimation(scene, 0); evaluateConstraints(scene, repeated);
+    expect(repeated).toEqual(first); expect(first.get("target")!.rotation.every(Number.isFinite)).toBe(true);
+    expect(new Vector3(0, 0, 1).transformDirection(world(scene, first)).angleTo(new Vector3(0, 1, 0))).toBeLessThan(0.0002);
+  });
+  it("permits a sheared source origin but rejects a nonuniform driven parent", () => {
+    const doc = fixture(); doc.nodes.source.parentId = "other";
+    const poses = evaluateSceneAnimation(doc, 0); poses.get("other")!.scale = [2, 1, 1]; poses.get("source")!.rotation = [0, 0, 45]; poses.get("source")!.position = [3, 2, 1];
+    const store = createSceneStore(doc); createConstraint(store, "aim", "source", "target", false, poses);
+    const scene = store.getState().document; evaluateConstraints(scene, poses);
+    expect(new Vector3(0, 0, 1).transformDirection(world(scene, poses)).angleTo(direction(scene, poses))).toBeLessThan(1e-7);
+    const parented = fixture(); parented.nodes.target.parentId = "parent";
+    const unsupported = evaluateSceneAnimation(parented, 0); unsupported.get("source")!.position = [3, 0, 0]; unsupported.get("parent")!.scale = [2, 1, 1];
+    expect(() => createConstraint(createSceneStore(parented), "aim", "source", "target", false, unsupported)).toThrow(/uniformly scaled/);
+  });
+  it("validates signed axes, shares rotation ownership, preserves cycles protection and supports undo", () => {
+    const doc = fixture(); if (doc.nodes.source.type === "transform") doc.nodes.source.position = [2, 1, 3];
+    const store = createSceneStore(doc), before = store.getState().document;
+    expect(() => createConstraint(store, "aim", "source", "target", false, undefined, { aimAxis: "X" as SignedAxis })).toThrow(/axes must be/);
+    const id = createConstraint(store, "aim", "source", "target", false), scene = store.getState().document;
+    expect(() => createConstraint(store, "orient", "source", "target", false)).toThrow(/one constraint/);
+    expect(() => createConstraint(store, "point", "target", "source", false)).toThrow(/cycle/);
+    expect(() => validateConstraints([{ ...scene.constraints![0], worldUpAxis: "invalid" }], scene)).toThrow(/axes must be/);
+    store.temporal.getState().undo(); expect(store.getState().document).toBe(before);
+    store.temporal.getState().redo(); expect(store.getState().document.constraints![0].id).toBe(id);
   });
 });
 

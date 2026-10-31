@@ -3,7 +3,9 @@ import type { AnimationPose } from "./animation.ts";
 import type { SceneDocument, TransformChannels, Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
-export type ConstraintType = "point" | "orient" | "scale" | "parent";
+export type ConstraintType = "point" | "orient" | "scale" | "parent" | "aim";
+export type SignedAxis = "+X" | "-X" | "+Y" | "-Y" | "+Z" | "-Z";
+export type AimOptions = { aimAxis?: SignedAxis; worldUpAxis?: SignedAxis };
 export type Constraint = {
   id: string;
   name: string;
@@ -12,12 +14,15 @@ export type Constraint = {
   targetId: string;
   enabled: boolean;
   maintainOffset: boolean;
+  aimAxis?: SignedAxis;
+  worldUpAxis?: SignedAxis;
   offset: { position: Vec3; rotation: [number, number, number, number]; scale: Vec3 };
 };
 type Node = { id: string; parentId: string | null; position: Vec3; rotation?: Vec3; scale?: Vec3 };
 type Plan = { nodes: Map<string, Node>; order: string[]; byTarget: Map<string, Constraint[]> };
 const planCache = new WeakMap<SceneDocument, Plan>();
-const constraintTypes: ConstraintType[] = ["point", "orient", "scale", "parent"];
+const constraintTypes: ConstraintType[] = ["point", "orient", "aim", "scale", "parent"];
+const signedAxes: SignedAxis[] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e12;
 const vector = (value: unknown): value is Vec3 => Array.isArray(value) && value.length === 3 && value.every(finite);
 const validId = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value);
@@ -32,7 +37,7 @@ function nodesFor(doc: SceneDocument): Map<string, Node> {
 }
 function groups(type: ConstraintType): (keyof TransformChannels)[] {
   if (type === "parent") return ["position", "rotation"];
-  return [type === "point" ? "position" : type === "orient" ? "rotation" : "scale"];
+  return [type === "point" ? "position" : type === "orient" || type === "aim" ? "rotation" : "scale"];
 }
 function buildPlan(doc: SceneDocument, constraints: Constraint[]): Plan {
   const nodes = nodesFor(doc), outgoing = new Map<string, Set<string>>(), incoming = new Map<string, number>();
@@ -72,6 +77,7 @@ export function validateConstraints(value: unknown, doc: SceneDocument): asserts
       || constraint.sourceId === constraint.targetId || !nodes.has(constraint.sourceId) || !nodes.has(constraint.targetId)
       || typeof constraint.enabled !== "boolean" || typeof constraint.maintainOffset !== "boolean") throw Error("Invalid constraint or missing target.");
     if (constraint.type === "scale" && doc.joints?.some(joint => joint.id === constraint.targetId)) throw Error("Joint scale constraints are not supported.");
+    validateAimOptions(constraint);
     const offset = constraint.offset;
     if (!offset || typeof offset !== "object" || !vector(offset.position) || !vector(offset.scale) || offset.scale.some(n => n <= 0)
       || !Array.isArray(offset.rotation) || offset.rotation.length !== 4 || !offset.rotation.every(finite)
@@ -135,13 +141,39 @@ function checkConstraintPose(constraint: Pick<Constraint, "type" | "name">, sour
     throw Error(`${prefix}the source or driven parent has a non-finite or singular transform. Restore finite, nonzero scales.`);
   }
   if (constraint.type === "point") return;
-  const parentBasis = basis(parent), sourceBasis = basis(source), largest = Math.max(...parentBasis.lengths), smallest = Math.min(...parentBasis.lengths);
+  const parentBasis = basis(parent), largest = Math.max(...parentBasis.lengths), smallest = Math.min(...parentBasis.lengths);
   if (!parentBasis.orthogonal || largest - smallest > largest * AFFINE_TOLERANCE) {
     throw Error(`${prefix}${constraint.type} constraints require a uniformly scaled driven parent. Set its ancestor scales to equal X, Y and Z values, or use a point constraint.`);
   }
+  // Aim consumes only the source origin; source shear does not affect it.
+  if (constraint.type === "aim") return;
+  const sourceBasis = basis(source);
   if (!sourceBasis.orthogonal || sourceBasis.lengths.some(length => !Number.isFinite(length) || length === 0)) {
     throw Error(`${prefix}the source contains shear. Use uniform ancestor scales or remove the rotated nonuniform scaling.`);
   }
+}
+
+function validateAimOptions(options: AimOptions) {
+  if ((options.aimAxis !== undefined && !signedAxes.includes(options.aimAxis)) || (options.worldUpAxis !== undefined && !signedAxes.includes(options.worldUpAxis))) {
+    throw Error("Aim and world-up axes must be +X, -X, +Y, -Y, +Z or -Z.");
+  }
+}
+function axisVector(axis: SignedAxis): Vector3 {
+  const vector = new Vector3(); vector.setComponent("XYZ".indexOf(axis[1]), axis[0] === "+" ? 1 : -1); return vector;
+}
+function aimRotation(constraint: AimOptions & { name: string }, source: Vector3, target: Vector3): Quaternion {
+  const distanceSquared = source.distanceToSquared(target);
+  if (!Number.isFinite(distanceSquared)) throw Error(`Unsupported pose for ${constraint.name}: aim positions must be finite and within a representable distance.`);
+  if (distanceSquared <= 1e-16) throw Error(`Unsupported pose for ${constraint.name}: the look-at source and driven object coincide. Separate their positions or disable the aim constraint.`);
+  const axis = constraint.aimAxis ?? "+Z", worldUp = axisVector(constraint.worldUpAxis ?? "+Y");
+  // Three's lookAt builds a +Z-facing frame. Convert the selected local aim
+  // axis into that frame, keeping +Y local up (+Z when aiming along ±Y).
+  // Its built-in deterministic perturbation handles an up/aim parallel pole;
+  // this is not a history-dependent roll-continuity or object-up solver.
+  const localUp = axis[1] === "Y" ? new Vector3(0, 0, 1) : new Vector3(0, 1, 0);
+  const localFrame = new Quaternion().setFromRotationMatrix(new Matrix4().lookAt(axisVector(axis), new Vector3(), localUp));
+  const worldFrame = new Quaternion().setFromRotationMatrix(new Matrix4().lookAt(source, target, worldUp));
+  return worldFrame.multiply(localFrame.invert()).normalize();
 }
 
 /** Final pose stage after time animation, SDK and IK. Constraints override their
@@ -165,8 +197,10 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
             : sourceComponents.position.add(new Vector3(...offset.position));
           pose.position = desired.applyMatrix4(parentInverse).toArray() as Vec3;
         }
-        if (constraint.type === "orient" || constraint.type === "parent") {
-          const desired = sourceComponents.rotation.multiply(new Quaternion(...offset.rotation));
+        if (constraint.type === "orient" || constraint.type === "parent" || constraint.type === "aim") {
+          const desired = (constraint.type === "aim"
+            ? aimRotation(constraint, sourceComponents.position, new Vector3(...pose.position).applyMatrix4(parent))
+            : sourceComponents.rotation).multiply(new Quaternion(...offset.rotation));
           const local = parentComponents.rotation.clone().invert().multiply(desired).normalize();
           const rotation = new Euler().setFromQuaternion(local, "XYZ");
           pose.rotation = [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3;
@@ -190,23 +224,27 @@ function saveConstraints(store: SceneStore, constraints: Constraint[], editLabel
   if (JSON.stringify(doc.constraints ?? []) === JSON.stringify(constraints)) return;
   store.setState({ document: { ...doc, constraints }, editLabel });
 }
-export function createConstraint(store: SceneStore, type: ConstraintType, sourceId: string, targetId: string, maintainOffset = true, poses?: ReadonlyMap<string, AnimationPose>): string {
+export function createConstraint(store: SceneStore, type: ConstraintType, sourceId: string, targetId: string, maintainOffset = true, poses?: ReadonlyMap<string, AnimationPose>, aimOptions: AimOptions = {}): string {
+  validateAimOptions(aimOptions);
   const doc = store.getState().document, matrices = constraintWorldMatrices(doc, poses);
   if (!matrices.has(sourceId) || !matrices.has(targetId)) throw Error("Choose a source and driven object or joint.");
   const source = matrices.get(sourceId)!, targetParentId = nodesFor(doc).get(targetId)!.parentId;
   checkConstraintPose({ type, name: `${type} constraint` }, source, targetParentId ? matrices.get(targetParentId)! : new Matrix4());
   const sourceComponents = decompose(source), targetComponents = decompose(matrices.get(targetId)!);
+  const aimSettings: AimOptions = type === "aim" ? { aimAxis: aimOptions.aimAxis ?? "+Z", worldUpAxis: aimOptions.worldUpAxis ?? "+Y" } : {};
+  const initialAim = type === "aim" ? aimRotation({ ...aimSettings, name: "aim constraint" }, sourceComponents.position, targetComponents.position) : undefined;
   const offset: Constraint["offset"] = { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] };
   if (maintainOffset) {
     if (type === "point") offset.position = targetComponents.position.clone().sub(sourceComponents.position).toArray() as Vec3;
     if (type === "parent") offset.position = targetComponents.position.clone().applyMatrix4(source.clone().invert()).toArray() as Vec3;
     if (type === "orient" || type === "parent") offset.rotation = sourceComponents.rotation.clone().invert().multiply(targetComponents.rotation).normalize().toArray();
+    if (initialAim) offset.rotation = initialAim.clone().invert().multiply(targetComponents.rotation).normalize().toArray();
     if (type === "scale") offset.scale = targetComponents.scale.clone().divide(sourceComponents.scale).toArray() as Vec3;
   }
   const id = crypto.randomUUID();
   const targetName = doc.nodes[targetId]?.name ?? doc.joints?.find(joint => joint.id === targetId)?.name ?? targetId;
   const name = `${targetName}_${type}`.slice(0, 100);
-  const constraint: Constraint = { id, name, type, sourceId, targetId, enabled: true, maintainOffset, offset };
+  const constraint: Constraint = { id, name, type, sourceId, targetId, enabled: true, maintainOffset, offset, ...aimSettings };
   saveConstraints(store, [...doc.constraints ?? [], constraint], `Create ${type} constraint`);
   return id;
 }
