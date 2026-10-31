@@ -17,7 +17,7 @@ export function createElasticityPanel(host: HTMLElement, change:(id:string,value
  ] as const) {
   const labelElement=document.createElement("label"); labelElement.textContent=label; labelElement.title=help;
   const input=document.createElement("input"); input.type="number";input.min=String(min);input.max=String(max);input.step=String(step);input.dataset.key=key;
-  refreshLocks.push(propertyInteraction(input,()=>`${active?.id}/elasticity/${key}`));
+  refreshLocks.push(propertyInteraction(input,()=>`${active?.id}/elasticity/${key}`,labelElement));
   input.onchange=()=>{
    if(!active?.elasticity||input.readOnly)return;
    const n=input.valueAsNumber;

@@ -189,6 +189,18 @@ kbd {
 #viewport-tools button:focus-visible { outline: 1px solid var(--text); outline-offset: -1px; }
 #viewport-tools .camera-view { flex-direction: column; gap: 0; font-size: 9px; }
 #viewport-tools .camera-view svg { width: 13px; height: 13px; }
+.camera-cube { position: absolute; right: 12px; top: 12px; width: 112px; height: 112px; z-index: 5; }
+.cube-solid { position: absolute; left: 30px; top: 30px; width: 52px; height: 52px; transform-style: preserve-3d; }
+.cube-solid button { position: absolute; inset: 0; width: 52px; height: 52px; box-sizing: border-box; backface-visibility: hidden; border: 1px solid #777; border-radius: 2px; background: #c8cbd0; color: #34383d; font: 600 10px 'Segoe UI', sans-serif; text-transform: uppercase; letter-spacing: .3px; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 2px #ffffff30; }
+.cube-solid button:hover, .cube-solid button:focus-visible { background: #92bbdf; outline: none; }
+.cube-solid .cube-front { transform: translateZ(26px); }
+.cube-solid .cube-back { transform: rotateY(180deg) translateZ(26px); }
+.cube-solid .cube-right { transform: rotateY(90deg) translateZ(26px); background: #aeb3ba; }
+.cube-solid .cube-left { transform: rotateY(-90deg) translateZ(26px); background: #aeb3ba; }
+.cube-solid .cube-top { transform: rotateX(90deg) translateZ(26px); background: #e0e2e5; }
+.cube-solid .cube-bottom { transform: rotateX(-90deg) translateZ(26px); }
+.camera-cube .cube-home { position: absolute; left: 0; top: 0; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.camera-cube .cube-home:hover { background: var(--line); color: var(--text); }
 #viewport-tools .viewport-divider { border-left: 1px solid var(--line); margin-left: 3px; }
 #viewport-tools-drag { touch-action: none; cursor: grab !important; min-width: 20px !important; }
 #viewport-tools-drag[aria-disabled="true"] { cursor: default !important; opacity: .4; }

@@ -1,5 +1,6 @@
 import { buttonContent, type IconName } from "./ui";
 import { mountToolPalette } from "./tool-palette";
+import { Matrix4, type Quaternion } from "three";
 export type ViewName="perspective"|"front"|"back"|"left"|"right"|"top"|"bottom";
 export function mountViewportTools(host:HTMLElement,visibility:(kind:"grid"|"gizmos"|"joints",visible:boolean)=>void,view:(name:ViewName)=>void,reset:()=>void) {
   const panel=document.createElement("div");panel.id="viewport-tools";panel.setAttribute("aria-label","Viewport controls");
@@ -14,13 +15,23 @@ export function mountViewportTools(host:HTMLElement,visibility:(kind:"grid"|"giz
   const resetButton=button("viewport-reset","Reset camera","rest",reset);
   resetButton.classList.add("viewport-divider");
   const views=new Map<ViewName,HTMLButtonElement>();
-  for(const [name,short] of [["perspective","P"],["front","F"],["back","B"],["left","L"],["right","R"],["top","T"],["bottom","Bt"]] as const) {
-    const b=button(`view-${name}`,name==="perspective"?"Perspective view":`${name[0].toUpperCase()+name.slice(1)} orthographic view`,"object",()=>view(name),short);
-    b.classList.add("camera-view");views.set(name,b);
+  const cube=document.createElement("div");cube.className="camera-cube";cube.setAttribute("aria-label","Camera view cube");
+  const solid=document.createElement("div");solid.className="cube-solid";cube.append(solid);
+  for(const [name,label] of [["front","Front"],["back","Back"],["left","Left"],["right","Right"],["top","Top"],["bottom","Bottom"]] as const) {
+    const b=document.createElement("button");b.type="button";b.textContent=label;b.className=`cube-${name}`;
+    b.title=`${label} orthographic view`;b.setAttribute("aria-label",b.title);b.onclick=()=>view(name);
+    solid.append(b);views.set(name,b);
   }
+  const home=document.createElement("button");home.type="button";home.className="cube-home";home.title="Home view";home.setAttribute("aria-label","Home view");buttonContent(home,"home");home.onclick=reset;cube.append(home);
+  host.append(cube);
   const lock=button("viewport-tools-lock","Unlock viewport controls","lock",()=>{});lock.setAttribute("aria-pressed","true");lock.classList.add("viewport-divider");
   host.append(panel);
   panel.style.left=`${Math.max(12,(host.clientWidth-panel.offsetWidth)/2)}px`;
   mountToolPalette({panel:panel.id,handle:handle.id,lock:lock.id},"viewport controls");
-  return {setView(name:ViewName){for(const [key,b]of views)b.setAttribute("aria-pressed",String(key===name));}};
+  const orientation=new Matrix4();
+  return {updateOrientation(q:Quaternion){
+    orientation.makeRotationFromQuaternion(q.clone().invert());
+    const values=orientation.elements.map((v,i)=>((i%4===1)!==(Math.floor(i/4)===1))?-v:v);
+    solid.style.transform=`matrix3d(${values.join(",")})`;
+  },setView(name:ViewName){for(const [key,b]of views)b.setAttribute("aria-pressed",String(key===name));}};
 }

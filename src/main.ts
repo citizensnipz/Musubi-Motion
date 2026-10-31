@@ -578,6 +578,7 @@ async function start() {
     controls.enabled = !event.value;
     if (event.value) {
       dragId = skeleton.selectedId || singleId();
+      if(skeleton.selectedId&&currentMode==="rotate")skeleton.beginRotation();
       cancelDrag = false;
       setPlaying(false);
     } else if (dragId) {
@@ -586,7 +587,8 @@ async function start() {
       const jointPosition = joint?.position.toArray() as Vec3 | undefined;
       dragId = undefined;
       if (jointPosition) {
-        if (!cancelDrag) skeleton.commitMove(id, jointPosition, readChannels(joint!).rotation);
+        if (!cancelDrag && currentMode==="rotate") skeleton.commitRotation();
+        else if (!cancelDrag) skeleton.commitMove(id, jointPosition, readChannels(joint!).rotation);
         else skeleton.reset();
         updateHistoryButtons();
         return;
@@ -605,7 +607,7 @@ async function start() {
     updateHistoryButtons();
   });
   transform.addEventListener("objectChange", () => {
-    if (skeleton.selectedId) { skeleton.preview(); updateBindings(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
+    if (skeleton.selectedId) { if(dragId&&currentMode==="rotate")skeleton.previewRotation(); skeleton.preview(); updateBindings(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
     if (!object) return;
@@ -1285,6 +1287,7 @@ async function start() {
           .applyMatrix4(object.mesh.matrixWorld);
       }
     }
+    viewportTools.updateOrientation(camera.quaternion);
     webgl.render(world, camera);
   });
   choose("select");

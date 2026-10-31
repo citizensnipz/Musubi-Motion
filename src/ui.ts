@@ -47,6 +47,7 @@ import {
   KeyRound,
   RotateCcw,
   Grid2x2,
+  House,
 } from "lucide";
 
 const icons = {
@@ -87,6 +88,7 @@ const icons = {
   key: KeyRound,
   rest: RotateCcw,
   grid: Grid2x2,
+  home: House,
 };
 export type IconName = keyof typeof icons;
 export function icon(name: IconName) {

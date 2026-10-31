@@ -12,18 +12,38 @@ export function propertyInteraction(input:any,key:()=>string,handle?:HTMLElement
     const close=(e:Event)=>{if(!popup.contains(e.target as Node)){popup.remove();document.removeEventListener("pointerdown",close,true);}};
     document.addEventListener("pointerdown",close,true);popup.onkeydown=e=>{if(e.key==="Escape"){popup.remove();input.focus();}};
   });
-  if(handle){
-    handle.title="Middle-drag left/right to adjust";
-    handle.addEventListener("pointerdown",e=>{
+  // Numeric attributes scrub by default, on the field and any supplied label.
+  // Text attributes (such as Name) retain their normal editing behavior.
+  if(input.type==="number") for(const surface of new Set<HTMLElement>([input,...(handle?[handle]:[])])) {
+    if(!surface.title)surface.title="Middle-drag left/right to adjust";
+    surface.addEventListener("pointerdown",e=>{
       if(e.button!==1||locks.has(key())||input.disabled)return;
-      e.preventDefault();const start=e.clientX,value=Number(input.value),id=key();
-      handle.setPointerCapture(e.pointerId);
-      const move=(m:PointerEvent)=>{if(key()!==id)return;const step=Number(input.step)||.1;const min=input.min==null?-Infinity:Number(input.min);input.value=String(Math.max(min,Number((value+(m.clientX-start)*step*.1).toFixed(5))));};
-      const end=()=>{handle.removeEventListener("pointermove",move);handle.removeEventListener("pointerup",end);handle.removeEventListener("pointercancel",end);if(key()===id)input.dispatchEvent(new Event("change",{bubbles:true}));};
-      handle.addEventListener("pointermove",move);handle.addEventListener("pointerup",end);handle.addEventListener("pointercancel",end);
+      e.preventDefault();e.stopPropagation();
+      const start=e.clientX,value=Number(input.value),id=key();
+      if(!Number.isFinite(value))return;
+      const step=Number(input.step)>0?Number(input.step):.1;
+      const bound=(raw:unknown,fallback:number)=>raw==null||raw===""?fallback:Number(raw);
+      const min=bound(input.min,-Infinity),max=bound(input.max,Infinity);
+      surface.setPointerCapture(e.pointerId);
+      let finished=false;
+      const move=(m:PointerEvent)=>{
+        if(key()!==id||locks.has(id))return;
+        const ticks=Math.round((m.clientX-start)/10);
+        input.value=String(Math.min(max,Math.max(min,Number((value+ticks*step).toFixed(6)))));
+      };
+      const finish=(cancel:boolean)=>{
+        if(finished)return;finished=true;
+        surface.removeEventListener("pointermove",move);surface.removeEventListener("pointerup",end);surface.removeEventListener("pointercancel",cancelled);surface.removeEventListener("lostpointercapture",cancelled);surface.removeEventListener("keydown",escape);
+        if(surface.hasPointerCapture(e.pointerId))surface.releasePointerCapture(e.pointerId);
+        if(key()!==id)return;
+        if(cancel||locks.has(id))input.value=String(value);
+        else if(Number(input.value)!==value)input.dispatchEvent(new Event("change",{bubbles:true}));
+      };
+      const end=()=>finish(false),cancelled=()=>finish(true);
+      const escape=(event:KeyboardEvent)=>{if(event.key==="Escape"){event.preventDefault();finish(true);}};
+      surface.addEventListener("pointermove",move);surface.addEventListener("pointerup",end);surface.addEventListener("pointercancel",cancelled);surface.addEventListener("lostpointercapture",cancelled);surface.addEventListener("keydown",escape);
     });
-    handle.addEventListener("auxclick",e=>e.preventDefault());
+    surface.addEventListener("auxclick",e=>{if(e.button===1)e.preventDefault();});
   }
   return refresh;
 }
-
