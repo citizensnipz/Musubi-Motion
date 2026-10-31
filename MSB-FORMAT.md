@@ -57,7 +57,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | Field | Stored data |
 | --- | --- |
 | `joints` | Joint IDs/names, parent IDs, local position, optional XYZ Euler rotation in degrees |
-| `SplatShape.binding` | Influence joint IDs and matching rest matrices |
+| `SplatShape.binding` | Influence joint IDs, matching rest matrices, optional sparse `weights` |
 | `SplatShape.elasticity` | Stretch/spacing/expansion, allocation budget, optional density/distribution, selected connection scope |
 | `CurveShape` | `type: "curveShape"`, ID/name/parent ID, `degree`, weighted `points`, `knots`, `closed`, `color` |
 | `animation` | `fps`, `start`, `end`, `loop`, `tracks` |
@@ -74,11 +74,30 @@ is `[x, y, z, weight]`; there must be at least degree + 1 and at most 128 points
 Coordinates and knot values are finite within ±1,000,000; weights are positive
 from 0.000001 through 1,000,000. The knot vector has point count + degree + 1
 entries, is nondecreasing, has a nonempty active interval, allows multiplicity
-up to degree + 1, and separates distinct values by at least 0.000000001.
+up to degree + 1 at endpoints and degree in the interior, and separates distinct
+values by at least 0.000000001. Interior continuity prevents false display bridges.
 `closed` is a boolean and joins rendered endpoints without periodic conversion;
 `color` is a six-digit `#rrggbb` string. Samples, line buffers, and selection
 bounds are rebuilt at load time rather than saved. Existing splat-only archives
 remain supported; older applications may reject the new shape type.
+
+Optional `binding.weights` stores `{ count, overrides }`. `count` is the
+nonnegative safe-integer count of original splat components, excluding generated
+elasticity fill. `overrides` maps canonical decimal indices such as `"0"` and
+`"12"` to arrays of `{ jointId, weight }`. Each row has one through four unique
+bound joint IDs, strictly positive finite weights no greater than one, and a
+total within 0.00000001 of one. Indices must be less than `count`; leading-zero,
+fractional, negative, and unsafe-integer keys are rejected. Each shape supports
+at most 200,000 stored overrides; a single editing command accepts at most
+20,000 component indices.
+
+Missing rows retain the existing automatic nearest-four inverse-squared-distance
+weights. Authored weights retain floating-point precision in JSON; Spark packs
+them to 8-bit values for rendering. Loading checks the stored count against the
+decoded source before attaching skinning. A mismatch rejects the load rather
+than applying weights to different components. Resetting overrides restores
+automatic weighting. Original asset bytes are unchanged, and generated fill
+inherits weights through the existing elasticity pipeline.
 
 Property references contain `targetId` and `channel`. Channels are
 `position.x/y/z`, `rotation.x/y/z`, `scale.x/y/z`, and `visibility`; joints do not
@@ -158,7 +177,7 @@ and releases old runtime objects. No network asset downloads occur during Open.
 ## Limits and future work
 
 - Packaging is in memory. Files and total unpacked data are capped at 512 MiB;
-  JSON metadata is capped at 4 MiB and scene nodes at 10,000. These are guardrails,
+  JSON metadata is capped at 128 MiB and scene nodes at 10,000. These are guardrails,
   not a performance guarantee: actual memory includes staging and GPU data too.
 - Saves use ZIP STORE entries because splat files often have their own
   compression. Each save rewrites the portable package. Streaming/project-folder

@@ -2,9 +2,9 @@
 
 Musubi implements a practical subset of Maya-style animation workflows. The
 current editor has a frame timeline, editable transform/joint curves, driven
-keys, FK/CCD IK, and point/orient/aim/scale/parent constraints. Animation layers,
-pole vectors, full skin-weight
-editing, polygon modeling, and particle FX remain future work.
+keys, FK/CCD IK, editable skin weights, and point/orient/aim/scale/parent
+constraints. Animation layers, pole vectors, weight painting, polygon modeling,
+and particle FX remain future work.
 
 ## Start with the example
 
@@ -254,6 +254,59 @@ target/blend keyframing, or range-based IK-to-FK pose baking. Matching a target 
 does not reproduce every possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
 
+## Skin weights
+
+The [skin-weight study](../examples/skin-weights-study.msb) is reproducible with
+`node scripts/create-skin-weights-example.mjs`. It has three bound joints,
+11,629 original components, and Tip weight 0.85 on indices 0–511. Middle rotates
+over frames 0–48, making the edited region easy to inspect while scrubbing.
+
+Open **Rigging → Skin Weights** and choose a **Bound splat object**, or select
+one in the Outliner. Enter the inclusive **First component index** and **Last
+component index**. **Previous component** and **Next component** replace the
+range with one adjacent component. Choose a **Joint influence**, enter its
+**Weight · 0 to 1**, and click **Apply influence weight**. The inspection table
+shows the first component's effective influences, total, and whether its weights
+are automatic or authored. **Reset selected to automatic** clears overrides in
+the range; **Reset all overrides** clears the entire shape's overrides.
+
+Weight editing applies to original components of an already bound splat object.
+Component indices start at zero and stay tied to the loaded source asset.
+Choose a bound influence and set its weight from zero to one for the selected
+components. Other active influences scale proportionally to keep the total at
+one. Setting an influence to zero removes it; setting it to one makes it the sole
+influence. Add a second influence before reducing a sole influence, and remove
+an existing influence before adding a fifth. Each component supports at most
+four active bound joints.
+
+Edits store sparse overrides with undo/redo. Unedited components keep the
+existing nearest-four distance weighting; resetting selected components or all
+overrides restores that automatic result. One command edits at most 20,000
+components, and a shape stores at most 200,000 overrides. Reopening a scene
+checks the original component count against the source before using saved
+weights.
+
+The editor retains precise authored weights, while Spark renders its existing
+8-bit packed weights. Component previews use those packed values and current
+joint transforms, so they follow the displayed deformation. Preview evaluation
+reads only selected components and follows the same opacity filtering as object
+picking. Elasticity fill inherits the edited weights, but generated fill splats
+are excluded from component indices and cannot be edited individually.
+
+**Show weights in viewport** draws points through the scene, from blue at zero
+to orange at one for the chosen influence. At most 5,000 evenly sampled indices
+are displayed, including the range endpoints; edits still affect every index in
+the range. Preview hides during playback or manipulation and with Gizmos hidden.
+Reset, unbind, and selection changes clear the preview. Preview settings create
+no scene history entries.
+
+This is numeric weight editing, with no paint brush, smoothing, influence locks,
+mirrored transfer, or adding/removing joints from an existing binding. Bind and
+unbind remain available through the existing rigging controls.
+The workflow follows Autodesk's [numeric skin-weight editing](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-1E9D36A8-92D1-4D1A-A769-D4A05AE852FB.htm)
+and [interactive normalization](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Basics/files/GUID-F632811C-DE7C-4464-B025-9B6379FAA750.htm)
+concepts, with normalization always enabled in this subset.
+
 ## Curve controllers
 
 Open **Rigging → Curve Controls** to create or edit a controller. Choose a preset,
@@ -383,7 +436,7 @@ small-scene playback results.
    limits, target/blend animation, and range-based IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
-3. Editable normalized skin weights, influence management, weight painting,
+3. Influence management, weight painting,
    joint/pose mirroring, and conventional deformers.
 4. Animation layers, camera/custom-property animation, Euler filtering, richer
    clipboard/retargeting, and SDK Graph Editor integration.

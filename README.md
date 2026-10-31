@@ -31,6 +31,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture the current solved joint rotations and switch to FK in one undoable edit. Blend is not animated; matching captures one frame.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
+- **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges, inspects precise weights, restores automatic weights, and shows a sampled color preview. Edits support undo and project persistence; the existing elasticity pipeline inherits them.
 - **Undo/redo:** editing operations use shared document commands. History retains up to 100 edits without copying splat buffers; playback and scrubbing create no history entries.
 - **Turntable preview:** the Timeline's separate playback mode retains the original 12-second rotation preview.
 - **Portable scenes:** save and reopen `.msb` packages with source assets, joints, binding/elasticity settings, animation curves, driven relationships, IK handles, and constraints.
@@ -119,7 +120,7 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 1. Pole vectors, analytic two-bone IK, joint orientation/limits, target/blend animation, and range-based IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
-3. Influence management, editable normalized skin weights, weight painting, and joint/pose mirroring.
+3. Influence management, viewport component selection, weight painting, and joint/pose mirroring.
 4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.
 5. Editable polygon topology, component selection, extrusion/inset/bevel/subdivision, materials, and mesh import/export.
 6. Deterministic particle emitters, fields, lifetime properties, and an FX workspace.

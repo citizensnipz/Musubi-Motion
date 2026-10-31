@@ -6,10 +6,11 @@ import { validateDrivenKeys } from "./driven-keys.ts";
 import { validateIKHandles } from "./ik.ts";
 import { validateConstraints } from "./constraints.ts";
 import { validateCurveShape } from "./controller-curves.ts";
+import { validateSkinWeights } from "./skin-weights.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 
 export const MAX_PROJECT_BYTES = 512 * 1024 * 1024;
-const MAX_JSON_BYTES = 4 * 1024 * 1024;
+const MAX_JSON_BYTES = 128 * 1024 * 1024;
 const MAX_NODES = 10000;
 export type EditorSnapshot = {
   camera: {
@@ -141,6 +142,7 @@ export function validateScene(value: unknown): SceneDocument {
         for (const matrix of binding.restMatrices as unknown[]) {
           if (!Array.isArray(matrix) || matrix.length !== 16 || !matrix.every(n => typeof n === "number" && Number.isFinite(n))) fail("Invalid bind matrix.");
         }
+        validateSkinWeights(binding);
       }
       if (parent === null) fail("Shape has no transform.");
       id(node.assetId);

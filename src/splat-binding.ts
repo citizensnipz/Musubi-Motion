@@ -1,27 +1,60 @@
 import * as THREE from "three";
 import { SplatSkinning, SplatSkinningMode, type SplatMesh } from "@sparkjsdev/spark";
-import type { SplatShapeNode } from "./scene-document";
+import type { SkinInfluence, SplatShapeNode, Vec3 } from "./scene-document";
 import { createElasticRuntime } from "./elastic-runtime";
 import type { Joint } from "./skeleton";
 import { posedSelection } from "./splat-selection";
+import { createSkinWeightLookup, validateSkinWeightCount } from "./skin-weights";
 export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNode["binding"]>, elasticity?: SplatShapeNode["elasticity"], joints: Joint[] = []) {
- const skin = new SplatSkinning({mesh, numSplats: mesh.numSplats + (elasticity?.budget ?? 0), numBones:binding.jointIds.length, mode:SplatSkinningMode.LINEAR_BLEND});
+ const source = mesh.extSplats ?? mesh.packedSplats;
+ if (!source) throw Error("Skin binding requires loaded splat data.");
+ const componentCount = source.numSplats;
+ // Validate authored component indices/count before allocating skin textures.
+ validateSkinWeightCount(binding, componentCount);
+ const lookup = createSkinWeightLookup(binding);
+ const boneIndices = new Map(binding.jointIds.map((id, index) => [id, index]));
+ const skin = new SplatSkinning({mesh, numSplats: componentCount + (elasticity?.budget ?? 0), numBones:binding.jointIds.length, mode:SplatSkinningMode.LINEAR_BLEND});
  const rests = binding.restMatrices.map(m => new THREE.Matrix4().fromArray(m));
  const inverseRests = rests.map(m => m.clone().invert());
- const centers = rests.map(m => new THREE.Vector3().setFromMatrixPosition(m));
  rests.forEach((_,i)=>skin.setRestMatrix(i,new THREE.Matrix4()));
- mesh.forEachSplat((index, center)=>{
-  const nearest = centers.map((p,i)=>({i,w:1/Math.max(1e-8,p.distanceToSquared(center))})).sort((a,b)=>b.w-a.w).slice(0,4);
-  const total = nearest.reduce((sum,n)=>sum+n.w,0);
+ source.forEachSplat((index, center)=>{
+  const influences = lookup(index, center.toArray() as Vec3);
   const indices = [0,0,0,0], weights = [0,0,0,0];
-  nearest.forEach((n,i)=>{indices[i]=n.i;weights[i]=n.w/total;});
+  influences.forEach((influence,i)=>{indices[i]=boneIndices.get(influence.jointId)!;weights[i]=influence.weight;});
   skin.setSplatBones(index,new THREE.Vector4(...indices),new THREE.Vector4(...weights));
  });
  skin.skinTexture.needsUpdate=true; mesh.skinning=skin; mesh.updateGenerator();
  const elastic = elasticity ? createElasticRuntime(mesh,skin,rests,binding.jointIds,joints,elasticity) : undefined;
  let transforms=rests.map(()=>new THREE.Matrix4());
  let selection:ReturnType<typeof posedSelection>|undefined, signature="";
- return { update(boneMatrix:(id:string)=>THREE.Matrix4|undefined) {
+ let disposed=false;
+ function validateIndex(index:number) {
+  if(disposed)throw Error("Skin binding has been disposed.");
+  if(!Number.isInteger(index)||index<0||index>=componentCount)throw Error("Choose an original splat component index within this object's range.");
+ }
+ return { componentCount,
+ getWeights(index:number):SkinInfluence[] {
+  validateIndex(index);
+  // Elasticity changes original scales, but preserves their rest centers.
+  return lookup(index,source.getSplat(index).center.toArray() as Vec3).map(influence=>({...influence}));
+ },
+ getComponentPositions(indices:number[]):Float32Array {
+  indices.forEach(validateIndex);
+  const positions=new Float32Array(indices.length*3),matrix=new THREE.Matrix4();
+  indices.forEach((index,output)=>{
+   const splat=source.getSplat(index);
+   if(splat.opacity<mesh.minRaycastOpacity){positions.fill(NaN,output*3,output*3+3);return;}
+   matrix.elements.fill(0);
+   for(let k=0;k<4;k++) {
+    const packed=skin.skinData[index*4+k],weight=(packed&255)/255,bone=transforms[packed>>8];
+    if(weight&&bone)for(let j=0;j<16;j++)matrix.elements[j]+=weight*bone.elements[j];
+   }
+   // Match Spark and posedSelection, including independently rounded 8-bit weights.
+   matrix.elements[15]=1;
+   positions.set(splat.center.applyMatrix4(matrix).toArray(),output*3);
+  });
+  return positions;
+ }, update(boneMatrix:(id:string)=>THREE.Matrix4|undefined) {
   mesh.updateWorldMatrix(true,false);
   const inverse = mesh.matrixWorld.clone().invert();
   const currentMatrices = binding.jointIds.map((id,i)=>{ const matrix=boneMatrix(id); return matrix ? inverse.clone().multiply(matrix) : rests[i].clone(); });
@@ -37,5 +70,5 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
   const result=new THREE.Box3();
   for(const matrix of transforms)result.union(bounds.clone().applyMatrix4(matrix));
   return result;
- }, selection() { return selection??=posedSelection(mesh,skin,transforms); }, dispose() { elastic?.dispose(); mesh.skinning=null; mesh.updateGenerator(); skin.skinTexture.dispose();skin.boneTexture.dispose(); } };
+ }, selection() { return selection??=posedSelection(mesh,skin,transforms); }, dispose() { if(disposed)return;disposed=true;elastic?.dispose(); mesh.skinning=null; mesh.updateGenerator(); skin.skinTexture.dispose();skin.boneTexture.dispose(); } };
 }

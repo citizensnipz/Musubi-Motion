@@ -15,7 +15,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   );
   contents.set("rigging", riggingContent);
   contents.set("terminal", terminalContent);
-  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints", controllers: "Curve Controls" };
+  const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights" };
   for (const id of Object.keys(animationPanels)) {
     const wrapper = document.createElement("div"); wrapper.className = "animation-dock-host";
     contents.set(id, wrapper);
@@ -166,13 +166,14 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     customized = true;
     const existing = api.getPanel(id);
     if (existing) { existing.api.setActive(); return; }
-    const attribute = ["driven-keys", "ik-handles", "constraints", "controllers"].includes(id);
-    const reference = attribute ? "properties" : "viewport";
+    const attributeIds = ["driven-keys", "ik-handles", "constraints", "controllers", "skin-weights"];
+    const attribute = attributeIds.includes(id);
+    const sidePanel = attribute ? ["properties", "outliner", "rigging", ...attributeIds].find(candidate => api.getPanel(candidate)) : undefined;
+    const reference = sidePanel ?? (api.getPanel("viewport") ? "viewport" : api.panels[0]?.id);
     api.addPanel({ id, component: id, title, tabComponent: "label", renderer: "always",
       minimumWidth: attribute ? 300 : 440, minimumHeight: attribute ? 180 : 260,
-      ...(attribute ? {} : { initialHeight: 330 }),
-      position: api.getPanel(reference) ? { referencePanel: reference, direction: attribute ? "within" : "below" }
-        : api.panels.length ? { direction: "below" } : undefined,
+      ...(attribute ? sidePanel ? {} : { initialWidth: 340 } : { initialHeight: 330 }),
+      position: reference ? { referencePanel: reference, direction: attribute ? sidePanel ? "within" : "right" : "below" } : undefined,
     }).api.setActive();
   }
   for (const id of Object.keys(animationPanels)) document.getElementById(`view-${id}`)!.addEventListener("click", () => showAnimationPanel(id));

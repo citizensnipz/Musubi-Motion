@@ -62,6 +62,9 @@ import { createControllerPanel } from "./controller-panel.ts";
 import { controllerPlacement } from "./controller-placement.ts";
 import { mountSkeleton } from "./skeleton.ts";
 import { createBinding } from "./splat-binding.ts";
+import { validateSkinWeightCount } from "./skin-weights.ts";
+import { createSkinWeightsPanel } from "./skin-weights-panel.ts";
+import { createSkinWeightPreview } from "./skin-weight-preview.ts";
 import { createTerminal } from "./terminal-panel.ts";
 import { elasticityDefaults, elasticEdges, validateElasticity } from "./elasticity";
 import { createElasticityPanel } from "./elasticity-panel";
@@ -214,6 +217,9 @@ async function start() {
   let ikPanel: ReturnType<typeof createIKPanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
+  let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
+  let weightPreview: { shapeId: string; indices: number[]; jointId: string } | undefined;
+  const weightOverlay = createSkinWeightPreview();
   let channelKeys: ReturnType<typeof mountChannelKeyControls> | undefined;
   let evaluationError = "";
   const animationSettings = () => store.getState().document.animation ?? defaultAnimation();
@@ -266,28 +272,44 @@ async function start() {
     poseOverrides.clear();
     poseDrafts.clear();
   }
-  const bindings = new Map<string, { signature: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
+  const bindings = new Map<string, { binding: SplatShapeNode["binding"]; elasticity: SplatShapeNode["elasticity"]; structure: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
+  let cachedJoints: SceneDocument["joints"], jointStructure = "";
+  function updateWeightPreview() {
+    if (!weightPreview || playing || loading || dragId || !gizmosVisible) { weightOverlay.setVisible(false); return; }
+    const entry = bindings.get(weightPreview.shapeId);
+    const shape = store.getState().document.nodes[weightPreview.shapeId];
+    if (!entry || shape?.type !== "splatShape" || !shape.binding?.jointIds.includes(weightPreview.jointId)
+      || weightPreview.indices.some(index => index < 0 || index >= entry.skin.componentCount)) { weightOverlay.clear(); return; }
+    const weights = weightPreview.indices.map(index => entry.skin.getWeights(index).find(influence => influence.jointId === weightPreview!.jointId)?.weight ?? 0);
+    weightOverlay.update(entry.mesh, entry.skin.getComponentPositions(weightPreview.indices), weights);
+  }
   function boundSelection(object:RuntimeObject) {
     if (object.kind !== "splat") return undefined;
     return [...bindings.values()].find(b=>b.mesh===object.mesh)?.skin.selection();
   }
   function updateBindings() {
     const doc = store.getState().document;
+    if (cachedJoints !== doc.joints) {
+      cachedJoints = doc.joints;
+      jointStructure = JSON.stringify(doc.joints?.map(joint => [joint.id, joint.parentId]));
+    }
     const shapes = Object.values(doc.nodes).filter((n): n is SplatShapeNode => n.type === "splatShape");
     for (const [id, entry] of bindings) {
-      const shape = shapes.find(s => s.id === id);
-      if (!shape?.binding || JSON.stringify([shape.binding, shape.elasticity, doc.joints?.map(j => [j.id, j.parentId])]) !== entry.signature || runtime.get(shape.parentId)?.mesh !== entry.mesh) {
+      const shape = doc.nodes[id];
+      if (shape?.type !== "splatShape" || !shape.binding || shape.binding !== entry.binding || shape.elasticity !== entry.elasticity
+        || jointStructure !== entry.structure || runtime.get(shape.parentId)?.mesh !== entry.mesh) {
         entry.skin.dispose(); bindings.delete(id);
       }
     }
     for (const shape of shapes) if (shape.binding) {
       const object = runtime.get(shape.parentId);
       if (!object || object.kind !== "splat") continue;
-      if (!bindings.has(shape.id)) bindings.set(shape.id, {signature:JSON.stringify([shape.binding, shape.elasticity, doc.joints?.map(j => [j.id, j.parentId])]),mesh:object.mesh,skin:createBinding(object.mesh,shape.binding,shape.elasticity,doc.joints)});
+      if (!bindings.has(shape.id)) bindings.set(shape.id, {binding:shape.binding,elasticity:shape.elasticity,structure:jointStructure,mesh:object.mesh,skin:createBinding(object.mesh,shape.binding,shape.elasticity,doc.joints)});
       bindings.get(shape.id)!.skin.update(id => skeleton.boneMatrix(id));
     }
+    updateWeightPreview();
   }
-  for (const control of [...Array.from(document.querySelectorAll<WaButton>("[data-rig-action]")), ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action]"))]) {
+  for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action]")), ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action]"))])) {
     const action = control.dataset.rigAction;
     if (action === "Elasticity") {
       control.disabled = false; control.title = "Apply Elasticity to selected bound objects";
@@ -465,6 +487,7 @@ async function start() {
       updatePanel();
     }
     if (selected.size && skeleton.selectedIds.size) selectionLabel.textContent = `${selected.size} objects · ${skeleton.selectedIds.size} joints selected`;
+    skinWeightsPanel?.refresh();
     refreshGizmo();
   });
   riggingPanel.addEventListener("rigging-error", event => { notice.textContent = (event as CustomEvent<string>).detail; });
@@ -570,6 +593,7 @@ async function start() {
     timelinePanel?.refresh();
     animationEditors?.refresh();
     controllerPanel?.refresh();
+    skinWeightsPanel?.refresh();
   }
   function syncScene() {
     const doc = store.getState().document;
@@ -727,6 +751,16 @@ async function start() {
     updateHistoryButtons();
     queueMicrotask(collectUnusedResources);
   });
+  skinWeightsPanel = createSkinWeightsPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection,
+    getComponents: shapeId => {
+      const entry = bindings.get(shapeId);
+      return entry ? { count: entry.skin.componentCount, getWeights: entry.skin.getWeights } : undefined;
+    },
+    onPreview: preview => { weightPreview = preview; if (!preview) weightOverlay.clear(); else updateWeightPreview(); },
+  });
+  workspace.registerPanel("skin-weights", "Skin Weights", skinWeightsPanel.element);
   function historyAction(redo: boolean) {
     if (loading || dragId) return;
     setPlaying(false);
@@ -854,7 +888,7 @@ async function start() {
   const viewportTools=mountViewportTools(viewport,(kind,visible)=>{
     if(kind==="grid")grid!.visible=visible;
     if(kind==="joints"){jointsVisible=visible;skeleton.setVisible(visible);ikTargets.setVisible(visible);}
-    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);}
+    if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);updateWeightPreview();}
     refreshGizmo();
   },switchView,()=>{switchView("perspective");fitView();});
   viewportTools.setView(activeView);
@@ -1109,6 +1143,8 @@ async function start() {
     ikPanel?.refresh();
     constraintsPanel?.refresh();
     controllerPanel?.refresh();
+    skinWeightsPanel?.refresh();
+    updateWeightPreview();
     channelKeys?.refresh();
   }
   function applyAnimationPose() {
@@ -1312,6 +1348,7 @@ async function start() {
               });
         try {
           const data = await prepareSplat(mesh);
+          if (shape.binding) validateSkinWeightCount(shape.binding, mesh.numSplats);
           const root = new THREE.Group(),
             preview = new THREE.Group(),
             box = new THREE.Box3Helper(new THREE.Box3(), 0x999999);

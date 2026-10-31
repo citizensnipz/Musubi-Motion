@@ -14,6 +14,7 @@ service was introduced by this work.
 | Aim-constraint checkpoint at 17:19 | 137 tests passed across 15 files |
 | IK/FK matching checkpoint at 17:28 | 148 tests passed across 15 files |
 | Curve-controller checkpoint at 17:51 | 168 tests passed across 18 files |
+| Skin-weight checkpoint | 190 tests passed across 21 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -62,6 +63,12 @@ latest checked session had no browser console errors.
 | Controller animation and constraint | Controller X keys 4/6 at frames 0/24 evaluated to 5 at frame 12. A point-constrained splat followed X=5/6 at frames 12/24 |
 | Controller placement and picking | An arrow matched the selected controller's evaluated X=5 world pose. An actual canvas click selected the curve line |
 | Controller project and deletion | Download/reopen retained both shapes, CV X=3, keys, constraint and frame 24. Delete removed the selected controller; undo restored it and the three-object scene |
+| Weight range and normalization | Changed Tip from 0.85 to 0.2 over indices 0–511; other influences rescaled to a total of 1. Undo/redo restored both versions |
+| Weight validation and resets | Weight 1.2 was rejected without dirtying the scene. Resetting 0–15 reduced authored overrides from 512 to 496; Reset all produced 0. Rigid weight 1 worked; reducing that sole influence to 0.5 was rejected atomically |
+| Weight save/reopen and malformed asset | Download/reopen retained 512 overrides and Tip=0.2. A valid archive declaring the wrong component count was rejected before replacing the active scene |
+| Weight preview and docking | Color points appeared over Spark splats, followed posed components, and sampled 5,000 of 11,629 indices. The panel joined the side group when Properties was closed; preview cleared on joint selection |
+| Weight editing with elasticity | Edited weights remained usable with elasticity and a translated joint: 14,922 rendered splats, 11,629 original editable components, 512 overrides. Unbind/undo restored the authored weights |
+| Rigging action history | Fixed duplicate panel event registration. Apply Elasticity now used one history entry; one undo after Unbind restored the binding and weights |
 
 The viewport target drag/release/cancel/history checks passed with no browser
 console errors. Testing exposed a pointer-capture condition that omitted the
@@ -86,6 +93,8 @@ the browser retest now cover preservation of the opposite handle.
 | Browser animation with binding/elasticity, approximately 23,600 scene splats, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms |
 | Node creation of 100 rational circle renderables, 129 samples each | 17.69 ms total; excludes GPU upload/rendering |
 | Browser looping a controller-driven 11,629-splat scene with two curves, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms |
+| Node weight edit across 11,629 components / rebuild binding / preview 5,000 posed centers | 23.12 ms / 11.51 ms / 3.55 ms; excludes GPU rendering |
+| Browser joint animation with 512 authored overrides on 11,629 splats, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms; preview hidden during playback |
 
 CPU microbenchmarks exclude rendering, editor drawing, asset decoding, Spark
 sorting, binding uploads, and elasticity. The browser sample is a small local
@@ -94,7 +103,8 @@ does not establish performance for production-size assets. Device, browser,
 graphics driver, scene density, and active editor panels can change the result.
 
 The representative scenes are [animation-study.msb](../examples/animation-study.msb)
-and [controller-study.msb](../examples/controller-study.msb).
+and [controller-study.msb](../examples/controller-study.msb), plus
+[skin-weights-study.msb](../examples/skin-weights-study.msb).
 It uses procedural knots and a short rig, not a large imported capture. Cross-
 browser compatibility, large-asset memory/load times, and long-session editing
 remain outside this checkpoint's evidence. Imported multi-million-splat scenes
@@ -108,6 +118,7 @@ were not benchmarked.
 - `c7f422e` — Preserve animation curve shape when inserting keys.
 - `1a15714` — Add aim constraints with configurable local and world-up axes.
 - `341d863` — Match solved IK poses to keyed FK with atomic pose validation.
+- `ff82b7c` — Add editable NURBS curve controllers to shared scene workflows.
 
 The curve-insertion commit adds verified shape-preserving key insertion,
 preserves the animation frame during import, and restores Save/Open shortcuts
@@ -130,5 +141,11 @@ It also fixes server-side example tooling: Zundo now passes through Vite's
 existing framework-free Zustand alias, avoiding an unintended React import.
 IK/FK matching retains the actual fractional playback frame when capturing a
 paused pose instead of rounding a pose sampled at a different time.
+The accompanying skin-weight commit adds 22 tests for normalization, sparse
+archives (including metadata above the old 4 MiB cap), Spark binding/elasticity
+integration and preview lifetime. Numeric editing is limited to 20,000 components
+per command and 200,000 stored overrides per shape. Painting, influence locks and
+viewport component selection remain future work. The preview uses the transparent
+render pass so it draws after Spark; paused display is capped at 5,000 points.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.

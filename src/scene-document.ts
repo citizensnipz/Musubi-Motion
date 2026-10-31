@@ -11,9 +11,12 @@ export type TransformNode = TransformChannels & {
   parentId: string | null;
   rotationOrder: "XYZ";
 };
+export type SkinInfluence = { jointId: string; weight: number };
+export type SkinWeights = { count: number; overrides: Record<string, SkinInfluence[]> };
+export type SkinBinding = { jointIds: string[]; restMatrices: number[][]; weights?: SkinWeights };
 export type SplatShapeNode = {
   elasticity?: import("./elasticity").Elasticity;
-  binding?: { jointIds: string[]; restMatrices: number[][] };
+  binding?: SkinBinding;
   id: string;
   type: "splatShape";
   name: string;

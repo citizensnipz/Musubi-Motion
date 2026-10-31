@@ -35,9 +35,14 @@ SceneDocument v1
   cycles. General transform grouping, interactive object parenting, and DAG
   instancing remain future work. Archive transforms require one shape, either a
   splat shape or a controller curve shape.
-- Binding records influence joint IDs and rest matrices. The runtime creates
-  normalized distance-based weights and passes bone transforms to Spark skinning.
-  Editable weights and weight painting are not implemented.
+- Binding records influence joint IDs, rest matrices and optional sparse component
+  weight overrides. Shared skin-weight commands validate and normalize authored
+  rows; unedited components retain nearest-four distance weights. Spark receives
+  the resulting weights before elasticity is initialized. Numeric range editing
+  and a paused, sampled viewport preview are available; painting is not yet implemented.
+- Binding runtimes cache document binding/elasticity references and joint topology.
+  Playback does not serialize the authored weight map. Preview points use only
+  requested original components and the same packed skin transforms as selection.
 - Elasticity settings belong to bound shapes. Existing elasticity deformation
   and bounded splat allocation run after the rig pose; they are not a second rig.
 
