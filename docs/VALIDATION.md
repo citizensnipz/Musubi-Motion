@@ -15,6 +15,7 @@ service was introduced by this work.
 | IK/FK matching checkpoint at 17:28 | 148 tests passed across 15 files |
 | Curve-controller checkpoint at 17:51 | 168 tests passed across 18 files |
 | Skin-weight checkpoint | 190 tests passed across 21 files |
+| Viewport component-selection checkpoint | 202 tests passed across 22 files |
 | Production build | TypeScript checking and Vite build passed |
 | Lint | No separate lint script is configured |
 
@@ -69,6 +70,9 @@ latest checked session had no browser console errors.
 | Weight preview and docking | Color points appeared over Spark splats, followed posed components, and sampled 5,000 of 11,629 indices. The panel joined the side group when Properties was closed; preview cleared on joint selection |
 | Weight editing with elasticity | Edited weights remained usable with elasticity and a translated joint: 14,922 rendered splats, 11,629 original editable components, 512 overrides. Unbind/undo restored the authored weights |
 | Rigging action history | Fixed duplicate panel event registration. Apply Elasticity now used one history entry; one undo after Unbind restored the binding and weights |
+| Viewport component selection | Full-view box selected all 11,629 original components without changing object selection. Click selected 1000; Shift added 7000; Ctrl removed each. Empty selection disabled Apply while keeping picking active |
+| Exact selection editing and persistence | Editing 1000/7000 added exactly two overrides (512→514); decoded archive confirmed Tip=0.7 for both and no override at 1001. Reopen retained weights and cleared the temporary selection |
+| Selection pose and lifecycle | Frame-24 click selected component 1000 at its deformed position. Undo/redo preserved the pair, playback stopped picking but retained indices, and Escape canceled a box while retaining the prior pair |
 
 The viewport target drag/release/cancel/history checks passed with no browser
 console errors. Testing exposed a pointer-capture condition that omitted the
@@ -95,6 +99,7 @@ the browser retest now cover preservation of the opposite handle.
 | Browser looping a controller-driven 11,629-splat scene with two curves, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms |
 | Node weight edit across 11,629 components / rebuild binding / preview 5,000 posed centers | 23.12 ms / 11.51 ms / 3.55 ms; excludes GPU rendering |
 | Browser joint animation with 512 authored overrides on 11,629 splats, 90 requestAnimationFrame samples | Median 16.7 ms, p95 16.8 ms; preview hidden during playback |
+| Node projection and posed-center scan of 11,629 components at frame 24 | 10.29 ms; no GPU rendering or browser scheduling |
 
 CPU microbenchmarks exclude rendering, editor drawing, asset decoding, Spark
 sorting, binding uploads, and elasticity. The browser sample is a small local
@@ -119,6 +124,7 @@ were not benchmarked.
 - `1a15714` — Add aim constraints with configurable local and world-up axes.
 - `341d863` — Match solved IK poses to keyed FK with atomic pose validation.
 - `ff82b7c` — Add editable NURBS curve controllers to shared scene workflows.
+- `f532bf7` — Add normalized skin weight editing and posed component previews.
 
 The curve-insertion commit adds verified shape-preserving key insertion,
 preserves the animation frame during import, and restores Save/Open shortcuts
@@ -144,8 +150,14 @@ paused pose instead of rounding a pose sampled at a different time.
 The accompanying skin-weight commit adds 22 tests for normalization, sparse
 archives (including metadata above the old 4 MiB cap), Spark binding/elasticity
 integration and preview lifetime. Numeric editing is limited to 20,000 components
-per command and 200,000 stored overrides per shape. Painting, influence locks and
-viewport component selection remain future work. The preview uses the transparent
+per command and 200,000 stored overrides per shape. Painting and influence locks
+remain future work. The preview uses the transparent
 render pass so it draws after Spark; paused display is capped at 5,000 points.
+The component-selection commit adds 12 projection tests for perspective and
+orthographic cameras, transformed parents, clipping, click ties, chunk offsets,
+cancellation and atomic overflow. Browser testing caught undo clearing selections
+when a historical command label was “Open scene”; scene replacement now resets
+selection explicitly. Scans yield on an 8 ms work budget instead of waiting one
+animation frame per chunk. X-ray center selection does not test surface occlusion.
 Implementation, local verification, commits, remote pushes, and deployment are
 separate statuses.

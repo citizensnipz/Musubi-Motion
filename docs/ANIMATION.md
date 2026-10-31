@@ -262,13 +262,39 @@ The [skin-weight study](../examples/skin-weights-study.msb) is reproducible with
 over frames 0–48, making the edited region easy to inspect while scrubbing.
 
 Open **Rigging → Skin Weights** and choose a **Bound splat object**, or select
-one in the Outliner. Enter the inclusive **First component index** and **Last
+one in the Outliner. In **Selection mode → Range**, enter the inclusive **First component index** and **Last
 component index**. **Previous component** and **Next component** replace the
 range with one adjacent component. Choose a **Joint influence**, enter its
 **Weight · 0 to 1**, and click **Apply influence weight**. The inspection table
 shows the first component's effective influences, total, and whether its weights
 are automatic or authored. **Reset selected to automatic** clears overrides in
 the range; **Reset all overrides** clears the entire shape's overrides.
+
+For direct selection, enable **Select components in viewport**. A click selects
+the nearest projected original component center within eight CSS pixels; drag a
+rectangle to select centers through the object. **Shift** adds and **Ctrl**
+(or **Cmd**) subtracts. This switches to **Viewport selection** mode, whose
+read-only **Selected component indices** list shows the exact sorted selection.
+It can contain separate groups of indices: applying or resetting weights affects
+only those indices, never the intervening range. A nonempty result automatically
+shows the weight preview. An empty click leaves picking active so another click
+can select a component.
+
+Selections are limited to 20,000 components. An oversized box or addition keeps
+the previous selection unchanged. **Clear component selection** stops picking
+and leaves an empty Viewport selection; editing is disabled until components
+are selected or Range mode is chosen. Committing range fields or using Previous/
+Next explicitly returns to Range mode. **Escape** cancels an in-progress scan
+and stops picking; the completed selection remains. Playback also stops picking
+while retaining the selection. Changing the bound object, unbinding, or opening
+a scene clears it. Component selection is temporary editor state, with no undo
+entry or saved archive data; weight edits still use normal undo and persistence.
+
+Picking scans original component centers in bounded chunks. Changes to the scene
+or view cancel an unfinished scan, so it cannot apply a selection from stale
+positions. This is X-ray center selection, without occlusion tests, a paint
+brush, or splat-footprint intersection. Hidden objects and components below the
+opacity picking threshold are excluded.
 
 Weight editing applies to original components of an already bound splat object.
 Component indices start at zero and stay tied to the loaded source asset.
@@ -295,9 +321,9 @@ are excluded from component indices and cannot be edited individually.
 
 **Show weights in viewport** draws points through the scene, from blue at zero
 to orange at one for the chosen influence. At most 5,000 evenly sampled indices
-are displayed, including the range endpoints; edits still affect every index in
-the range. Preview hides during playback or manipulation and with Gizmos hidden.
-Reset, unbind, and selection changes clear the preview. Preview settings create
+are displayed from the active range or selected index set; edits still affect
+every selected index. Preview hides during playback or manipulation and with
+Gizmos hidden. Reset, unbind, and scene-object selection changes clear the preview. Preview settings create
 no scene history entries.
 
 This is numeric weight editing, with no paint brush, smoothing, influence locks,
@@ -306,6 +332,8 @@ unbind remain available through the existing rigging controls.
 The workflow follows Autodesk's [numeric skin-weight editing](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-CharacterAnimation/files/GUID-1E9D36A8-92D1-4D1A-A769-D4A05AE852FB.htm)
 and [interactive normalization](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Basics/files/GUID-F632811C-DE7C-4464-B025-9B6379FAA750.htm)
 concepts, with normalization always enabled in this subset.
+The rectangle-selection workflow follows Autodesk's [component marquee selection](https://help.autodesk.com/cloudhelp/2024/ENU/Maya-Basics/files/GUID-ABB00438-68A6-4108-8D79-C362F690E808.htm),
+adapted here to original splat centers rather than polygon vertices, edges, or faces.
 
 ## Curve controllers
 

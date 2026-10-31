@@ -65,6 +65,7 @@ import { createBinding } from "./splat-binding.ts";
 import { validateSkinWeightCount } from "./skin-weights.ts";
 import { createSkinWeightsPanel } from "./skin-weights-panel.ts";
 import { createSkinWeightPreview } from "./skin-weight-preview.ts";
+import { pickProjectedComponents } from "./component-picking.ts";
 import { createTerminal } from "./terminal-panel.ts";
 import { elasticityDefaults, elasticEdges, validateElasticity } from "./elasticity";
 import { createElasticityPanel } from "./elasticity-panel";
@@ -220,6 +221,12 @@ async function start() {
   let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
   let weightPreview: { shapeId: string; indices: number[]; jointId: string } | undefined;
   const weightOverlay = createSkinWeightPreview();
+  let componentPickShape: string | undefined, componentPickEpoch = 0, pendingComponentPick: number | undefined;
+  let skinPoseVersion = 0;
+  function cancelComponentScan(message = "Component selection canceled.") {
+    componentPickEpoch++;
+    if (pendingComponentPick !== undefined) { pendingComponentPick = undefined; notice.textContent = message; }
+  }
   let channelKeys: ReturnType<typeof mountChannelKeyControls> | undefined;
   let evaluationError = "";
   const animationSettings = () => store.getState().document.animation ?? defaultAnimation();
@@ -288,6 +295,7 @@ async function start() {
     return [...bindings.values()].find(b=>b.mesh===object.mesh)?.skin.selection();
   }
   function updateBindings() {
+    skinPoseVersion++;
     const doc = store.getState().document;
     if (cachedJoints !== doc.joints) {
       cachedJoints = doc.joints;
@@ -369,8 +377,10 @@ async function start() {
   webgl.domElement.addEventListener(
     "pointerdown",
     (event) => {
+      if (componentPickShape && !skinWeightsPanel?.element.checkVisibility()) skinWeightsPanel?.stopPicking();
       controls.enabled = event.pointerType === "touch" || event.altKey;
       transform.enabled =
+        !componentPickShape &&
         gizmosVisible && (!skeleton.selectedId || jointsVisible) &&
         !event.altKey &&
         (selectedIKId ? jointsVisible && currentMode === "translate" : (selected.size === 1 || !!skeleton.selectedId) && currentMode !== "select") &&
@@ -406,6 +416,7 @@ async function start() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
+    if (componentPickShape) { transform.detach(); transform.enabled = false; return; }
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
     if (selectedIKId) {
       const target = ikTargets.getObject(selectedIKId);
@@ -438,6 +449,7 @@ async function start() {
   }
   function choose(mode: Mode) {
     if (dragId) return;
+    if (componentPickShape && mode !== "select") { notice.textContent = "Exit viewport component selection before transforming an object."; return; }
     currentMode = mode;
     refreshGizmo();
     toolbar
@@ -759,6 +771,12 @@ async function start() {
       return entry ? { count: entry.skin.componentCount, getWeights: entry.skin.getWeights } : undefined;
     },
     onPreview: preview => { weightPreview = preview; if (!preview) weightOverlay.clear(); else updateWeightPreview(); },
+    onPickMode: shapeId => {
+      if (componentPickShape === shapeId) return;
+      cancelComponentScan(); componentPickShape = shapeId;
+      webgl.domElement.style.cursor = shapeId ? "crosshair" : "";
+      if (shapeId) choose("select"); else refreshGizmo();
+    },
   });
   workspace.registerPanel("skin-weights", "Skin Weights", skinWeightsPanel.element);
   function historyAction(redo: boolean) {
@@ -943,15 +961,58 @@ async function start() {
   const raycaster = new THREE.Raycaster(),
     projected = new THREE.Vector3();
   let gesture:
-    { x: number; y: number; id: number; additive: boolean } | undefined;
+    { x: number; y: number; id: number; additive: boolean; subtract: boolean; component?: string } | undefined;
   function cancelSelection() {
     gesture = undefined;
     marquee.hidden = true;
     controls.enabled = !transform.dragging;
   }
+  async function pickSkinComponents(start: NonNullable<typeof gesture>, event: PointerEvent) {
+    const shapeId = start.component!, entry = bindings.get(shapeId);
+    if (!entry || componentPickShape !== shapeId || playing || loading || dragId) return;
+    for (let parent: THREE.Object3D | null = entry.mesh; parent; parent = parent.parent) {
+      if (!parent.visible) { notice.textContent = "The component object is hidden."; return; }
+    }
+    world.updateMatrixWorld(true); camera.updateWorldMatrix(true, false);
+    const rect = webgl.domElement.getBoundingClientRect(), cameraRef = camera;
+    const cameraWorld = camera.matrixWorld.clone(), projection = camera.projectionMatrix.clone(), meshWorld = entry.mesh.matrixWorld.clone();
+    const documentRef = store.getState().document, poseVersion = skinPoseVersion;
+    const epoch = ++componentPickEpoch; pendingComponentPick = epoch;
+    const cancelled = () => {
+      const current = webgl.domElement.getBoundingClientRect();
+      return epoch !== componentPickEpoch || componentPickShape !== shapeId || playing || loading || !!dragId
+        || documentRef !== store.getState().document || poseVersion !== skinPoseVersion || bindings.get(shapeId)?.skin !== entry.skin
+        || camera !== cameraRef || !camera.matrixWorld.equals(cameraWorld) || !camera.projectionMatrix.equals(projection)
+        || !entry.mesh.matrixWorld.equals(meshWorld) || current.width !== rect.width || current.height !== rect.height
+        || current.left !== rect.left || current.top !== rect.top;
+    };
+    notice.textContent = "Selecting components… Esc cancels.";
+    let lastYield = performance.now();
+    try {
+      const indices = await pickProjectedComponents({
+        componentCount: entry.skin.componentCount,
+        readPositions: (offset, count) => entry.skin.getComponentPositions(Array.from({ length: count }, (_, index) => offset + index)),
+        matrixWorld: meshWorld, camera: cameraRef, width: rect.width, height: rect.height,
+        start: { x: start.x - rect.left, y: start.y - rect.top },
+        end: { x: event.clientX - rect.left, y: event.clientY - rect.top }, cancelled,
+        yieldTask: async () => {
+          if (performance.now() - lastYield < 8) return;
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+          lastYield = performance.now();
+        },
+      });
+      if (cancelled()) throw new DOMException("Component selection canceled.", "AbortError");
+      skinWeightsPanel?.setComponentSelection(shapeId, indices, start.subtract ? "subtract" : start.additive ? "add" : "replace");
+      notice.textContent = `${skinWeightsPanel?.getComponentSelection().length.toLocaleString() ?? 0} skin components selected. Edit their weights in Skin Weights.`;
+    } catch (error) {
+      if (epoch === componentPickEpoch) notice.textContent = (error as Error).name === "AbortError"
+        ? "Component selection canceled because the scene or view changed." : (error as Error).message;
+    } finally { if (pendingComponentPick === epoch) pendingComponentPick = undefined; }
+  }
   webgl.domElement.addEventListener(
     "wheel",
     () => {
+      cancelComponentScan(); cancelSelection();
       controls.enabled = !transform.dragging;
     },
     { capture: true },
@@ -965,17 +1026,21 @@ async function start() {
       transform.dragging
     )
       return;
+    cancelComponentScan();
     gesture = {
       x: event.clientX,
       y: event.clientY,
       id: event.pointerId,
       additive: event.shiftKey,
+      subtract: event.ctrlKey || event.metaKey,
+      component: componentPickShape,
     };
     webgl.domElement.setPointerCapture(event.pointerId);
   });
   webgl.domElement.addEventListener("pointermove", (event) => {
     if (!gesture || gesture.id !== event.pointerId) return;
     if (event.altKey) {
+      cancelComponentScan();
       cancelSelection();
       return;
     }
@@ -995,6 +1060,7 @@ async function start() {
     const start = gesture;
     cancelSelection();
     if (event.altKey) return;
+    if (start.component) { void pickSkinComponents(start, event); return; }
     world.updateMatrixWorld(true);
     camera.updateMatrixWorld(true);
     const rect = webgl.domElement.getBoundingClientRect();
@@ -1054,17 +1120,24 @@ async function start() {
     }
   });
   webgl.domElement.addEventListener("pointercancel", () => {
+    cancelComponentScan();
     abortDrag();
     cancelSelection();
   });
-  webgl.domElement.addEventListener("lostpointercapture", cancelSelection);
+  webgl.domElement.addEventListener("lostpointercapture", () => { if (gesture?.component) cancelComponentScan(); cancelSelection(); });
   window.addEventListener("blur", () => {
+    cancelComponentScan();
     abortDrag();
     cancelSelection();
   });
   window.addEventListener("keyup", (event) => {
     if (event.key === "Alt" && !dragId) refreshGizmo();
   });
+  // A long scan must remain cancellable even if focus moves into an editor field.
+  window.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || pendingComponentPick === undefined) return;
+    cancelComponentScan(); cancelSelection(); skinWeightsPanel?.stopPicking();
+  }, true);
   window.addEventListener("keydown", (event) => {
     if (event.defaultPrevented || dialogOpen()) return;
     if (
@@ -1084,9 +1157,15 @@ async function start() {
       element<WaDropdown>("edit-menu").open
     )
       return;
+    const key = event.key.toLowerCase();
+    if (key === "escape" && (componentPickShape || pendingComponentPick !== undefined || gesture?.component)) {
+      event.preventDefault(); cancelComponentScan(); cancelSelection(); skinWeightsPanel?.stopPicking(); return;
+    }
     const editing = isEditing(event);
     if (editing) return; // Preserve native text editing undo inside fields.
-    const key = event.key.toLowerCase();
+    if (componentPickShape && ["delete", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault(); notice.textContent = "Exit viewport component selection before deleting or keying an object."; return;
+    }
     if (
       !event.altKey &&
       (event.ctrlKey || event.metaKey) &&
@@ -1232,6 +1311,7 @@ async function start() {
     clearPoseDraft();
     selectedIKId = "";
     selected.clear();
+    skinWeightsPanel?.resetScene();
     const previousObjects = [...runtime.values()];
     runtime.clear();
     assetFiles.clear();

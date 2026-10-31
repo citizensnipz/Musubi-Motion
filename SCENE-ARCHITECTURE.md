@@ -38,11 +38,17 @@ SceneDocument v1
 - Binding records influence joint IDs, rest matrices and optional sparse component
   weight overrides. Shared skin-weight commands validate and normalize authored
   rows; unedited components retain nearest-four distance weights. Spark receives
-  the resulting weights before elasticity is initialized. Numeric range editing
-  and a paused, sampled viewport preview are available; painting is not yet implemented.
+  the resulting weights before elasticity is initialized. Numeric ranges and
+  exact viewport component selections share the editing commands. Painting is
+  not yet implemented.
 - Binding runtimes cache document binding/elasticity references and joint topology.
   Playback does not serialize the authored weight map. Preview points use only
   requested original components and the same packed skin transforms as selection.
+- Component picking projects posed original centers in chunks with Three matrices.
+  A click selects the nearest screen-space center; rectangles select through the
+  object. Async scans cancel on scene, pose, camera, layout, or binding changes.
+  Runtime selections stay outside undo snapshots and archives; explicit scene
+  replacement clears them without confusing undo-restored command labels with opens.
 - Elasticity settings belong to bound shapes. Existing elasticity deformation
   and bounded splat allocation run after the rig pose; they are not a second rig.
 
