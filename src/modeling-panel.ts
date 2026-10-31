@@ -5,6 +5,8 @@ import type { SceneStore } from "./scene-store.ts";
 export type MeshComponentMode = "vertex" | "edge" | "face";
 type Options = {
   available: () => boolean;
+  /** Keep the active component request while a viewport drag temporarily disables edits. */
+  keepComponentMode?: () => boolean;
   getSelection: () => string[];
   onSelectObject: (id: string) => void;
   onComponentMode: (request: { shapeId: string; mode: MeshComponentMode } | undefined) => void;
@@ -71,7 +73,9 @@ export function createModelingPanel(store: SceneStore, options: Options) {
   const extrusionHelp = document.createElement("p"); extrusionHelp.textContent = "Extrude one edge-connected face region along its average local normal. Use a nonzero distance within ±1,000,000. A closed whole-mesh selection has no boundary and cannot be extruded. Invalid topology is rejected without a partial edit.";
   faceActions.append(label("Extrude distance · local units", distance), faceButtons, extrusionHelp);
   const componentHelp = document.createElement("p"); componentHelp.textContent = "Choose a component mode to edit in the viewport or select IDs here. Offsets move the unique vertices belonging to the selected components in mesh-local coordinates. Topology and position edits use undo and save with the scene; component selection is temporary.";
-  components.append(label("Mode", mode), summary, label("Component", picker), selectionActions, cap, idDetails, absoluteGroup, deltaTitle, delta.row, applyOffset, faceActions, componentHelp);
+  const gizmoHelp = document.createElement("p"); gizmoHelp.textContent = "W Move · E Rotate · R Scale. Drag to preview; release to apply. Escape cancels the drag, then exits component mode.";
+  gizmoHelp.title = "Gizmos use world axes and the center of the selected vertices. Each drag creates one undo step. Numeric fields below use local axes.";
+  components.append(label("Mode", mode), gizmoHelp, summary, label("Component", picker), selectionActions, cap, idDetails, absoluteGroup, deltaTitle, delta.row, applyOffset, faceActions, componentHelp);
   const appearance = group("Appearance"), color = document.createElement("input"); color.type = "color"; color.setAttribute("aria-label", "Mesh color");
   const shading = select("Mesh shading"); shading.add(new Option("Flat", "flat")); shading.add(new Option("Smooth", "smooth"));
   const wireframe = document.createElement("input"); wireframe.type = "checkbox"; const wireframeLabel = label("Wireframe", wireframe); wireframeLabel.className = "modeling-check";
@@ -185,7 +189,9 @@ export function createModelingPanel(store: SceneStore, options: Options) {
     applyOffset.disabled = !available || !kind || !selectedIds.length;
     faceActions.hidden = kind !== "face"; extrude.disabled = remove.disabled = !available || kind !== "face" || !selectedIds.length;
     if (shape) { setValue(color, shape.color); shading.value = shape.shading; wireframe.checked = shape.wireframe; }
-    const nextMode = shape && kind && available ? JSON.stringify([shape.id, kind]) : "";
+    const requestedMode = shape && kind ? JSON.stringify([shape.id, kind]) : "";
+    const retainActiveMode = !!requestedMode && requestedMode === modeSignature && options.keepComponentMode?.();
+    const nextMode = available || retainActiveMode ? requestedMode : "";
     if (nextMode !== modeSignature) { modeSignature = nextMode; options.onComponentMode(nextMode ? { shapeId: shape!.id, mode: kind! } : undefined); }
     const nextSelection = shape && kind ? JSON.stringify([shape.id, kind, selectedIds]) : "";
     if (nextSelection !== emittedSelection) { emittedSelection = nextSelection; if (shape && kind) options.onComponentSelection(shape.id, kind, [...selectedIds]); }

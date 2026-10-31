@@ -335,3 +335,43 @@ replay after edits/backward seeks, device-limited point sizes and approximate
 transparent sorting. Collisions, trails, animated field objects, cache export,
 and splat-particle rendering remain unimplemented. The existing Vite large-bundle
 warning remains; the production bundle grew by approximately 88 kB before compression.
+
+## Mesh component gizmos checkpoint
+
+`npm test` passes 345 tests across 38 files; `npm run build` passes with the existing
+large-bundle warning. Twenty added tests cover shared vertex resolution, immutable
+gesture baselines, world/local conversion through nonuniform and sheared parents,
+matrix validation, buffer reuse, normals/wires/bounds, atomic preview rejection,
+exact cancellation restore, document updates and disposal.
+
+Real browser drags moved a cube face from X 0.5 to approximately 1, scaled its Y
+extent, and rotated it around the common selection center. One undo restored each
+starting geometry; redo restored the move. Vertex and edge drags also worked.
+Escape cancelled a drag while preserving component mode/selection and the existing
+redo history; a second Escape returned to Object mode. Clicking a handle without
+moving kept the saved scene clean. A vertex drag that folded a face was rejected
+on release, restored X 0.5, and preserved redo history.
+
+A pending numeric X edit to 0.6 now commits before grabbing a component handle.
+The following drag produced approximately 0.783; consecutive undo operations
+restored 0.6 and then 0.5. This checks the early blur fix that prevents disabling
+Mesh Tools during a drag from discarding an unfinished field edit.
+
+A downloaded edited scene contained exactly the two moved edge vertices, with
+unchanged face IDs/topology and whole-object transform. Reopening retained their
+X value (approximately 0.749638) and started with empty undo/redo history. No
+browser console errors were reported.
+
+The mesh benchmark now measures capture and preview separately, selecting every
+face and reusing one renderer. One Node 22.16.0 run, five warmups and thirty samples:
+
+| Selected faces / vertices | Capture median / p95 | Preview frame median / p95 |
+| --- | --- | --- |
+| 1,024 / 1,089 | 0.530 / 1.277 ms | 0.392 / 1.093 ms |
+| 10,000 / 10,201 | 5.901 / 7.055 ms | 5.163 / 7.701 ms |
+
+Preview timings include world/local vertex conversion and updating mesh/wire
+buffers, normals and bounds. They exclude selection overlays, editor callbacks,
+browser scheduling and GPU upload/rendering. Release still runs full validation
+and triangulation synchronously. Pivot/axis customization, snapping, soft
+selection and component animation remain unimplemented.

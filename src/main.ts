@@ -74,6 +74,8 @@ import { createMeshRenderable } from "./mesh-renderer.ts";
 import { createMeshComponentPreview, type MeshComponentMode } from "./mesh-component-preview.ts";
 import { createModelingPanel } from "./modeling-panel.ts";
 import { pickMeshComponents } from "./mesh-component-selection.ts";
+import { captureMeshComponentTransform } from "./mesh-component-transform.ts";
+import { setMeshVertexPositions } from "./mesh-modeling.ts";
 import { createParticleRuntime } from "./particle-runtime.ts";
 import { createParticlePoseSampler } from "./particle-pose-sampler.ts";
 import { createParticlePanel } from "./particle-panel.ts";
@@ -258,12 +260,15 @@ async function start() {
   let particlePoseDoc: SceneDocument | undefined, particlePoseSampler: ReturnType<typeof createParticlePoseSampler> | undefined;
   let meshComponentRequest: { shapeId: string; mode: MeshComponentMode } | undefined;
   let meshComponentIds: string[] = [];
+  const meshComponentProxy = new THREE.Object3D(); world.add(meshComponentProxy);
+  let meshDrag: { document: SceneDocument; shape: MeshShapeNode; object: Extract<RuntimeObject, { kind: "mesh" }>;
+    snapshot: ReturnType<typeof captureMeshComponentTransform>; startInverse: THREE.Matrix4; previewShape?: MeshShapeNode } | undefined;
   const meshComponentPreview = createMeshComponentPreview();
   function updateMeshComponentPreview() {
     const shape = meshComponentRequest && store.getState().document.nodes[meshComponentRequest.shapeId];
     const object = shape?.type === "meshShape" ? runtime.get(shape.parentId) : undefined;
     if (!meshComponentRequest || shape?.type !== "meshShape" || object?.kind !== "mesh") { meshComponentPreview.clear(); return; }
-    meshComponentPreview.update(shape, object.mesh, object.polygon.triangleFaceIds, meshComponentRequest.mode, meshComponentIds);
+    meshComponentPreview.update(meshDrag?.previewShape ?? shape, object.mesh, object.polygon.triangleFaceIds, meshComponentRequest.mode, meshComponentIds);
     meshComponentPreview.setVisible(gizmosVisible && !playing && !loading);
   }
   let weightPreview: { shapeId: string; indices: number[]; jointId: string } | undefined;
@@ -426,9 +431,9 @@ async function start() {
   webgl.domElement.addEventListener(
     "pointerdown",
     (event) => {
-      // TransformControls suppresses native focus changes. Commit IK drafts before a drag makes the panel busy.
+      // TransformControls suppresses native focus changes. Commit field drafts before a drag makes their panel busy.
       const focused = document.activeElement;
-      if (focused instanceof HTMLElement && focused.closest(".ik-panel")) {
+      if (focused instanceof HTMLElement && focused.closest(".ik-panel, .modeling-panel")) {
         focused.blur();
         transform.getHelper().updateMatrixWorld(true);
       }
@@ -437,7 +442,7 @@ async function start() {
       if (meshComponentRequest && !modelingPanel?.element.checkVisibility()) modelingPanel?.stopEditing();
       controls.enabled = event.pointerType === "touch" || event.altKey;
       transform.enabled =
-        !componentPickShape && !paintSettings && !meshComponentRequest &&
+        !componentPickShape && !paintSettings && (!meshComponentRequest || transform.object === meshComponentProxy) &&
         gizmosVisible && (!skeleton.selectedId || jointsVisible) &&
         !event.altKey &&
         (selectedIKId ? jointsVisible && currentMode === "translate" : (selected.size === 1 || !!skeleton.selectedId) && currentMode !== "select") &&
@@ -473,8 +478,25 @@ async function start() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
-    if (componentPickShape || paintSettings || meshComponentRequest) { transform.detach(); transform.enabled = false; return; }
+    if (meshDrag) return;
+    if (componentPickShape || paintSettings) { transform.detach(); transform.enabled = false; return; }
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
+    if (meshComponentRequest) {
+      const shape = store.getState().document.nodes[meshComponentRequest.shapeId];
+      const object = shape?.type === "meshShape" ? runtime.get(shape.parentId) : undefined;
+      if (currentMode !== "select" && !loading && !playing && meshComponentIds.length && shape?.type === "meshShape" && object?.kind === "mesh") {
+        try {
+          object.mesh.updateWorldMatrix(true, false);
+          const snapshot = captureMeshComponentTransform(shape, meshComponentRequest.mode, meshComponentIds, object.mesh.matrixWorld);
+          meshComponentProxy.position.copy(snapshot.pivot); meshComponentProxy.quaternion.identity(); meshComponentProxy.scale.setScalar(1);
+          meshComponentProxy.updateMatrixWorld(true);
+          if (transform.object !== meshComponentProxy) transform.attach(meshComponentProxy);
+          transform.setMode(currentMode); transform.enabled = true; transform.getHelper().visible = true;
+          return;
+        } catch (error) { notice.textContent = (error as Error).message; }
+      }
+      transform.detach(); transform.enabled = false; return;
+    }
     if (selectedIKId) {
       const target = ikTargets.getObject(selectedIKId, selectedIKKind);
       if (target && currentMode === "translate" && !loading && jointsVisible) {
@@ -506,7 +528,7 @@ async function start() {
   }
   function choose(mode: Mode) {
     if (dragId) return;
-    if ((componentPickShape || paintSettings || meshComponentRequest) && mode !== "select") { notice.textContent = "Return to Object mode before transforming an object. Component positions can be edited in Mesh Tools."; return; }
+    if ((componentPickShape || paintSettings) && mode !== "select") { notice.textContent = "Return to Object mode before transforming an object."; return; }
     currentMode = mode;
     refreshGizmo();
     toolbar
@@ -893,6 +915,7 @@ async function start() {
   workspace.registerPanel("paint-skin-weights", "Paint Skin Weights", skinPaintPanel.element);
   modelingPanel = createModelingPanel(store, {
     available: () => !loading && !dragId && !playing,
+    keepComponentMode: () => !!meshDrag,
     getSelection: allSelection,
     onSelectObject: id => selectObjects([id]),
     onComponentMode: request => {
@@ -904,7 +927,7 @@ async function start() {
     },
     onComponentSelection: (shapeId, mode, ids) => {
       if (meshComponentRequest?.shapeId !== shapeId || meshComponentRequest.mode !== mode) return;
-      meshComponentIds = [...ids]; updateMeshComponentPreview();
+      meshComponentIds = [...ids]; updateMeshComponentPreview(); refreshGizmo();
     },
   });
   workspace.registerPanel("modeling", "Mesh Tools", modelingPanel.element);
@@ -939,12 +962,37 @@ async function start() {
   transform.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value;
     if (event.value) {
-      dragId = selectedIKId ? `ik:${selectedIKId}` : skeleton.selectedId || singleId();
+      if (meshComponentRequest && transform.object === meshComponentProxy) {
+        try {
+          const document = store.getState().document, shape = document.nodes[meshComponentRequest.shapeId];
+          const object = shape?.type === "meshShape" ? runtime.get(shape.parentId) : undefined;
+          if (shape?.type !== "meshShape" || object?.kind !== "mesh") throw Error("The selected mesh no longer exists.");
+          object.mesh.updateWorldMatrix(true, false); meshComponentProxy.updateMatrixWorld(true);
+          meshDrag = { document, shape, object,
+            snapshot: captureMeshComponentTransform(shape, meshComponentRequest.mode, meshComponentIds, object.mesh.matrixWorld),
+            startInverse: meshComponentProxy.matrixWorld.clone().invert() };
+          dragId = `mesh:${shape.id}`;
+        } catch (error) { notice.textContent = (error as Error).message; transform.pointerUp(null); refreshGizmo(); return; }
+      } else dragId = selectedIKId ? `ik:${selectedIKId}` : skeleton.selectedId || singleId();
       if(skeleton.selectedId&&currentMode==="rotate")skeleton.beginRotation();
       cancelDrag = false;
       setPlaying(false);
     } else if (dragId) {
       const id = dragId;
+      if (meshDrag) {
+        const session = meshDrag;
+        meshComponentProxy.updateMatrixWorld(true);
+        const delta = meshComponentProxy.matrixWorld.clone().multiply(session.startInverse);
+        session.object.polygon.clearPreview(); meshDrag = undefined; dragId = undefined;
+        try {
+          if (!cancelDrag) {
+            if (store.getState().document !== session.document) throw Error("The scene changed during the component drag. Try again.");
+            setMeshVertexPositions(store, session.shape.id, session.snapshot.changes(delta),
+              currentMode === "rotate" ? "Rotate mesh vertices" : currentMode === "scale" ? "Scale mesh vertices" : "Move mesh vertices");
+          }
+        } catch (error) { notice.textContent = (error as Error).message; }
+        syncScene(); updateMeshComponentPreview(); updateHistoryButtons(); return;
+      }
       if (selectedIKId && id === `ik:${selectedIKId}`) {
         const target = ikTargets.getObject(selectedIKId, selectedIKKind)?.position.toArray() as Vec3 | undefined;
         dragId = undefined;
@@ -980,6 +1028,17 @@ async function start() {
     updateHistoryButtons();
   });
   transform.addEventListener("objectChange", () => {
+    if (meshDrag) {
+      if (cancelDrag) return;
+      try {
+        if (store.getState().document !== meshDrag.document) throw Error("The scene changed during the component drag. Try again.");
+        meshComponentProxy.updateMatrixWorld(true);
+        const changes = meshDrag.snapshot.changes(meshComponentProxy.matrixWorld.clone().multiply(meshDrag.startInverse));
+        meshDrag.previewShape = meshDrag.object.polygon.previewVertices(changes);
+        updateMeshComponentPreview();
+      } catch (error) { notice.textContent = (error as Error).message; }
+      return;
+    }
     if (selectedIKId) { applyAnimationPose(); updateBindings(); return; }
     if (skeleton.selectedId) { if(dragId&&currentMode==="rotate")skeleton.previewRotation(); skeleton.preview(); updateBindings(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
     const id = singleId(),
@@ -1340,6 +1399,7 @@ async function start() {
     )
       return;
     const key = event.key.toLowerCase();
+    if (key === "escape" && meshDrag) { event.preventDefault(); abortDrag(); return; }
     if (key === "escape" && meshComponentRequest) { event.preventDefault(); cancelSelection(); modelingPanel?.stopEditing(); return; }
     if (key === "escape" && paintSettings) { event.preventDefault(); skinPaintPanel?.stopPainting(); return; }
     if (key === "escape" && (componentPickShape || pendingComponentPick !== undefined || gesture?.component)) {
@@ -1453,6 +1513,7 @@ async function start() {
   }
   function updateTime(apply = true) {
     if (apply) { applyAnimationPose(); updateBindings(); }
+    if (meshComponentRequest) refreshGizmo();
     updateParticles();
     timelinePanel?.refresh();
     const turntable = timelinePanel?.turntable;

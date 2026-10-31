@@ -1,7 +1,7 @@
 # Polygon modeling guide
 
 Choose the **Modeling** workspace or open **Modeling → Mesh Tools**. The panel
-provides polygon primitives, component selection, numeric position edits,
+provides polygon primitives, component selection, transform gizmos, numeric position edits,
 connected face extrusion, face deletion, and basic appearance settings.
 
 ## Create and select a mesh
@@ -38,8 +38,9 @@ selection blocker. Face box centers are the average of their vertex positions;
 a box does not select a face merely because it intersects part of its surface.
 Selections are limited to 20,000 components; an oversized selection or addition
 leaves the previous set unchanged. View or scene changes cancel an unfinished
-selection gesture. **Escape** returns to Object mode and clears component
-selection.
+selection gesture. Outside a numeric field, **Escape** cancels an active component
+gizmo drag while keeping the selection. Press it again, or press it while no
+gizmo drag is active, to return to Object mode and clear component selection.
 
 The **Component** menu provides an alternative to viewport picking. Choose an
 entry and click **Select component** to replace the selection or **Add component**
@@ -52,6 +53,24 @@ component selection. Opening a scene resets this state explicitly.
 
 ## Move components
 
+Select vertices, edges, or faces, then press **W** for Move, **E** for Rotate,
+or **R** for Scale. The component gizmo uses world-aligned axes and the center of
+the selected unique vertices. Edges and faces expand to their shared vertices,
+so each selected vertex participates only once. Rotation and scaling operate
+around this common center.
+
+Dragging previews the changed mesh without modifying the saved document. Release
+to commit the whole gesture as one undo step. **Escape** during the drag restores
+the starting geometry and retains component mode and selection; Escape again
+exits to Object mode. Panel editing controls disable during the drag, while the
+active component mode stays in place. Invalid geometry is rejected by the shared
+validation when committed. Previews reuse the starting triangulation; release
+validates and triangulates the edited polygons again. A temporarily folded or
+collapsed face can therefore appear during a drag, but an invalid final edit
+restores the starting mesh and leaves undo history unchanged. Rotation and scale
+work through nonuniformly scaled or sheared parents by converting the world-space
+gesture back into mesh-local vertex positions.
+
 Select exactly one vertex to reveal **Single vertex · absolute local position**.
 Edit its X, Y, or Z coordinate to set that vertex's mesh-local position.
 
@@ -62,10 +81,11 @@ the object's rotation and scale still affect the resulting world-space motion.
 The offset remains available for another application.
 
 Numeric edits commit on **Enter** or blur. **Escape** cancels the pending field
-edit. Positions must be finite and within ±1,000,000 on each axis. Invalid
-geometry rejects the whole command without leaving a partial move. Component
-translation, rotation, or scaling with a mouse gizmo is not implemented; use
-numeric edits here or return to Object mode for the normal object gizmo.
+edit. Positions must be finite and within ±1,000,000 on each local axis. Invalid
+geometry rejects the whole command without leaving a partial move. Numeric edits
+use local coordinates; the component gizmo uses world-aligned axes. Return to
+Object mode for the normal whole-object gizmo. Component animation, customized
+pivots, snapping, and soft selection are not implemented.
 
 ## Extrude and delete faces
 
@@ -118,8 +138,9 @@ test: intersections between separate faces are not automatically repaired, and
 there is no automatic self-collision cleanup.
 
 Bevel, inset, subdivision, UV editing, material assignment beyond a single shape
-color, mesh import/export, mesh skinning, topology construction history, and
-component gizmos remain future work. This slice supplies direct polygon edits,
+color, mesh import/export, mesh skinning, topology construction history,
+component animation, pivot customization, snapping, and soft selection remain
+future work. This slice supplies direct polygon edits,
 not the complete Maya modeling toolset. See [VALIDATION.md](VALIDATION.md) for
 the separate verification record.
 

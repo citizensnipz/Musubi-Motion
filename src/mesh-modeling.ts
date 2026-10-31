@@ -175,7 +175,7 @@ export function createMeshPrimitive(store: SceneStore, preset: MeshPrimitive, op
   store.setState({ document: { ...doc, rootIds: [...doc.rootIds, id], nodes: { ...doc.nodes, [id]: node, [shapeId]: shape } }, editLabel: "Create polygon mesh" }); return id;
 }
 
-export function setMeshVertexPositions(store: SceneStore, shapeId: string, changes: { id: string; position: Vec3 }[]): void {
+export function setMeshVertexPositions(store: SceneStore, shapeId: string, changes: { id: string; position: Vec3 }[], label = "Move mesh vertices"): void {
   const shape = selectedShape(store, shapeId), replacements = new Map<string, Vec3>();
   for (const change of changes) {
     if (!change || !validPosition(change.position) || replacements.has(change.id)) throw Error("Vertex edits need unique IDs and finite positions within ±1,000,000.");
@@ -183,7 +183,7 @@ export function setMeshVertexPositions(store: SceneStore, shapeId: string, chang
   }
   const existingIds = new Set(shape.vertices.map(vertex => vertex.id));
   if ([...replacements.keys()].some(id => !existingIds.has(id))) throw Error("A selected mesh vertex no longer exists.");
-  commitShape(store, { ...shape, vertices: shape.vertices.map(vertex => replacements.has(vertex.id) ? { ...vertex, position: replacements.get(vertex.id)! } : vertex) }, "Move mesh vertices");
+  commitShape(store, { ...shape, vertices: shape.vertices.map(vertex => replacements.has(vertex.id) ? { ...vertex, position: replacements.get(vertex.id)! } : vertex) }, label);
 }
 export function updateMeshAppearance(store: SceneStore, shapeId: string, patch: Partial<Pick<MeshShapeNode, "color" | "shading" | "wireframe">>): void {
   const shape = selectedShape(store, shapeId);

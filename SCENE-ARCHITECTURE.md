@@ -74,10 +74,23 @@ triangle-to-authored-face mappings. Buffers, computed normals, bounds, and polyg
 wire overlays belong to `mesh-renderer.ts`, outside the document/history. Appearance
 changes reuse geometry; topology changes dispose replaced geometry.
 
+Component gizmos capture the selected components' unique vertices and the mesh's
+world matrix once at gesture start. `mesh-component-transform.ts` applies each
+complete world-space gizmo delta to that immutable baseline, converting it back
+to local coordinates with `inverse(meshWorld) × deltaWorld × meshWorld`. Repeated
+pointer events therefore do not accumulate edits or rounding error.
+`mesh-renderer.ts` previews those local coordinates in the existing position,
+normal and polygon-wire buffers, updating bounds while preserving the committed
+tessellation and triangle-to-face mapping. Preview input validation checks IDs
+and finite coordinate limits; full topology validation and retessellation happen
+on release through the shared mesh command. A valid commit creates one undo step;
+cancel restores the exact committed buffers and bounds without changing history.
+
 Mesh vertex/edge clicks use screen distance; face clicks raycast the selected mesh.
-Rectangles select component centers through the object. Selection and overlays
-are runtime state, limited to 20,000 selected components, and mutually exclusive
-with splat skin editing. Document, pose, camera, or layout changes cancel pending
+Rectangles select component centers through the object. Component selection,
+gizmo snapshots, transient geometry previews and overlays are runtime state and
+are not saved in `.msb` files. Selection is limited to 20,000 components and is
+mutually exclusive with splat skin editing. Document, pose, camera, or layout changes cancel pending
 mesh selection gestures. Mesh transforms participate in shared animation, SDK,
 and constraints; mesh skinning and animated vertex positions are not implemented.
 
