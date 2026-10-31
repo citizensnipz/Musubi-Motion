@@ -198,6 +198,13 @@ use the FK/IK blend to retain FK at zero or apply the solution at one. The
 Enable/disable, target, blend, solver iteration count, and handle removal are
 document edits with undo and serialization.
 
+Click **Move target in viewport** to select the handle's target marker and attach
+the translation gizmo. Target markers can also be selected by clicking them in
+the viewport. Drag to preview the solution; release records one target edit in
+history. **Escape** cancels the drag, and **Delete** removes the selected handle.
+The marker is a viewport control for the handle's stored world-space target,
+not a separate scene transform node or animation channel.
+
 The solver reuses Three.js `CCDIKSolver`. It supports two-bone and longer chains,
 with deterministic handling around straight-chain singularities. Unreachable
 targets produce a bounded iterative approximation. Chains may not overlap or
@@ -244,14 +251,24 @@ rejected, including disabled constraints, so enabling a record cannot introduce
 a hidden cycle.
 
 This subset has no aim constraint, multi-source weighting, constraint animation,
-or shear support. Joint scale constraints are disabled. Use uniform parent
-scales for predictable rotation and scale; general rotated/nonuniform-scale
-hierarchies can produce shear that a transform-only pose cannot represent.
+or shear support. Joint scale constraints are disabled. Orient, Parent, and
+Scale constraints reject nonuniformly scaled driven-parent transforms and
+sheared source transforms. Point constraints support arbitrary finite,
+invertible parent transforms. Singular or non-finite source/parent transforms
+are rejected for every type.
+
+If animation reaches an unsupported constraint pose, playback stops and a notice
+identifies the limitation. Constraint evaluation falls back atomically to the
+underlying animation/SDK/IK pose rather than leaving some constraints applied.
+Disabled constraints remain editable, so the offending relationship can be
+disabled or deleted before repairing the hierarchy or animation.
 
 ## Performance and verification
 
 Development CPU measurements were approximately **0.56 ms for 1,000 animation
-tracks** and **2.62 ms for 20 IK chains** on the local development machine.
+tracks**, **2.62 ms for 20 IK chains**, and **0.44 ms for 100 parent constraints**
+on the local development machine. The constraint measurement used 100 Node CPU
+evaluations taking 43.5 ms in total.
 These are narrow CPU microbenchmarks, not end-to-end frame times. They exclude
 WebGL/Spark rendering, skinning/binding uploads, elasticity, UI rendering,
 source-asset loading, and device/browser variation. Large weighted curves and
@@ -263,6 +280,8 @@ lint script is configured. Tests cover weighted curves, full-turn rotations,
 key edits/history, SDK cycles/order, animated FK edit continuity, IK solving,
 and existing scene/elasticity behavior. The example scene supports repeatable
 manual browser checks; it does not substitute for imported production assets.
+See [VALIDATION.md](VALIDATION.md) for the dated verification record and measured
+small-scene playback results.
 
 ## Remaining work, in priority order
 

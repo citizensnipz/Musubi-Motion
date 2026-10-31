@@ -48,7 +48,7 @@ export function createConstraintsPanel(store: SceneStore, options: Options) {
   const heading = document.createElement("h3"); heading.textContent = "Scene constraints";
   const list = document.createElement("div"); list.className = "constraint-list"; list.setAttribute("aria-label", "Scene constraints");
   const note = document.createElement("p"); note.textContent = "Constraints override their position, rotation or scale channels after animation, driven keys and IK. Disable a constraint to return to that underlying pose. Cycles and duplicate outputs are rejected. Parent does not constrain size.";
-  const limits = document.createElement("p"); limits.textContent = "Use uniform parent scales for predictable rotation and scale. Shear, joint scaling, aim constraints, and blending multiple sources are not supported yet.";
+  const limits = document.createElement("p"); limits.textContent = "Orient, Parent and Scale require uniform driven-parent scales and a source without shear. Unsupported animated poses stop playback with an explanation. Point accepts any invertible parent. Joint scaling, aim and multiple sources are not supported yet.";
   element.append(fieldset, status, heading, list, note, limits);
   for (const select of [source, target, type]) select.onchange = () => { status.textContent = ""; refresh(); };
   let targetSignature = "", listSignature = "", previousConstraints: Constraint[] | undefined;

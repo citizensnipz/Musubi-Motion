@@ -28,7 +28,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Channel key controls:** key individual Properties channels with their diamonds and author stepped visibility with the Visible checkbox. Indicators distinguish unanimated channels, animated channels, and keys at the current frame.
 - **Graph Editor and Dope Sheet:** dockable curve/channel editing, key multiselection and box selection, Bezier tangent handles, linear/stepped interpolation, tangent presets, copy/paste, retiming, and time scaling.
 - **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
-- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, world-space targets, FK/IK blend, and matching a target to the current FK endpoint.
+- **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, and matching a target to the current FK endpoint.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, scale, and parent relationships with optional maintain-offset. Each output group has one source; dependency cycles are rejected.
 - **Undo/redo:** editing operations use shared document commands. History retains up to 100 edits without copying splat buffers; playback and scrubbing create no history entries.
 - **Turntable preview:** the Timeline's separate playback mode retains the original 12-second rotation preview.
@@ -126,7 +126,9 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 Only the General, Animation, and Rigging workspace presets exist today. Modeling and FX workspaces will accompany functioning tools. Existing disabled rigging entries describe work still to come; they are not implemented commands.
 
-Local CPU measurements were approximately **0.56 ms for 1,000 animation tracks** and **2.62 ms for 20 IK chains**. These development measurements exclude WebGL/Spark rendering, binding, elasticity, editor drawing, and large asset loads; they are not a browser frame-rate or production performance guarantee. See [the animation guide](docs/ANIMATION.md#performance-and-verification).
+Local CPU measurements were approximately **0.56 ms for 1,000 animation tracks**, **2.62 ms for 20 IK chains**, and **0.44 ms for 100 parent constraints**. These development measurements exclude WebGL/Spark rendering, binding, elasticity, editor drawing, and large asset loads; they are not a browser frame-rate or production performance guarantee. See [the animation guide](docs/ANIMATION.md#performance-and-verification).
+
+The dated [validation record](docs/VALIDATION.md) separates model tests, browser workflows, small-scene playback measurements, and remaining verification limits.
 
 Capture reconstruction, model training, and recorded 4D splat playback are outside the current scope. A future WebGPU backend needs a compatible splat rendering path; switching the Three.js renderer alone is insufficient.
 

@@ -103,7 +103,10 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (!selectedHandleId) return;
     deleteIKHandle(store, selectedHandleId);
   }, "IK handle deleted. The chain uses its authored FK pose."));
-  const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(match, remove);
+  const move = button("Move target in viewport", () => {
+    if (selectedHandleId && options.available()) element.dispatchEvent(new CustomEvent("ik-target-select", { detail: selectedHandleId }));
+  });
+  const actions = document.createElement("div"); actions.className = "ik-actions"; actions.append(move, match, remove);
   details.append(detailsLegend, chainDescription, label("Name", name), enabledLabel, targetHeading, targetRow, blendLabel, blendRow, label("Solver iterations", iterations), actions);
   const empty = document.createElement("p"); empty.className = "ik-empty"; empty.textContent = "No IK handles. Create a joint chain, then choose its root and end above.";
   const note = document.createElement("p"); note.textContent = "CCD solves position with fixed bone lengths. Unreachable targets extend toward the target. This version has no pole vectors or joint limits; overlapping chains are rejected. Targets are saved but are not yet keyframe channels.";
@@ -175,5 +178,5 @@ export function createIKPanel(store: SceneStore, options: Options) {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) event.stopPropagation();
   });
   store.subscribe(refresh); refresh();
-  return { element, refresh };
+  return { element, refresh, select(id: string) { selectedHandleId = id; refresh(); } };
 }

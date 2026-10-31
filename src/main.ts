@@ -49,12 +49,13 @@ import { advanceFrame } from "./animation-playback.ts";
 import { mountAnimationEditors } from "./graph-editor.ts";
 import { createDrivenKeyPanel } from "./driven-key-panel.ts";
 import { prepareJointAnimationEdit, unwrapEuler } from "./animation-edit.ts";
-import { evaluateIK, validateIKHandles } from "./ik.ts";
+import { evaluateIK, validateIKHandles, updateIKHandle, deleteIKHandle } from "./ik.ts";
 import { createIKPanel } from "./ik-panel.ts";
 import { evaluateConstraints, validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
 import { PoseDrafts } from "./pose-drafts.ts";
+import { createIKTargets } from "./ik-targets.ts";
 import { mountSkeleton } from "./skeleton.ts";
 import { createBinding } from "./splat-binding.ts";
 import { createTerminal } from "./terminal-panel.ts";
@@ -161,6 +162,8 @@ async function start() {
   const runtime = new Map<string, RuntimeObject>();
   const assetFiles = new Map<string, File>();
   let selected = new Set<string>();
+  let selectedIKId = "";
+  const ikTargets = createIKTargets(world);
   let sceneName = "Untitled.msb";
   let sceneHandle: SceneFileHandle | undefined;
   let savedDocument = JSON.stringify(store.getState().document);
@@ -195,6 +198,7 @@ async function start() {
   let ikPanel: ReturnType<typeof createIKPanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let channelKeys: ReturnType<typeof mountChannelKeyControls> | undefined;
+  let evaluationError = "";
   const animationSettings = () => store.getState().document.animation ?? defaultAnimation();
   const getFrame = () => time * animationSettings().fps;
   const allSelection = (): string[] => [...selected, ...skeleton.selectedIds];
@@ -214,8 +218,13 @@ async function start() {
     const node = doc.nodes[id];
     if (node?.type !== "transform") return;
     const pose = { ...normalizedChannels(channels), visibility: currentPose(id).visibility };
-    poseOverrides.set(id, pose);
     doc = { ...doc, nodes: { ...doc.nodes, [id]: { ...node, position: pose.position, rotation: pose.rotation, scale: pose.scale } } };
+    try {
+      if (doc.constraints) validateConstraints(doc.constraints, doc);
+    } catch (error) {
+      syncScene(); notice.textContent = (error as Error).message; return;
+    }
+    poseOverrides.set(id, pose);
     if (timelinePanel?.autoKey) doc = keyChannels(doc, id, pose, Math.round(getFrame()));
     poseDrafts.capture(doc, poseOverrides);
     store.setState({ document: doc, editLabel: label });
@@ -322,8 +331,7 @@ async function start() {
       transform.enabled =
         gizmosVisible && (!skeleton.selectedId || jointsVisible) &&
         !event.altKey &&
-        (selected.size === 1 || !!skeleton.selectedId) &&
-        currentMode !== "select" &&
+        (selectedIKId ? jointsVisible && currentMode === "translate" : (selected.size === 1 || !!skeleton.selectedId) && currentMode !== "select") &&
         !loading;
     },
     true,
@@ -357,6 +365,13 @@ async function start() {
   }
   function refreshGizmo() {
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
+    if (selectedIKId) {
+      const target = ikTargets.getObject(selectedIKId);
+      if (target && currentMode === "translate" && !loading && jointsVisible) {
+        transform.attach(target); transform.setMode("translate"); transform.enabled = true; transform.getHelper().visible = true;
+      } else { transform.detach(); transform.enabled = false; }
+      return;
+    }
     if (selected.size && skeleton.selectedIds.size) { transform.detach(); transform.enabled = false; return; }
     if (skeleton.selectedBone) {
       if ((currentMode === "translate" || currentMode === "rotate") && !loading) {
@@ -418,6 +433,7 @@ async function start() {
   selectionLabel.setAttribute("role", "status");
   viewport.append(selectionLabel);
   riggingPanel.addEventListener("joint-selection-change", () => {
+    if (skeleton.selectedIds.size) { selectedIKId = ""; ikTargets.setSelected(); }
     if (!dragId) { applyAnimationPose(); updateBindings(); }
     if (skeleton.selectedIds.size) {
       for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
@@ -505,6 +521,7 @@ async function start() {
   }
   function selectObjects(ids: string[], additive = false) {
     if (dragId) return;
+    selectedIKId = ""; ikTargets.setSelected();
     if (!additive && skeleton.selectedIds.size) skeleton.select("");
     const doc = store.getState().document;
     const next = additive ? new Set(selected) : new Set<string>();
@@ -518,11 +535,13 @@ async function start() {
   }
   function refreshSelection() {
     const doc = store.getState().document;
+    if (!doc.ikHandles?.some(h => h.id === selectedIKId)) selectedIKId = "";
+    ikTargets.setSelected(selectedIKId || undefined);
     selected = new Set(
       [...selected].filter((id) => doc.nodes[id]?.type === "transform"),
     );
     for (const [id, object] of runtime) object.box.visible = gizmosVisible && selected.has(id);
-    selectionLabel.textContent = skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
+    selectionLabel.textContent = selectedIKId ? `IK target: ${doc.ikHandles?.find(h => h.id === selectedIKId)?.name}` : selected.size && skeleton.selectedIds.size ? `${selected.size} objects · ${skeleton.selectedIds.size} joints selected` : skeleton.selectedBone ? `Joint: ${skeleton.selectedBone.name}` : skeleton.selectedIds.size ? `${skeleton.selectedIds.size} joints selected` : selected.size
       ? `${selected.size} object${selected.size === 1 ? "" : "s"} selected`
       : "Nothing selected";
     refreshGizmo();
@@ -630,6 +649,15 @@ async function start() {
   workspace.registerPanel("dope-sheet", "Dope Sheet", animationEditors.dopeSheet);
   workspace.registerPanel("driven-keys", "Set Driven Key", drivenPanel.element);
   workspace.registerPanel("ik-handles", "IK Handles", ikPanel.element);
+  function selectIKTarget(id: string) {
+    if (loading || dragId || !ikTargets.getObject(id)) return;
+    setPlaying(false);
+    selected.clear(); skeleton.select("");
+    selectedIKId = id; ikTargets.setSelected(id); ikPanel?.select(id);
+    choose("translate"); refreshSelection();
+    element("view-ik-handles").click();
+  }
+  ikPanel.element.addEventListener("ik-target-select", event => selectIKTarget((event as CustomEvent<string>).detail));
   workspace.registerPanel("constraints", "Constraints", constraintsPanel.element);
   for (const control of Array.from(document.querySelectorAll<WaButton>("[data-rig-action]"))) {
     if (["Create IK chain", "Move IK target", "IK / FK blend"].includes(control.dataset.rigAction!)) {
@@ -673,12 +701,21 @@ async function start() {
   transform.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value;
     if (event.value) {
-      dragId = skeleton.selectedId || singleId();
+      dragId = selectedIKId ? `ik:${selectedIKId}` : skeleton.selectedId || singleId();
       if(skeleton.selectedId&&currentMode==="rotate")skeleton.beginRotation();
       cancelDrag = false;
       setPlaying(false);
     } else if (dragId) {
       const id = dragId;
+      if (selectedIKId && id === `ik:${selectedIKId}`) {
+        const target = ikTargets.getObject(selectedIKId)?.position.toArray() as Vec3 | undefined;
+        dragId = undefined;
+        if (!cancelDrag && target) {
+          try { updateIKHandle(store, selectedIKId, { target }); }
+          catch (error) { notice.textContent = (error as Error).message; }
+        }
+        syncScene(); updateHistoryButtons(); return;
+      }
       const joint = skeleton.selectedId === id ? skeleton.selectedBone : undefined;
       const jointPosition = joint?.position.toArray() as Vec3 | undefined;
       dragId = undefined;
@@ -705,6 +742,7 @@ async function start() {
     updateHistoryButtons();
   });
   transform.addEventListener("objectChange", () => {
+    if (selectedIKId) { applyAnimationPose(); updateBindings(); return; }
     if (skeleton.selectedId) { if(dragId&&currentMode==="rotate")skeleton.previewRotation(); skeleton.preview(); updateBindings(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
@@ -773,7 +811,7 @@ async function start() {
   }
   const viewportTools=mountViewportTools(viewport,(kind,visible)=>{
     if(kind==="grid")grid!.visible=visible;
-    if(kind==="joints"){jointsVisible=visible;skeleton.setVisible(visible);}
+    if(kind==="joints"){jointsVisible=visible;skeleton.setVisible(visible);ikTargets.setVisible(visible);}
     if(kind==="gizmos"){gizmosVisible=visible;for(const [id,object]of runtime)object.box.visible=visible&&selected.has(id);}
     refreshGizmo();
   },switchView,()=>{switchView("perspective");fitView();});
@@ -900,6 +938,8 @@ async function start() {
     });
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4) {
       raycaster.setFromCamera(end, camera);
+      const targetHit = ikTargets.pick(raycaster);
+      if (targetHit) { selectIKTarget(targetHit); return; }
       const jointHit = skeleton.pick(raycaster);
       if (jointHit) { if (!start.additive) selected.clear(); skeleton.selectMany([jointHit], start.additive); return; }
       const hits=objects.map(({id,object})=>({id,distance:boundSelection(object)?.pick(raycaster)??raycaster.intersectObject(object.mesh,false)[0]?.distance??Infinity})).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
@@ -984,6 +1024,7 @@ async function start() {
     if (key === "delete") {
       if (loading || dragId) return;
       event.preventDefault();
+      if (selectedIKId) { deleteIKHandle(store, selectedIKId); return; }
       const ids = new Set([...selected, ...skeleton.selectedIds]);
       if (!ids.size) return;
       setPlaying(false);
@@ -1025,14 +1066,27 @@ async function start() {
     channelKeys?.refresh();
   }
   function applyAnimationPose() {
-    if (dragId) return;
-    const doc = store.getState().document;
+    const draggingTarget = !!selectedIKId && dragId === `ik:${selectedIKId}`;
+    if (dragId && !draggingTarget) return;
+    let doc = store.getState().document;
+    if (draggingTarget) {
+      const target = ikTargets.getObject(selectedIKId)!.position.toArray() as Vec3;
+      doc = { ...doc, ikHandles: doc.ikHandles?.map(handle => handle.id === selectedIKId ? { ...handle, target } : handle) };
+    }
     evaluated = evaluateSceneAnimation(doc, getFrame());
     for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, pose);
     evaluateDrivenKeys(doc, evaluated);
     fkPoses = new Map(evaluated);
     evaluateIK(doc, evaluated);
-    evaluateConstraints(doc, evaluated);
+    try {
+      evaluateConstraints(doc, evaluated);
+      evaluationError = "";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (playing) setPlaying(false);
+      if (message !== evaluationError) notice.textContent = message;
+      evaluationError = message;
+    }
     for (const [id, object] of runtime) {
       const pose = evaluated.get(id);
       if (!pose) continue;
@@ -1043,6 +1097,7 @@ async function start() {
       object.preview.rotation.y = timelinePanel?.turntable ? (time / duration) * Math.PI * 2 : 0;
     }
     skeleton.applyPose(evaluated);
+    ikTargets.sync(doc, evaluated);
   }
   function updateTime(apply = true) {
     if (apply) { applyAnimationPose(); updateBindings(); }
@@ -1091,6 +1146,7 @@ async function start() {
   ) {
     transform.detach();
     clearPoseDraft();
+    selectedIKId = "";
     selected.clear();
     const previousObjects = [...runtime.values()];
     runtime.clear();

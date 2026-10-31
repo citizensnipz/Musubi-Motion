@@ -57,6 +57,12 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
   const bones = new Map<string, THREE.Bone>();
   const rotationStart=new Map<string,THREE.Quaternion>();
   const markers: THREE.Mesh[] = [];
+  const markerFor = new Map<string, THREE.Mesh>();
+  function boneVisible(id: string) {
+    let bone: THREE.Object3D | null | undefined = bones.get(id);
+    while (bone && bone !== layer) { if (!bone.visible) return false; bone = bone.parent; }
+    return true;
+  }
   const links: { line: THREE.Line; shape: THREE.Mesh; child: string; parent: string }[] = [];
   const boneGeometry=new THREE.ConeGeometry(1,1,4);
   boneGeometry.translate(0,.5,0);
@@ -100,7 +106,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       if (child instanceof THREE.Line) child.geometry.dispose();
       layer.remove(child);
     }
-    bones.clear(); markers.length = 0; links.length = 0;
+    bones.clear(); markers.length = 0; markerFor.clear(); links.length = 0;
     for (const j of joints()) {
       const bone = new THREE.Bone(); bone.name = j.name; bone.position.fromArray(j.position);
       const r = (j.rotation ?? [0,0,0]).map(THREE.MathUtils.degToRad);
@@ -109,6 +115,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       const marker = new THREE.Mesh(geometry, selection.has(j.id) ? activeMaterial : material);
       marker.userData.jointId = j.id;
       markers.push(marker);
+      markerFor.set(j.id, marker);
       marker.renderOrder = 100000; bone.add(marker);
     }
     for (const j of joints()) (j.parentId ? bones.get(j.parentId)! : layer).add(bones.get(j.id)!);
@@ -176,7 +183,8 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
         if (!pose) continue;
         bone.position.fromArray(pose.position);
         bone.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as [number, number, number]);
-        const marker = markers.find(m => m.userData.jointId === id);
+        bone.visible = pose.visibility >= .5;
+        const marker = markerFor.get(id);
         if (marker) marker.visible = pose.visibility >= .5;
       }
       this.preview();
@@ -217,7 +225,8 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
     marquee(begin: THREE.Vector2, end: THREE.Vector2, camera: THREE.Camera) {
       if(!layer.visible)return [];
       layer.updateMatrixWorld(true);
-      return [...bones].filter(([, bone]) => {
+      return [...bones].filter(([id, bone]) => {
+        if (!boneVisible(id)) return false;
         const p = bone.getWorldPosition(new THREE.Vector3()).project(camera);
         return p.z >= -1 && p.z <= 1 && p.x >= Math.min(begin.x,end.x) && p.x <= Math.max(begin.x,end.x)
           && p.y >= Math.min(begin.y,end.y) && p.y <= Math.max(begin.y,end.y);
@@ -226,7 +235,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
     pick(raycaster: THREE.Raycaster) {
       if(!layer.visible)return undefined;
       layer.updateMatrixWorld(true);
-      return raycaster.intersectObjects(markers.filter(marker => marker.visible), false)[0]?.object.userData.jointId as string | undefined;
+      return raycaster.intersectObjects(markers.filter(marker => boneVisible(marker.userData.jointId)), false)[0]?.object.userData.jointId as string | undefined;
     },
     preview() {
       layer.updateMatrixWorld(true);
@@ -237,6 +246,8 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
         positions.setXYZ(0, a.x, a.y, a.z); positions.setXYZ(1, b.x, b.y, b.z);
         positions.needsUpdate = true; line.geometry.computeBoundingSphere();
         placeBone(shape,b,a);
+        line.visible = boneVisible(child);
+        shape.visible = shape.visible && line.visible;
       }
     },
     commitMove(id: string, position: Joint["position"], rotation?: Joint["rotation"]) {

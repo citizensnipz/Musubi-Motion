@@ -169,7 +169,8 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     const attribute = ["driven-keys", "ik-handles", "constraints"].includes(id);
     const reference = attribute ? "properties" : "viewport";
     api.addPanel({ id, component: id, title, tabComponent: "label", renderer: "always",
-      minimumWidth: attribute ? 300 : 440, minimumHeight: 260, initialHeight: 330,
+      minimumWidth: attribute ? 300 : 440, minimumHeight: attribute ? 180 : 260,
+      ...(attribute ? {} : { initialHeight: 330 }),
       position: api.getPanel(reference) ? { referencePanel: reference, direction: attribute ? "within" : "below" }
         : api.panels.length ? { direction: "below" } : undefined,
     }).api.setActive();

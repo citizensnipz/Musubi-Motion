@@ -110,6 +110,15 @@ still participate in cycle/ownership validation. Parent owns position and
 rotation; it does not own scale. Removing a source or target removes its
 constraints, and undo restores them with the scene.
 
+Creation and archive validation reject unsupported enabled constraints in the
+authored pose. Runtime affine checks are also necessary because valid data can animate
+into unsupported transforms. Orient/parent/scale require uniformly scaled
+driven-parent transforms and nonsheared sources; point permits arbitrary finite
+invertible parents. Singular or non-finite transforms are rejected. A runtime
+failure stops playback with a notice and leaves the underlying pre-constraint
+pose intact. This check does not remove the saved constraint; it can be disabled
+or deleted to repair the scene.
+
 The loader validates format versions, IDs, references, unique sibling names,
 hierarchy cycles, roots, transform values, shape counts, camera values, asset
 inventory, byte lengths, SHA-256 digests, and the optional animation/rigging

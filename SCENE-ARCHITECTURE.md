@@ -91,8 +91,12 @@ retaining target scale; their positional offset follows the source's full
 transform, including source scale. Point offsets stay in world space. Rotation
 offsets are normalized quaternions. One constraint owns each output group;
 hierarchy/constraint cycles, including disabled links, are rejected. SDK and IK
-are not reevaluated from constrained results. Shear and joint scale constraints
-are not supported; rotation/scale under nonuniform scaled hierarchies are limited.
+are not reevaluated from constrained results. Joint scale constraints are not
+supported. Orient/parent/scale reject nonuniform driven-parent transforms and
+sheared sources; point supports arbitrary finite invertible parents. Unsupported
+animated poses stop playback with an explicit notice. Evaluation is atomic, so
+the whole constraint stage falls back to its underlying pose when a check fails.
+Disabled constraints remain editable for repair.
 
 The document and its commands do not depend on a viewport widget. This is the
 integration boundary for future automation/MCP access; no MCP endpoint is

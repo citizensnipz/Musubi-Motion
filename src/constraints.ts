@@ -83,7 +83,11 @@ export function validateConstraints(value: unknown, doc: SceneDocument): asserts
     }
     ids.add(constraint.id);
   }
-  buildPlan(doc, value);
+  const plan = buildPlan(doc, value), world = worldMatricesForPlan(plan);
+  for (const constraint of value as Constraint[]) if (constraint.enabled) {
+    const parentId = plan.nodes.get(constraint.targetId)!.parentId;
+    checkConstraintPose(constraint, world.get(constraint.sourceId)!, parentId ? world.get(parentId)! : new Matrix4());
+  }
 }
 
 function poseFor(node: Node, poses?: ReadonlyMap<string, AnimationPose>): AnimationPose {
@@ -104,8 +108,8 @@ function getPlan(doc: SceneDocument): Plan {
   if (!plan) { plan = buildPlan(doc, doc.constraints ?? []); planCache.set(doc, plan); }
   return plan;
 }
-export function constraintWorldMatrices(doc: SceneDocument, poses?: ReadonlyMap<string, AnimationPose>): Map<string, Matrix4> {
-  const plan = getPlan(doc), world = new Map<string, Matrix4>();
+function worldMatricesForPlan(plan: Plan, poses?: ReadonlyMap<string, AnimationPose>): Map<string, Matrix4> {
+  const world = new Map<string, Matrix4>();
   for (const id of plan.order) {
     const node = plan.nodes.get(id)!, matrix = localMatrix(poseFor(node, poses));
     if (node.parentId) matrix.premultiply(world.get(node.parentId)!);
@@ -113,12 +117,38 @@ export function constraintWorldMatrices(doc: SceneDocument, poses?: ReadonlyMap<
   }
   return world;
 }
+export function constraintWorldMatrices(doc: SceneDocument, poses?: ReadonlyMap<string, AnimationPose>): Map<string, Matrix4> {
+  return worldMatricesForPlan(getPlan(doc), poses);
+}
+
+const AFFINE_TOLERANCE = 1e-6;
+function basis(matrix: Matrix4) {
+  const x = new Vector3().setFromMatrixColumn(matrix, 0), y = new Vector3().setFromMatrixColumn(matrix, 1), z = new Vector3().setFromMatrixColumn(matrix, 2);
+  const lengths = [x.length(), y.length(), z.length()];
+  x.normalize(); y.normalize(); z.normalize();
+  return { lengths, orthogonal: Math.max(Math.abs(x.dot(y)), Math.abs(x.dot(z)), Math.abs(y.dot(z))) <= AFFINE_TOLERANCE };
+}
+function checkConstraintPose(constraint: Pick<Constraint, "type" | "name">, source: Matrix4, parent: Matrix4) {
+  const prefix = `Unsupported pose for ${constraint.name}: `;
+  const parentDeterminant = parent.determinant();
+  if (!source.elements.every(Number.isFinite) || !parent.elements.every(Number.isFinite) || !Number.isFinite(parentDeterminant) || parentDeterminant === 0) {
+    throw Error(`${prefix}the source or driven parent has a non-finite or singular transform. Restore finite, nonzero scales.`);
+  }
+  if (constraint.type === "point") return;
+  const parentBasis = basis(parent), sourceBasis = basis(source), largest = Math.max(...parentBasis.lengths), smallest = Math.min(...parentBasis.lengths);
+  if (!parentBasis.orthogonal || largest - smallest > largest * AFFINE_TOLERANCE) {
+    throw Error(`${prefix}${constraint.type} constraints require a uniformly scaled driven parent. Set its ancestor scales to equal X, Y and Z values, or use a point constraint.`);
+  }
+  if (!sourceBasis.orthogonal || sourceBasis.lengths.some(length => !Number.isFinite(length) || length === 0)) {
+    throw Error(`${prefix}the source contains shear. Use uniform ancestor scales or remove the rotated nonuniform scaling.`);
+  }
+}
 
 /** Final pose stage after time animation, SDK and IK. Constraints override their
  * output groups; SDK/IK are not re-evaluated from these results (no feedback). */
 export function evaluateConstraints(doc: SceneDocument, poses: Map<string, AnimationPose>): void {
   if (!doc.constraints?.some(constraint => constraint.enabled)) return;
-  const plan = getPlan(doc), world = new Map<string, Matrix4>();
+  const plan = getPlan(doc), world = new Map<string, Matrix4>(), updates = new Map<string, AnimationPose>();
   for (const id of plan.order) {
     const node = plan.nodes.get(id)!, parent = node.parentId ? world.get(node.parentId)! : new Matrix4();
     let pose = poseFor(node, poses);
@@ -126,7 +156,9 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
     if (constraints.length) {
       const parentInverse = parent.clone().invert(), parentComponents = decompose(parent);
       for (const constraint of constraints) {
-        const source = world.get(constraint.sourceId)!, sourceComponents = decompose(source), offset = constraint.offset;
+        const source = world.get(constraint.sourceId)!;
+        checkConstraintPose(constraint, source, parent);
+        const sourceComponents = decompose(source), offset = constraint.offset;
         pose = { ...pose, position: [...pose.position], rotation: [...pose.rotation], scale: [...pose.scale] };
         if (constraint.type === "point" || constraint.type === "parent") {
           const desired = constraint.type === "parent" ? new Vector3(...offset.position).applyMatrix4(source)
@@ -144,10 +176,12 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
           pose.scale = desired.toArray().map(value => Math.max(0.001, value)) as Vec3;
         }
       }
-      poses.set(id, pose);
+      updates.set(id, pose);
     }
     world.set(id, localMatrix(pose).premultiply(parent));
   }
+  // Failed evaluation must not expose a half-constrained scene to the host.
+  for (const [id, pose] of updates) poses.set(id, pose);
 }
 
 function saveConstraints(store: SceneStore, constraints: Constraint[], editLabel: string) {
@@ -159,7 +193,9 @@ function saveConstraints(store: SceneStore, constraints: Constraint[], editLabel
 export function createConstraint(store: SceneStore, type: ConstraintType, sourceId: string, targetId: string, maintainOffset = true, poses?: ReadonlyMap<string, AnimationPose>): string {
   const doc = store.getState().document, matrices = constraintWorldMatrices(doc, poses);
   if (!matrices.has(sourceId) || !matrices.has(targetId)) throw Error("Choose a source and driven object or joint.");
-  const source = matrices.get(sourceId)!, sourceComponents = decompose(source), targetComponents = decompose(matrices.get(targetId)!);
+  const source = matrices.get(sourceId)!, targetParentId = nodesFor(doc).get(targetId)!.parentId;
+  checkConstraintPose({ type, name: `${type} constraint` }, source, targetParentId ? matrices.get(targetParentId)! : new Matrix4());
+  const sourceComponents = decompose(source), targetComponents = decompose(matrices.get(targetId)!);
   const offset: Constraint["offset"] = { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] };
   if (maintainOffset) {
     if (type === "point") offset.position = targetComponents.position.clone().sub(sourceComponents.position).toArray() as Vec3;

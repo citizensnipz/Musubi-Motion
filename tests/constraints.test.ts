@@ -116,6 +116,69 @@ describe("constraint evaluation", () => {
 });
 
 describe("constraint integrity and history", () => {
+  it("rejects nonuniform driven parents for orient, parent and scale creation", () => {
+    for (const type of ["orient", "parent", "scale"] as const) {
+      const doc = fixture(); doc.nodes.target.parentId = "parent";
+      const poses = evaluateSceneAnimation(doc, 0); poses.get("parent")!.scale = [2, 1, 1];
+      const store = createSceneStore(doc);
+      expect(() => createConstraint(store, type, "source", "target", false, poses)).toThrow(/uniformly scaled driven parent/);
+      expect(store.getState().document).toBe(doc);
+      poses.get("parent")!.scale = [2, 2, 2];
+      expect(() => createConstraint(store, type, "source", "target", false, poses)).not.toThrow();
+    }
+  });
+  it("rejects sheared source transforms while allowing ordinary nonuniform source scale", () => {
+    const doc = fixture(); doc.nodes.source.parentId = "parent";
+    const poses = evaluateSceneAnimation(doc, 0); poses.get("parent")!.scale = [2, 1, 1]; poses.get("source")!.rotation = [0, 0, 45];
+    const store = createSceneStore(doc);
+    expect(() => createConstraint(store, "orient", "source", "target", false, poses)).toThrow(/source contains shear/);
+    poses.get("source")!.rotation = [0, 0, 0];
+    expect(() => createConstraint(store, "orient", "source", "target", false, poses)).not.toThrow();
+    poses.get("source")!.rotation = [0, 0, 45];
+    expect(() => evaluateConstraints(store.getState().document, poses)).toThrow(/source contains shear/);
+  });
+  it("revalidates authored affine compatibility and allows disabling an unsupported constraint", () => {
+    const doc = fixture(); doc.nodes.target.parentId = "parent";
+    const store = createSceneStore(doc); const id = createConstraint(store, "orient", "source", "target", false);
+    const unsupported = structuredClone(store.getState().document);
+    if (unsupported.nodes.parent.type === "transform") unsupported.nodes.parent.scale = [2, 1, 1];
+    expect(() => validateConstraints(unsupported.constraints, unsupported)).toThrow(/uniformly scaled driven parent/);
+    const repair = createSceneStore(unsupported);
+    expect(() => updateConstraint(repair, id, { enabled: false })).not.toThrow();
+    expect(() => validateConstraints(repair.getState().document.constraints, repair.getState().document)).not.toThrow();
+  });
+  it("rejects animated unsupported parent scales without partially updating any poses", () => {
+    const doc = fixture(); doc.nodes.target.parentId = "parent";
+    const store = createSceneStore(doc);
+    createConstraint(store, "point", "source", "other", false);
+    createConstraint(store, "orient", "source", "target", false);
+    const scene = store.getState().document, poses = evaluateSceneAnimation(scene, 0);
+    poses.get("source")!.position = [5, 0, 0]; poses.get("parent")!.scale = [2, 1, 1];
+    const original = structuredClone(poses);
+    expect(() => evaluateConstraints(scene, poses)).toThrow(/Unsupported pose.*uniformly scaled/);
+    expect(poses).toEqual(original);
+    poses.get("parent")!.scale = [2, 2, 2];
+    expect(() => evaluateConstraints(scene, poses)).not.toThrow();
+    expect(poses.get("other")!.position).toEqual([5, 0, 0]);
+  });
+  it("keeps point constraints valid under sheared invertible parents and sources", () => {
+    const doc = fixture(); doc.nodes.source.parentId = "other"; doc.nodes.parent.parentId = "other"; doc.nodes.target.parentId = "parent";
+    const poses = evaluateSceneAnimation(doc, 0);
+    poses.get("other")!.scale = [2, 1, 1]; poses.get("parent")!.rotation = [0, 0, 45]; poses.get("source")!.rotation = [0, 0, 45]; poses.get("source")!.position = [2, 3, 0];
+    const store = createSceneStore(doc); createConstraint(store, "point", "source", "target", false, poses);
+    evaluateConstraints(store.getState().document, poses);
+    expect(position(world(store.getState().document, poses)).distanceTo(position(world(store.getState().document, poses, "source")))).toBeLessThan(1e-8);
+    const singular = evaluateSceneAnimation(store.getState().document, 0); singular.get("parent")!.scale = [0, 1, 1];
+    expect(() => evaluateConstraints(store.getState().document, singular)).toThrow(/singular transform/);
+  });
+  it("uses relative scale tolerance instead of assuming unit-sized parents", () => {
+    for (const magnitude of [0.00001, 100000]) {
+      const doc = fixture(); doc.nodes.target.parentId = "parent";
+      const poses = evaluateSceneAnimation(doc, 0); poses.get("parent")!.scale = [magnitude, magnitude * (1 + 1e-8), magnitude];
+      const store = createSceneStore(doc);
+      expect(() => createConstraint(store, "orient", "source", "target", false, poses)).not.toThrow();
+    }
+  });
   it("rejects self, direct, and hierarchy-mediated cycles atomically", () => {
     const store = createSceneStore(fixture());
     expect(() => createConstraint(store, "point", "source", "source", false)).toThrow();
