@@ -1,4 +1,4 @@
-import { Bone, BufferGeometry, Euler, MathUtils, Matrix4, MeshBasicMaterial, Quaternion, Skeleton, SkinnedMesh, Vector3 } from "three";
+import { Bone, BufferGeometry, Matrix4, MeshBasicMaterial, Quaternion, Skeleton, SkinnedMesh, Vector3 } from "three";
 import { CCDIKSolver, type IK } from "three/addons/animation/CCDIKSolver.js";
 import { baseChannels, evaluateIKBlend, evaluateSceneAnimation, setIKBlendKey, setKeys, validateAnimation, type AnimationPose } from "./animation.ts";
 import { unwrapEuler } from "./animation-edit.ts";
@@ -9,6 +9,7 @@ import type { SceneDocument, Vec3 } from "./scene-document.ts";
 import { createSceneStore, type SceneStore } from "./scene-store.ts";
 import type { Joint } from "./skeleton.ts";
 import { solveTwoBoneCorrections } from "./two-bone-ik.ts";
+import { jointLocalQuaternion, jointRotationFromQuaternion } from "./joint-transform.ts";
 
 export type IKControlLink = { objectId: string; offset: Vec3 };
 export type IKHandle = {
@@ -121,7 +122,7 @@ function resetRig(doc: SceneDocument, poses?: ReadonlyMap<string, AnimationPose>
     const pose = poses?.get(joint.id), bone = rig.bones.get(joint.id)!;
     bone.position.fromArray(pose?.position ?? joint.position);
     const rotation = pose?.rotation ?? joint.rotation ?? [0, 0, 0];
-    bone.rotation.set(...rotation.map(MathUtils.degToRad) as Vec3, "XYZ");
+    bone.quaternion.copy(jointLocalQuaternion(joint, rotation));
     bone.scale.set(1, 1, 1);
   }
   rig.mesh.updateMatrixWorld(true);
@@ -219,7 +220,7 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
     for (const id of links) {
       const preferred = preferences.get(id);
       if (!preferred) continue;
-      rig.bones.get(id)!.rotation.set(...preferred.map(MathUtils.degToRad) as Vec3, "XYZ");
+      rig.bones.get(id)!.quaternion.copy(jointLocalQuaternion(doc.joints!.find(joint => joint.id === id)!, preferred));
       seeded = true;
     }
     if (seeded) rig.mesh.updateMatrixWorld(true);
@@ -272,9 +273,9 @@ export function evaluateIK(doc: SceneDocument, poses: Map<string, AnimationPose>
       const bone = rig.bones.get(id)!, original = originals.get(id)!;
       if (!bone.quaternion.toArray().every(Number.isFinite)) bone.quaternion.copy(original);
       if (blend < 1) bone.quaternion.copy(original.clone().slerp(bone.quaternion, blend));
-      const rotation = new Euler().setFromQuaternion(bone.quaternion, "XYZ");
       const pose = poses.get(id) ?? baseChannels(doc, id);
-      poses.set(id, { ...pose, rotation: [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3 });
+      const joint = doc.joints!.find(joint => joint.id === id)!;
+      poses.set(id, { ...pose, rotation: jointRotationFromQuaternion(joint, bone.quaternion) });
     }
     rig.mesh.updateMatrixWorld(true);
   }

@@ -57,6 +57,8 @@ import { ikInputConstraintTargets } from "./ik-control-plan.ts";
 import { createIKPanel } from "./ik-panel.ts";
 import { createIKBakePanel } from "./ik-bake-panel.ts";
 import { createJointSettingsPanel } from "./joint-settings-panel.ts";
+import { createRotationPanel } from "./rotation-panel.ts";
+import { jointRotationFromQuaternion } from "./joint-transform.ts";
 import { validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
@@ -249,6 +251,7 @@ async function start() {
   const poseOverrides = new Map<string, AnimationPose>();
   const poseDrafts = new PoseDrafts();
   let evaluated = new Map<string, AnimationPose>();
+  let drivenPoses = new Map<string, AnimationPose>();
   let fkPoses = new Map<string, AnimationPose>();
   let solvedPoses = new Map<string, AnimationPose>();
   let timelinePanel: ReturnType<typeof mountTimeline> | undefined;
@@ -257,6 +260,7 @@ async function start() {
   let ikPanel: ReturnType<typeof createIKPanel> | undefined;
   let ikBakePanel: ReturnType<typeof createIKBakePanel> | undefined;
   let jointSettingsPanel: ReturnType<typeof createJointSettingsPanel> | undefined;
+  let rotationPanel: ReturnType<typeof createRotationPanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
   let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
@@ -712,6 +716,7 @@ async function start() {
     animationEditors?.refresh();
     controllerPanel?.refresh();
     jointSettingsPanel?.refresh();
+    rotationPanel?.refresh();
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
@@ -802,6 +807,7 @@ async function start() {
     const history = store.temporal.getState();
     ikBakePanel?.refresh();
     jointSettingsPanel?.refresh();
+    rotationPanel?.refresh();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
     redoButton.disabled =
@@ -835,8 +841,10 @@ async function start() {
     available: () => !loading && !dragId,
     onModeChange() { setPlaying(false); clearPoseDraft(); time = timelinePanel?.turntable ? 0 : animationSettings().start / animationSettings().fps; updateTime(); },
   });
-  animationEditors = mountAnimationEditors(store, { getFrame, setFrame, getSelection: animationSelection, onSelectTarget: selectAnimationTarget, available: () => !loading && !dragId && !playing });
-  drivenPanel = createDrivenKeyPanel(store, { getFrame, getSelection: allSelection, getPoses: () => evaluated, available: () => !loading && !dragId && !playing });
+  animationEditors = mountAnimationEditors(store, { getFrame, setFrame, getSelection: animationSelection, getDrivenPoses: () => drivenPoses, onSelectTarget: selectAnimationTarget, available: () => !loading && !dragId && !playing });
+  drivenPanel = createDrivenKeyPanel(store, { getFrame, getSelection: allSelection, getPoses: () => drivenPoses,
+    onEditCurve: id => { animationEditors?.focusDrivenRelationship(id); element("view-graph").click(); },
+    available: () => !loading && !dragId && !playing });
   ikPanel = createIKPanel(store, { getFrame, setFrame, previewBlend(id, value) {
     blendPreview = value === undefined ? undefined : { id, value }; applyAnimationPose(); updateBindings();
   }, canKey: () => !timelinePanel?.turntable, getPoses: () => evaluated, getFKPoses: () => fkPoses, getSolvedPoses: () => solvedPoses, getSelection: allSelection, available: () => !loading && !dragId && !playing });
@@ -874,11 +882,18 @@ async function start() {
   jointSettingsPanel = createJointSettingsPanel(store, {
     available: () => !loading && !dragId && !playing,
     getSelection: allSelection, getFKPoses: () => fkPoses, getFrame,
+    onFreeze: () => { clearPoseDraft(); updateTime(); },
     canKey: () => !timelinePanel?.turntable,
     onSelect: selectAnimationTarget,
     onStatus: message => { notice.textContent = message; },
   });
   workspace.registerPanel("joint-settings", "Joint Settings", jointSettingsPanel.element);
+  rotationPanel = createRotationPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection,
+    onStatus: message => { notice.textContent = message; },
+  });
+  workspace.registerPanel("rotation-curves", "Rotation Curves", rotationPanel.element);
   ikPanel.element.addEventListener("ik-range-bake", event => {
     ikBakePanel?.selectHandle((event as CustomEvent<string>).detail);
     element("view-ik-bake").click();
@@ -1120,7 +1135,14 @@ async function start() {
       return;
     }
     if (selectedIKId) { applyAnimationPose(); updateBindings(); return; }
-    if (skeleton.selectedId) { if(dragId&&currentMode==="rotate")skeleton.previewRotation(); skeleton.preview(); updateBindings(); updatePanel(readChannels(skeleton.selectedBone!)); return; }
+    if (skeleton.selectedId) {
+      if(dragId&&currentMode==="rotate")skeleton.previewRotation();
+      skeleton.preview(); updateBindings();
+      const bone = skeleton.selectedBone!, channels = readChannels(bone);
+      const joint = store.getState().document.joints?.find(joint => joint.id === skeleton.selectedId);
+      if (joint) channels.rotation = jointRotationFromQuaternion(joint, bone.quaternion, currentPose(joint.id).rotation);
+      updatePanel(channels); return;
+    }
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
     if (!object) return;
@@ -1568,6 +1590,7 @@ async function start() {
     ikBakePanel?.refresh();
     skinWeightsPanel?.refresh();
     jointSettingsPanel?.refresh();
+    rotationPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
     updateWeightPreview();
@@ -1589,6 +1612,7 @@ async function start() {
     for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, pose);
     if (dragControlPose) evaluated.set(dragControlPose.id, dragControlPose.pose);
     evaluateDrivenKeys(doc, evaluated);
+    drivenPoses = new Map(evaluated);
     fkPoses = new Map(evaluated);
     solvedPoses = new Map(evaluated);
     try {
@@ -1628,6 +1652,7 @@ async function start() {
     constraintsPanel?.refresh();
     particlePanel?.refresh();
     jointSettingsPanel?.refresh();
+    rotationPanel?.refresh();
   }
   function updateParticles() {
     if (loading) return;

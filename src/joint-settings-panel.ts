@@ -1,5 +1,6 @@
 import type { AnimationPose } from "./animation.ts";
 import { preferredJointIds, setJointPreferredAngle, setPreferredAngles, clearPreferredAngles, keyPreferredAngles } from "./joint-preferred.ts";
+import { setJointOrientation, freezeJointRotations, setJointLocalAxes } from "./joint-orientation.ts";
 import type { Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
@@ -11,6 +12,7 @@ type Options = {
   canKey: () => boolean;
   onSelect?: (id: string) => void;
   onStatus?: (message: string) => void;
+  onFreeze?: () => void;
 };
 
 /** Preferred-angle metadata is separate from authored FK and its animation. */
@@ -34,7 +36,7 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
   function button(text: string, action: () => void) {
     const node = document.createElement("button"); node.type = "button"; node.textContent = text; node.onclick = action; return node;
   }
-  const intro = document.createElement("p"); intro.textContent = "Choose the local joint angles that IK should use as its starting pose.";
+  const intro = document.createElement("p"); intro.textContent = "Edit the static joint frame and the preferred FK angles used to initialize IK.";
   const joints = document.createElement("select"); joints.setAttribute("aria-label", "Joint settings joint");
   const useSelected = button("Use selected joint", () => {
     const valid = new Set((store.getState().document.joints ?? []).map(joint => joint.id));
@@ -54,6 +56,32 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
   const currentFK = document.createElement("output"); currentFK.setAttribute("aria-label", "Prepared FK rotations");
   const manualHelp = document.createElement("p"); manualHelp.textContent = "XYZ edits apply to this joint only. Unset fields show zero; IK then starts from the current FK pose.";
   angles.append(angleLegend, stored, axisRow, currentFK, manualHelp);
+  const orientation = document.createElement("fieldset"), orientationLegend = document.createElement("legend");
+  orientationLegend.textContent = "Joint orientation - local degrees";
+  const orientationFields = ["X", "Y", "Z"].map(axis => {
+    const input = document.createElement("input"); input.type = "number"; input.step = "any";
+    input.setAttribute("aria-label", `Joint orientation ${axis}`); return input;
+  });
+  const orientationRow = document.createElement("div"); orientationRow.className = "joint-angle-fields";
+  orientationFields.forEach((input, index) => orientationRow.append(label("XYZ"[index], input)));
+  const orientationHelp = document.createElement("p");
+  orientationHelp.textContent = "Orientation is a static frame applied before XYZ rotation channels. Editing it changes the joint pose while retaining rotation keys. Local rotation = orientation multiplied by channel rotation.";
+  const freezeHelp = document.createElement("p");
+  freezeHelp.textContent = "Freeze absorbs prepared FK rotation into orientation and zeroes rotation channels, preserving that FK pose. It applies to the descendant scope. Rotation curves, SDK dependencies, active rotation constraints and IK must be removed, baked or disabled first.";
+  const freeze = button("Freeze FK rotations into orientation", () => run(() => {
+    const ids = scopeIds(), before = store.getState().document;
+    freezeJointRotations(store, ids, options.getFKPoses());
+    if (store.getState().document !== before) options.onFreeze?.();
+    return `Frozen FK rotations for ${ids.length} joint${ids.length === 1 ? "" : "s"}.`;
+  }));
+  const localAxes = document.createElement("input"); localAxes.type = "checkbox";
+  localAxes.setAttribute("aria-label", "Show joint local axes");
+  const localAxesLabel = label("Show local axes", localAxes); localAxesLabel.className = "joint-settings-check";
+  localAxes.onchange = () => run(() => {
+    setJointLocalAxes(store, selectedJointId, localAxes.checked);
+    return localAxes.checked ? "Joint local axes shown." : "Joint local axes hidden.";
+  });
+  orientation.append(orientationLegend, orientationRow, orientationHelp, localAxesLabel, freeze, freezeHelp);
   const descendants = document.createElement("input"); descendants.type = "checkbox"; descendants.checked = true;
   const descendantsLabel = label("Include descendants", descendants); descendantsLabel.className = "joint-settings-check";
   const scope = document.createElement("p"), keyHelp = document.createElement("p");
@@ -73,7 +101,7 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
   const actions = document.createElement("div"); actions.className = "joint-settings-actions"; actions.append(capture, clear, key);
   const captureHelp = document.createElement("p"); captureHelp.textContent = "Capture uses FK before IK. The descendant setting applies to all three actions. Keying leaves IK enabled; set blend to 0 to inspect keyed FK.";
   const status = document.createElement("p"); status.className = "joint-settings-status"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-  element.append(style, intro, label("Joint", joints), useSelected, empty, angles, descendantsLabel, scope, actions, keyHelp, captureHelp, status);
+  element.append(style, intro, label("Joint", joints), useSelected, empty, angles, orientation, descendantsLabel, scope, actions, keyHelp, captureHelp, status);
 
   let selectedJointId = "", displayedJointId = "", jointSignature = "", selectionSignature = "", disposed = false, editEpoch = 0;
   let scopeJoints: unknown, scopeRoot = "", scopeDescendants = true, cachedScope: string[] = [], scopeFailure: Error | undefined;
@@ -118,14 +146,16 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
       editEpoch++;
       // A draft belongs to its original joint. End focus before replacing its
       // displayed values so subsequent edits begin against the new joint.
-      fields.find(input => input === document.activeElement)?.blur();
+      [...fields, ...orientationFields].find(input => input === document.activeElement)?.blur();
     }
-    empty.hidden = !!selected; angles.hidden = descendantsLabel.hidden = scope.hidden = actions.hidden = keyHelp.hidden = captureHelp.hidden = !selected;
+    empty.hidden = !!selected; orientation.hidden = angles.hidden = descendantsLabel.hidden = scope.hidden = actions.hidden = keyHelp.hidden = captureHelp.hidden = !selected;
     joints.disabled = !available || !records.length; useSelected.disabled = !available || !selection.some(id => byId.has(id));
-    angles.disabled = !available || !selected; descendants.disabled = !available || !selected;
+    orientation.disabled = angles.disabled = !available || !selected; descendants.disabled = !available || !selected;
+    localAxes.checked = selected?.showLocalAxes ?? false;
     const preferred = selected?.preferredAngle;
     stored.textContent = preferred ? "Preferred angles stored" : "Preferred angles unset";
     fields.forEach((input, index) => { if (changedJoint || document.activeElement !== input) input.value = String(preferred?.[index] ?? 0); });
+    orientationFields.forEach((input, index) => { if (changedJoint || document.activeElement !== input) input.value = String(selected?.orientation?.[index] ?? 0); });
     let ids: string[] = [], scopeError = "", fkError = "", poses: ReadonlyMap<string, AnimationPose> | undefined;
     if (selected) {
       try { ids = scopeIds(); } catch (error) { scopeError = error instanceof Error ? error.message : String(error); }
@@ -137,6 +167,7 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
     scope.textContent = scopeError || `${ids.length} joint${ids.length === 1 ? "" : "s"} in scope · ${saved} of ${ids.length} have preferred angles`;
     scope.dataset.error = String(!!scopeError);
     const completeFK = ids.length > 0 && ids.every(id => poses?.has(id));
+    freeze.disabled = !available || !completeFK || !!scopeError;
     capture.disabled = !available || !completeFK || !!scopeError;
     capture.title = fkError || (!completeFK ? "Every joint in scope needs a prepared FK pose before capture." : "Capture local rotations before IK for every joint in scope.");
     clear.disabled = !available || !saved || !!scopeError;
@@ -145,18 +176,19 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
       : saved !== ids.length ? "Every joint in scope needs a stored preference before keying. Capture the scope first, or turn off Include descendants."
       : "Key writes XYZ rotations at the current frame.";
   }
-  fields.forEach(input => {
+  function bindAngles(inputs: HTMLInputElement[], apply: (id: string, values: Vec3) => void, name: string) {
+  inputs.forEach(input => {
     let dirty = false, original = "", editingJointId = "", focusEpoch = 0;
     input.addEventListener("focus", () => { dirty = false; original = input.value; editingJointId = selectedJointId; focusEpoch = editEpoch; });
     input.addEventListener("input", () => { dirty = true; });
     input.addEventListener("blur", () => {
-      const shouldCommit = dirty && focusEpoch === editEpoch && selectedJointId === editingJointId && options.available(); dirty = false;
+      const shouldCommit = dirty && input.value !== original && focusEpoch === editEpoch && selectedJointId === editingJointId && options.available(); dirty = false;
       if (shouldCommit) run(() => {
-        const values = fields.map(field => {
-          if (!field.value.trim() || !Number.isFinite(field.valueAsNumber)) throw Error("Preferred angles must be finite local XYZ degrees.");
+        const values = inputs.map(field => {
+          if (!field.value.trim() || !Number.isFinite(field.valueAsNumber)) throw Error(`${name} must be finite local XYZ degrees.`);
           return field.valueAsNumber;
         }) as Vec3;
-        setJointPreferredAngle(store, editingJointId, values); return "Preferred angles stored for the selected joint.";
+        apply(editingJointId, values); return `${name} stored for the selected joint.`;
       });
       else refresh();
     });
@@ -165,6 +197,9 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
       else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dirty = false; input.value = original; input.blur(); refresh(); }
     });
   });
+  }
+  bindAngles(fields, (id, values) => setJointPreferredAngle(store, id, values), "Preferred angles");
+  bindAngles(orientationFields, (id, values) => setJointOrientation(store, id, values), "Joint orientation");
   joints.onchange = () => { selectedJointId = joints.value; clearStatus(); options.onSelect?.(selectedJointId); refresh(); };
   descendants.onchange = () => { clearStatus(); refresh(); };
   function resetScene() {

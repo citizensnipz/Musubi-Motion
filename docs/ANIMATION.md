@@ -62,8 +62,8 @@ storage, outside the `.msb` project.
 
 Open **Graph Editor**, **Dope Sheet**, and **Set Driven Key** from the **Animation**
 menu. Outliner and Properties remain the selection and local-channel controls.
-Use **View** to reopen the standard panels. Modeling and FX presets are not yet
-provided because their toolsets are not implemented.
+Use **View** to reopen the standard panels. Modeling and FX presets expose their
+dedicated mesh and particle tools.
 
 ## Keyframe an object or joint
 
@@ -174,8 +174,16 @@ evaluating the cubic, so the displayed curve and scene use the same evaluator.
 Rotation is XYZ Euler degrees. A 0→720 curve performs two turns, rather than
 taking a quaternion shortest path. Gizmo commits choose the nearest equivalent
 XYZ representation to the displayed pose; typed values retain intentional full
-turns. There is no full Euler filter, alternate rotation-order selection, or
-quaternion-curve editing yet. Interpolation holds endpoint values outside keys;
+turns. **Animation → Rotation Curves** offers explicit cleanup for selected or
+all animated objects/joints. **XYZ Euler filter** chooses the nearest equivalent
+XYZ branch and requires matching key times on all three axes. **Channel unwrap**
+supports independently keyed axes by adding multiples of 360 degrees. The first
+key stays unchanged. Both can remove intentional spins and change motion between
+keys; use Undo to restore the original curves. SDK curves are excluded. The panel
+also applies explicit Bézier, Linear, or Stepped interpolation to scoped rotation
+curves. Automatic tangents recompute; fixed tangents follow the chosen Euler branch.
+Alternate rotation orders and quaternion-curve editing are not implemented.
+Interpolation holds endpoint values outside keys;
 pre/post-infinity cycle modes are not implemented.
 
 Visibility channels use stepped playback and are authored through the Properties
@@ -205,8 +213,8 @@ layer compositing, range ripple editing, or a nonlinear animation editor.
 5. Enter another pair and set another key. Change the driver in Properties, or
    animate it with ordinary time keys, to see the response.
 
-**Load current values** samples the current displayed pose, including unkeyed
-editing previews. Values typed into this panel are draft mapping values until
+**Load current values** samples channels after SDK and before IK/constraints,
+including unkeyed FK editing previews. Values typed into this panel are draft mapping values until
 **Set driven key** is pressed; they do not directly move the objects.
 
 The **Relationships** list exposes each mapping. Its response curve plots driver
@@ -221,12 +229,27 @@ cycles. Chained mappings evaluate in dependency order and hold endpoint values
 outside the driver range. Visibility defaults to stepped response; interpolated
 scale remains positive. These records and edits support project saving and undo.
 
-SDK uses the same curve representation/evaluator as time animation, but its
-curves currently have their own table and preview. They are not selectable in
-the time Graph Editor. IK blend is time-keyed only: SDK accepts transform/joint
+Choose **Edit curve in Graph Editor**, or set the Graph Editor's **Graph source**
+to **Driven keys**, to edit response curves with the shared key and tangent tools.
+The horizontal axis is **Driver value**, with fractional coordinates and no frame
+snapping. The **Driver cursor** chooses where Insert/Paste operates; it never
+changes scene time or the actual driver. **Use scene driver** follows the active
+relationship's pre-IK driver again. Curve selection, clipboard and view are
+independent from time animation; the Dope Sheet continues to edit time keys only.
+The selected-target filter includes either side of a relationship. SDK visibility
+can use continuous interpolation, although rendered visibility switches at 0.5.
+
+SDK uses the same curve representation/evaluator as time animation. IK blend is
+time-keyed only: SDK accepts transform/joint
 pose properties, not handle properties, as either driver or output.
 Multiple-driver blending and driving from post-IK solved
 values are not implemented; SDK evaluates before IK and constraints.
+
+Open [examples/driven-curves-study.msb](../examples/driven-curves-study.msb) for
+weighted lift, rotation, scale and continuous visibility mappings driven by a
+time-animated controller. Regenerate with
+`node scripts/create-driven-curves-example.mjs`. The generator checks 1,001 curve
+samples and 385 scene-time samples before and after native archive readback.
 
 ## FK, IK, binding, and elasticity
 
@@ -387,11 +410,27 @@ of another chain, preventing order-dependent results.
 
 Solver choice and literal target/pole points remain static saved settings. Linked
 target and pole transforms and the handle's blend use animation curves. Both solvers share
-the current-frame **Match FK to IK and key** workflow above. Joint orientation/axis
-editing, angular limits, stretch, and SDK-driven blend
+the current-frame **Match FK to IK and key** workflow above. Angular limits,
+stretch, and SDK-driven blend
 remain unavailable. Matching a target position alone does not reproduce every
 possible elbow/knee bend. There is no animation layer
 for blending competing rigs. Use the FK and animation controls for authored poses.
+
+## Joint orientation and local axes
+
+**Rigging → Joint Settings** exposes static **Joint orientation** XYZ degrees,
+separate from keyed rotation channels. Local rotation composes orientation first,
+then channel rotation. FK, CCD, analytic IK, constraints and reparenting share the
+same conversion helpers. Legacy files default to zero orientation.
+
+**Show local axes** displays the evaluated joint frame and saves per joint.
+**Freeze FK rotations into orientation** absorbs the prepared FK rotations and
+zeroes channels while preserving the current local and descendant world poses.
+It uses the descendant scope and rebases stored preferred angles. Rotation time
+curves, rotation SDK dependencies, active rotation constraints and affecting IK
+must first be removed, baked or disabled; the command rejects incompatible cases
+atomically. Existing captured skin rest matrices are retained. Manual orientation
+edits intentionally change the pose. Automatic orient-to-child is not yet provided.
 
 ## Preferred joint angles
 
@@ -757,14 +796,14 @@ small-scene playback results.
 
 ## Remaining work, in priority order
 
-1. Local joint axes/orientation, rotation limits, stretch, SDK-driven blend,
+1. Automatic joint orientation, rotation limits, stretch, SDK-driven blend,
    and multi-chain/adaptive IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
 3. Influence management, weight smoothing/locks and mirrored transfer,
    joint/pose mirroring, and conventional deformers.
 4. Animation layers, camera/custom-property animation, Euler filtering, richer
-   clipboard/retargeting, and SDK Graph Editor integration.
+   clipboard/retargeting.
 5. Additional polygon tools, materials/UVs, mesh skinning, and mesh import/export;
    see the [modeling guide](MODELING.md) for the implemented subset.
 6. Particle collisions, trails, animated emitter properties, and cache export;

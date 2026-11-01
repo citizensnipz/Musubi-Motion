@@ -376,13 +376,25 @@ export function insertKey(store: SceneStore, trackId: string, time: number): str
   const animation = store.getState().document.animation ?? defaultAnimation();
   const track = animation.tracks.find(track => track.id === trackId);
   if (!track) throw Error("Select an existing animation curve.");
-  const existing = track.keys.find(key => key.time === time);
-  if (existing) return existing.id;
-  if (!track.keys.length) throw Error("Set the first key before inserting into a curve.");
-  const keys = [...track.keys], value = evaluateCurve(track.keys, time)!;
+  const { keys, id } = insertCurveKey(track.keys, time, { discrete: track.channel === "visibility" });
+  if (track.keys.some(key => key.id === id)) return id;
+  saveAnimation(store, { ...animation, tracks: animation.tracks.map(candidate => candidate.id === trackId ? { ...track, keys } : candidate) }, "Insert keyframe");
+  return id;
+}
+
+/** Split a curve without changing its evaluated shape. Discrete evaluation is
+ * opt-in: driven visibility curves use the same continuous math as other SDKs. */
+export function insertCurveKey(source: readonly CurveKey[], time: number, options: { discrete?: boolean } = {}): { keys: CurveKey[]; id: string } {
+  if (!finite(time, 1e6)) throw Error("Invalid curve coordinate.");
+  validateCurveKeys(source);
+  if (options.discrete !== undefined && typeof options.discrete !== "boolean") throw Error("Invalid discrete curve option.");
+  const existing = source.find(key => key.time === time);
+  if (existing) return { keys: [...source], id: existing.id };
+  if (!source.length) throw Error("Set the first key before inserting into a curve.");
+  const keys = [...source], value = evaluateCurve(source, time)!;
   const inserted: CurveKey = { ...newKey(time, value), tangentMode: "fixed", inSlope: 0, outSlope: 0 };
   const freeze = (index: number): CurveKey => ({ ...keys[index], tangentMode: "fixed",
-    inSlope: tangentSlope(track.keys, index, "in"), outSlope: tangentSlope(track.keys, index, "out") });
+    inSlope: tangentSlope(source, index, "in"), outSlope: tangentSlope(source, index, "out") });
   if (time < keys[0].time) {
     keys[0] = freeze(0); inserted.interpolation = "step"; keys.unshift(inserted);
   } else if (time > keys[keys.length - 1].time) {
@@ -393,11 +405,11 @@ export function insertKey(store: SceneStore, trackId: string, time: number): str
     const a = freeze(index), b = freeze(index + 1), duration = b.time - a.time;
     // Visibility is discrete in scene evaluation even for legacy curves whose
     // serialized interpolation says Bezier. Preserve its held state.
-    if (track.channel === "visibility") { a.interpolation = "step"; inserted.value = a.value; }
+    if (options.discrete) { a.interpolation = "step"; inserted.value = a.value; }
     inserted.interpolation = a.interpolation;
     if (a.interpolation === "linear") inserted.inSlope = inserted.outSlope = (b.value - a.value) / duration;
     if (a.interpolation === "bezier") {
-      const curve = bezierSegment(track.keys, index), fraction = (time - a.time) / duration;
+      const curve = bezierSegment(source, index), fraction = (time - a.time) / duration;
       const u = bezierParameter(curve, fraction);
       // De Casteljau splits the original control polygon using Three's vector
       // operations; the time parameter is the same one used by evaluation.
@@ -430,8 +442,8 @@ export function insertKey(store: SceneStore, trackId: string, time: number): str
     }
     keys.splice(index, 2, a, inserted, b);
   }
-  saveAnimation(store, { ...animation, tracks: animation.tracks.map(candidate => candidate.id === trackId ? { ...track, keys } : candidate) }, "Insert keyframe");
-  return inserted.id;
+  validateCurveKeys(keys);
+  return { keys, id: inserted.id };
 }
 
 export function deleteKeys(store: SceneStore, keyIds: Iterable<string>) {
@@ -457,23 +469,39 @@ export function scaleKeys(store: SceneStore, keyIds: Iterable<string>, factor: n
   let origin = pivot ?? Infinity;
   if (pivot === undefined) for (const track of animation.tracks) for (const key of track.keys) if (selected.has(key.id)) origin = Math.min(origin, key.time);
   if (!Number.isFinite(origin)) return;
-  const tracks = animation.tracks.map(track => ({ ...track, keys: track.keys.map((key, index) => {
+  const tracks = animation.tracks.map(track => ({ ...track, keys: scaleCurveKeys(track.keys, selected, factor, origin, true) }));
+  saveAnimation(store, { ...animation, tracks }, "Scale keyframes");
+}
+
+/** Scale curve coordinates; only adjoining selected endpoints share a duration
+ * change. Fixed handles preserve value offsets across those scaled segments. */
+export function scaleCurveKeys(keys: readonly CurveKey[], selected: ReadonlySet<string>, factor: number, pivot: number, snapToFrames: boolean): CurveKey[] {
+  if (!finite(factor) || factor <= 0 || !finite(pivot, 1e6)) throw Error("Keyframe scale must be positive and finite.");
+  if (typeof snapToFrames !== "boolean") throw Error("Invalid curve snapping option.");
+  validateCurveKeys(keys);
+  const scaledTime = (time: number) => {
+    const result = pivot + (time - pivot) * factor;
+    return snapToFrames ? Math.round(result) : result;
+  };
+  if (factor === 1 && !snapToFrames) return [...keys];
+  const result = keys.map((key, index) => {
     if (!selected.has(key.id)) return key;
-    const next = { ...key, time: Math.round(origin + (key.time - origin) * factor) };
+    const next = { ...key, time: scaledTime(key.time) };
     // Only segments with both endpoints selected undergo uniform scaling.
     // Preserve their handle value offsets using the actual snapped duration.
-    const previous = track.keys[index - 1], following = track.keys[index + 1];
+    const previous = keys[index - 1], following = keys[index + 1];
     if (key.tangentMode === "fixed" && previous && selected.has(previous.id) && key.inSlope !== undefined) {
-      const duration = next.time - Math.round(origin + (previous.time - origin) * factor);
+      const duration = next.time - scaledTime(previous.time);
       if (duration) next.inSlope = key.inSlope * (key.time - previous.time) / duration;
     }
     if (key.tangentMode === "fixed" && following && selected.has(following.id) && key.outSlope !== undefined) {
-      const duration = Math.round(origin + (following.time - origin) * factor) - next.time;
+      const duration = scaledTime(following.time) - next.time;
       if (duration) next.outSlope = key.outSlope * (following.time - key.time) / duration;
     }
-    return next;
-  }).sort((a, b) => a.time - b.time) }));
-  saveAnimation(store, { ...animation, tracks }, "Scale keyframes");
+    return Object.keys(next).every(name => next[name as keyof CurveKey] === key[name as keyof CurveKey]) ? key : next;
+  }).sort((a, b) => a.time - b.time);
+  validateCurveKeys(result);
+  return result;
 }
 export function setAnimationSettings(store: SceneStore, settings: Partial<Omit<AnimationData, "tracks">>) {
   saveAnimation(store, { ...(store.getState().document.animation ?? defaultAnimation()), ...settings }, "Animation settings");

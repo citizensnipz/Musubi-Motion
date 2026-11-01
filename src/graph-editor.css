@@ -1,3 +1,8 @@
+.animation-graph-wrapper { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--panel); color: var(--text); font-size: 11px; }
+.animation-graph-wrapper > .animation-editor { flex: 1; height: auto; }
+.animation-graph-wrapper > [hidden] { display: none; }
+.animation-graph-wrapper > .animation-toolbar select { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; font: inherit; }
+.animation-driver-controls output { color: var(--muted); }
 .animation-editor {
   display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
   background: var(--panel); color: var(--text); font-size: 11px;

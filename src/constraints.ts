@@ -1,8 +1,9 @@
-import { Euler, MathUtils, Matrix4, Quaternion, Vector3 } from "three";
+import { Matrix4, Quaternion, Vector3 } from "three";
 import type { AnimationPose } from "./animation.ts";
 import type { SceneDocument, TransformChannels, Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 import { validateIKControlDependencies } from "./ik-control-plan.ts";
+import { jointLocalQuaternion, jointRotationFromQuaternion } from "./joint-transform.ts";
 
 export type ConstraintType = "point" | "orient" | "scale" | "parent" | "aim";
 export type SignedAxis = "+X" | "-X" | "+Y" | "-Y" | "+Z" | "-Z";
@@ -19,7 +20,7 @@ export type Constraint = {
   worldUpAxis?: SignedAxis;
   offset: { position: Vec3; rotation: [number, number, number, number]; scale: Vec3 };
 };
-type Node = { id: string; parentId: string | null; position: Vec3; rotation?: Vec3; scale?: Vec3 };
+type Node = { id: string; parentId: string | null; position: Vec3; rotation?: Vec3; scale?: Vec3; orientation?: Vec3 };
 type Plan = { nodes: Map<string, Node>; order: string[]; byTarget: Map<string, Constraint[]> };
 const planCache = new WeakMap<SceneDocument, Plan>();
 const constraintTypes: ConstraintType[] = ["point", "orient", "aim", "scale", "parent"];
@@ -102,9 +103,9 @@ function poseFor(node: Node, poses?: ReadonlyMap<string, AnimationPose>): Animat
   const pose = poses?.get(node.id);
   return pose ?? { position: [...node.position], rotation: [...node.rotation ?? [0, 0, 0]], scale: [...node.scale ?? [1, 1, 1]], visibility: 1 };
 }
-function localMatrix(pose: AnimationPose): Matrix4 {
+function localMatrix(node: Node, pose: AnimationPose): Matrix4 {
   return new Matrix4().compose(new Vector3(...pose.position),
-    new Quaternion().setFromEuler(new Euler(...pose.rotation.map(MathUtils.degToRad) as Vec3, "XYZ")), new Vector3(...pose.scale));
+    jointLocalQuaternion(node, pose.rotation), new Vector3(...pose.scale));
 }
 function decompose(matrix: Matrix4) {
   const position = new Vector3(), rotation = new Quaternion(), scale = new Vector3();
@@ -119,7 +120,7 @@ function getPlan(doc: SceneDocument): Plan {
 function worldMatricesForPlan(plan: Plan, poses?: ReadonlyMap<string, AnimationPose>): Map<string, Matrix4> {
   const world = new Map<string, Matrix4>();
   for (const id of plan.order) {
-    const node = plan.nodes.get(id)!, matrix = localMatrix(poseFor(node, poses));
+    const node = plan.nodes.get(id)!, matrix = localMatrix(node, poseFor(node, poses));
     if (node.parentId) matrix.premultiply(world.get(node.parentId)!);
     world.set(id, matrix);
   }
@@ -209,8 +210,7 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
             ? aimRotation(constraint, sourceComponents.position, new Vector3(...pose.position).applyMatrix4(parent))
             : sourceComponents.rotation).multiply(new Quaternion(...offset.rotation));
           const local = parentComponents.rotation.clone().invert().multiply(desired).normalize();
-          const rotation = new Euler().setFromQuaternion(local, "XYZ");
-          pose.rotation = [rotation.x, rotation.y, rotation.z].map(MathUtils.radToDeg) as Vec3;
+          pose.rotation = jointRotationFromQuaternion(node, local);
         }
         if (constraint.type === "scale") {
           const desired = sourceComponents.scale.multiply(new Vector3(...offset.scale)).divide(parentComponents.scale);
@@ -219,7 +219,7 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
       }
       updates.set(id, pose);
     }
-    world.set(id, localMatrix(pose).premultiply(parent));
+    world.set(id, localMatrix(node, pose).premultiply(parent));
   }
   // Failed evaluation must not expose a half-constrained scene to the host.
   for (const [id, pose] of updates) poses.set(id, pose);

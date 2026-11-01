@@ -7,8 +7,9 @@ type Options = {
   getFrame: () => number;
   available: () => boolean;
   getSelection: () => string[];
-  /** Include unkeyed edit previews when hosted by the viewport. Returned poses are read-only here. */
+  /** Post-SDK poses before IK/constraints, including unkeyed FK inputs. Read-only here. */
   getPoses?: () => Map<string, EvaluatedPose>;
+  onEditCurve?: (relationshipId: string) => void;
 };
 
 /** Dedicated attribute-to-attribute authoring. Draft values never modify the scene until Key. */
@@ -146,7 +147,7 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
       driver.target.value = relation.driver.targetId; updateChannels(driver); driver.channel.value = relation.driver.channel;
       driven.target.value = relation.driven.targetId; updateChannels(driven); driven.channel.value = relation.driven.channel;
       sample(driver); sample(driven);
-    }), button("Remove relationship", () => report(() => removeDrivenRelationship(store, relation.id))));
+    }), button("Edit curve in Graph Editor", () => options.onEditCurve?.(relation.id)), button("Remove relationship", () => report(() => removeDrivenRelationship(store, relation.id))));
     curve.append(controls);
     const wrap = document.createElement("div"); wrap.className = "sdk-table-wrap";
     const table = document.createElement("table"); table.className = "sdk-keys";

@@ -2,12 +2,15 @@ import * as THREE from "three";
 import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type WaDropdownItem from "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import type { SceneStore } from "./scene-store.ts";
-export type Joint = { id: string; name: string; parentId: string | null; position: [number, number, number]; rotation?: [number, number, number]; preferredAngle?: [number, number, number] };
+import { jointLocalMatrix, jointLocalQuaternion, jointRotationFromQuaternion, validateJointAngle } from "./joint-transform.ts";
+export type Joint = { id: string; name: string; parentId: string | null; position: [number, number, number]; rotation?: [number, number, number]; orientation?: [number, number, number]; showLocalAxes?: boolean; preferredAngle?: [number, number, number] };
 export function validateJoints(joints: Joint[]) {
   if (!Array.isArray(joints) || joints.length > 1000) throw Error("Invalid joints");
   const ids = new Set(joints.map(j => j.id));
   if (ids.size !== joints.length) throw Error("Duplicate joint IDs");
   for (const j of joints) {
+    if (j.orientation !== undefined) validateJointAngle(j.orientation);
+    if (j.showLocalAxes !== undefined && typeof j.showLocalAxes !== "boolean") throw Error("Invalid joint local-axis visibility");
     if (j.rotation !== undefined && (!Array.isArray(j.rotation) || j.rotation.length !== 3 || ![0, 1, 2].every(index => Number.isFinite(j.rotation![index])))) throw Error("Invalid joint rotation");
     if (j.preferredAngle !== undefined && (!Array.isArray(j.preferredAngle) || j.preferredAngle.length !== 3 || ![0, 1, 2].every(index => Number.isFinite(j.preferredAngle![index])))) throw Error("Invalid joint preferred angle");
     if (typeof j.id !== "string" || typeof j.name !== "string" || !j.name.trim() || !Array.isArray(j.position) || j.position.length !== 3 || !j.position.every(Number.isFinite)) throw Error("Invalid joint");
@@ -24,15 +27,14 @@ export function reparentJoint(joints: Joint[], id: string, parentId: string | nu
   validateJoints(joints.map(j => j.id === id ? {...j, parentId} : j));
   const world = (key: string): THREE.Matrix4 => {
     const j = joints.find(n => n.id === key)!;
-    const r = (j.rotation ?? [0,0,0]).map(THREE.MathUtils.degToRad);
-    const local = new THREE.Matrix4().compose(new THREE.Vector3(...j.position), new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0],r[1],r[2])), new THREE.Vector3(1,1,1));
+    const local = jointLocalMatrix(j, j.position, j.rotation ?? [0,0,0]);
     return j.parentId ? world(j.parentId).multiply(local) : local;
   };
   const local = (parentId ? world(parentId).invert() : new THREE.Matrix4()).multiply(world(id));
   const p = new THREE.Vector3(), q = new THREE.Quaternion(); local.decompose(p, q, new THREE.Vector3());
-  const e = new THREE.Euler().setFromQuaternion(q);
   const position = p.toArray() as Joint["position"];
-  const rotation = [e.x,e.y,e.z].map(THREE.MathUtils.radToDeg) as Joint["position"];
+  const joint = joints.find(j => j.id === id)!;
+  const rotation = jointRotationFromQuaternion(joint, q, joint.rotation);
   const next = joints.map(j => j.id === id ? { ...j, parentId, position, rotation } : j);
   validateJoints(next); return next;
 }
@@ -56,6 +58,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
   let selected = "";
   let selection = new Set<string>();
   const bones = new Map<string, THREE.Bone>();
+  const axes = new Map<string, THREE.AxesHelper>();
   const rotationStart=new Map<string,THREE.Quaternion>();
   const markers: THREE.Mesh[] = [];
   const markerFor = new Map<string, THREE.Mesh>();
@@ -103,6 +106,8 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
   function render() {
     selection = new Set([...selection].filter(id => joints().some(j => j.id === id)));
     selected = activeJoint(joints(),selection);
+    for (const helper of axes.values()) helper.dispose();
+    axes.clear();
     for (const child of [...layer.children]) {
       if (child instanceof THREE.Line) child.geometry.dispose();
       layer.remove(child);
@@ -110,8 +115,12 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
     bones.clear(); markers.length = 0; markerFor.clear(); links.length = 0;
     for (const j of joints()) {
       const bone = new THREE.Bone(); bone.name = j.name; bone.position.fromArray(j.position);
-      const r = (j.rotation ?? [0,0,0]).map(THREE.MathUtils.degToRad);
-      bone.rotation.set(r[0],r[1],r[2]);
+      bone.quaternion.copy(jointLocalQuaternion(j, j.rotation ?? [0,0,0]));
+      if (j.showLocalAxes) {
+        const helper = new THREE.AxesHelper(.35);
+        helper.material.depthTest = false; helper.material.depthWrite = false;
+        helper.renderOrder = 100001; bone.add(helper); axes.set(j.id, helper);
+      }
       bones.set(j.id, bone);
       const marker = new THREE.Mesh(geometry, selection.has(j.id) ? activeMaterial : material);
       marker.userData.jointId = j.id;
@@ -183,7 +192,7 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
         const pose = poses.get(id);
         if (!pose) continue;
         bone.position.fromArray(pose.position);
-        bone.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as [number, number, number]);
+        bone.quaternion.copy(jointLocalQuaternion(joints().find(j => j.id === id)!, pose.rotation));
         bone.visible = pose.visibility >= .5;
         const marker = markerFor.get(id);
         if (marker) marker.visible = pose.visibility >= .5;
@@ -204,8 +213,8 @@ export function mountSkeleton(store: SceneStore, world: THREE.Scene, host: HTMLE
       const rotations=new Map<string,Joint["rotation"]>();
       for(const id of rotationStart.keys()){
         const bone=bones.get(id);if(!bone)continue;
-        const e=new THREE.Euler().setFromQuaternion(bone.quaternion,"XYZ");
-        rotations.set(id,[e.x,e.y,e.z].map(THREE.MathUtils.radToDeg) as Joint["position"]);
+        const joint = joints().find(j => j.id === id)!;
+        rotations.set(id,jointRotationFromQuaternion(joint,bone.quaternion,joint.rotation));
       }
       rotationStart.clear();
       commit(joints().map(j=>rotations.has(j.id)?{...j,rotation:rotations.get(j.id)}:j),"Rotate selected joints");

@@ -51,7 +51,7 @@ function changesOnlyIKBlend(next: SceneDocument, previous: SceneDocument): boole
   return changed;
 }
 
-function changesOnlyPreferredAngles(next: SceneDocument, previous: SceneDocument) {
+function changesOnlyJointMetadata(next: SceneDocument, previous: SceneDocument, field: "preferredAngle" | "showLocalAxes") {
   const { joints, ...inputs } = next, { joints: oldJoints, ...oldInputs } = previous;
   const keys = Object.keys(inputs) as (keyof typeof inputs)[];
   if (keys.length !== Object.keys(oldInputs).length || keys.some(key => inputs[key] !== oldInputs[key])
@@ -59,9 +59,9 @@ function changesOnlyPreferredAngles(next: SceneDocument, previous: SceneDocument
   let changed = false;
   for (let index = 0; index < joints.length; index++) {
     if (joints[index] === oldJoints[index]) continue;
-    const { preferredAngle, ...joint } = joints[index], { preferredAngle: oldAngle, ...oldJoint } = oldJoints[index];
+    const { [field]: value, ...joint } = joints[index], { [field]: oldValue, ...oldJoint } = oldJoints[index];
     if (JSON.stringify(joint) !== JSON.stringify(oldJoint)) return false;
-    changed ||= JSON.stringify(preferredAngle) !== JSON.stringify(oldAngle);
+    changed ||= JSON.stringify(value) !== JSON.stringify(oldValue);
   }
   return changed;
 }
@@ -72,7 +72,8 @@ function retainsDraft(next: SceneDocument, previous: SceneDocument, label: strin
     next.animation === previous.animation && next.joints === previous.joints &&
     next.drivenKeys === previous.drivenKeys && next.ikHandles === previous.ikHandles &&
     next.constraints === previous.constraints
-  ) || changesOnlyIKBlend(next, previous) || changesOnlyPreferredAngles(next, previous);
+  ) || changesOnlyIKBlend(next, previous) || changesOnlyJointMetadata(next, previous, "preferredAngle")
+    || changesOnlyJointMetadata(next, previous, "showLocalAxes");
 }
 
 /**

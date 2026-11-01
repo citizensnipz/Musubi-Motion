@@ -673,3 +673,22 @@ callbacks, renderer rebuilding and GPU work. Commands remain synchronous. No new
 dependencies were added. Merge by distance, bridge, Delete Edge/Vertex cleanup,
 custom normals, inset/bevel/subdivision and other remaining modeling work are
 documented in the modeling guide.
+
+## SDK Graph, Euler cleanup and joint orientation checkpoint
+
+- Full suite: 661 tests in 58 files passed; TypeScript and production build passed.
+- SDK command coverage includes fractional edits, weighted insertion shape preservation,
+  clipboard ownership, atomic bounds/collision rejection, undo/redo and native archive roundtrip.
+- `create-driven-curves-example.mjs` checks 1,001 response samples and 385 timeline samples
+  before/after archive reload. Maximum shape error 1.12e-15; output error 1.43e-14.
+- Browser: fractional key retime 0.4 to 0.425, insertion at 0.333 and copy/paste at 0.555
+  preserved scene frame 12; SDK visibility tangent controls enabled and invalid 1.2 rejected.
+  Switching to Time showed only the original time curve.
+- Browser: explicit channel unwrap and stepped interpolation, undo, orientation Z=25,
+  local-axis toggle, native Save As and reopen retained orientation/axes settings.
+- Rotation tests cover coupled XYZ equivalence, sparse channels, idempotence, fixed
+  tangent branch signs, multi-turn behavior, atomic history and native archives.
+- Joint tests cover shared FK/IK/constraint worlds, CCD/two-bone solving, preferred
+  seeds, rotated reparenting, freeze guards/preservation and unchanged skin rest matrices.
+- Independent agents reviewed SDK commands, Graph domain isolation and rotation filtering.
+  Existing production bundle-size warning remains. No dependencies were added.

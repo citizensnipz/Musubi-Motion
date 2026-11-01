@@ -27,7 +27,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Animation:** frame-based timeline, configurable frame rate and playback range, looping, manual keys with **S**, and auto-key for channels that already have keys. Transform and joint curves evaluate from the requested frame without writing playback into scene history.
 - **Channel key controls:** key individual Properties channels with their diamonds and author stepped visibility with the Visible checkbox. Indicators distinguish unanimated channels, animated channels, and keys at the current frame.
 - **Graph Editor and Dope Sheet:** dockable curve/channel editing, key multiselection and box selection, Bezier tangent handles, linear/stepped interpolation, tangent presets, shape-preserving key insertion, copy/paste, retiming, and time scaling.
-- **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Cycles and competing time keys are rejected.
+- **Set Driven Key:** connect a driver attribute to multiple driven attributes through individual response curves. Edit fractional driver coordinates and weighted tangents in the Graph Editor's Driven keys mode. Cycles and competing time keys are rejected.
 - **Rigging:** create and parent joints, edit FK rotations, bind selected splats to selected influences, unbind, and apply configurable elasticity. CCD IK handles support root/end chains, draggable viewport targets, FK/IK blend, target-to-FK alignment, and **Match FK to IK and key** to capture solved joint rotations and switch to FK in one undoable edit. Matching captures one frame; an existing blend curve receives a zero key, otherwise the static blend becomes zero.
 - **Two-bone IK:** select the analytic solver for a root/middle/end chain and move its pole target to control the bend plane. Target and pole markers support viewport dragging, numeric editing, undo, and saving. Unreachable targets preserve bone lengths; existing handles keep their CCD behavior.
 - **Preferred joint angles:** **Rigging → Joint Settings** captures a prepared FK pose or edits preferred XYZ angles. CCD and analytic IK use stored preferences as their starting pose while blending against current FK animation. Capture, clear, and key a joint or its hierarchy with undo and persistence. This stabilizes the demonstrated FK zero-crossing flips; pole singularities and other blend discontinuities remain separate limitations.
@@ -137,10 +137,10 @@ Non-uniform scaling uses Spark covariance rendering with extended-precision spla
 
 ## Remaining priorities
 
-1. Joint orientation/limits, twist controls, blend driven by SDK, and multi-chain or adaptive IK/FK baking.
+1. Automatic joint orientation/limits, twist controls, blend driven by SDK, and multi-chain or adaptive IK/FK baking.
 2. Object-up and roll controls for aim constraints, multi-source constraint weights, and richer controller/component editing.
 3. Influence management, weight smoothing and locks, surface-only component selection, and joint/pose mirroring.
-4. Animation layers, camera/property channels, Euler filtering, richer curve clipboard/retargeting, and SDK curves inside the Graph Editor.
+4. Animation layers, camera/property channels, Euler filtering, and richer curve clipboard/retargeting.
 5. Component pivot/axis options, snapping/soft selection, inset/bevel/subdivision, merge by distance, bridge, Delete Edge/Vertex cleanup, custom normals, materials/UVs, mesh skinning, and mesh import/export.
 6. Particle collisions, trails, animated emitter properties/field objects, cache export, and splat-particle rendering.
 7. Object grouping/reparenting tools, recovery snapshots, and saving strategies for large projects.

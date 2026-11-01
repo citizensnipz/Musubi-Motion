@@ -4,6 +4,7 @@ import { addSplat, deleteSceneItems, emptyScene, type SceneDocument } from "../s
 import { defaultAnimation, keyChannels, setIKBlendKey, type AnimationPose, type AnimationTrack } from "../src/animation.ts";
 import { updateIKHandle } from "../src/ik.ts";
 import { createSceneStore } from "../src/scene-store.ts";
+import { setJointLocalAxes, setJointOrientation } from "../src/joint-orientation.ts";
 
 function fixture(): SceneDocument {
   const doc = addSplat(emptyScene(), { id: "asset", kind: "procedural", generator: "knot-v1" }, "object", [0,0,0], "object", "shape").document;
@@ -27,6 +28,54 @@ function track(targetId: string, channel: "position.x" | "ik.blend"): AnimationT
 }
 
 describe("temporary pose draft lifecycle", () => {
+  it("retains isolated FK previews across local-axis toggles and history until the epoch ends", () => {
+    const doc = fixture(), drafts = new PoseDrafts(), store = createSceneStore(doc);
+    const input = new Map([["joint", { ...pose(2), rotation: [10, 20, 35] as [number, number, number] }]]);
+    drafts.capture(doc, input);
+    let current = new Map<string, AnimationPose>();
+    store.subscribe((next, previous) => { current = drafts.restore(next.document, previous.document, next.editLabel); });
+    setJointLocalAxes(store, "joint", true);
+    expect(current.get("joint")!.rotation).toEqual([10, 20, 35]);
+    current.get("joint")!.rotation[2] = 99;
+    expect(input.get("joint")!.rotation[2]).toBe(35);
+    setJointLocalAxes(store, "joint", false);
+    expect(current.get("joint")!.rotation[2]).toBe(35);
+    store.temporal.getState().undo(); expect(current.get("joint")!.rotation[2]).toBe(35);
+    store.temporal.getState().redo(); expect(current.get("joint")!.rotation[2]).toBe(35);
+    drafts.clear();
+    store.temporal.getState().undo(); expect(current.size).toBe(0);
+    store.temporal.getState().redo(); expect(current.size).toBe(0);
+  });
+
+  it("invalidates FK previews for actual orientation edits and restores each revision on undo", () => {
+    const doc = fixture(), drafts = new PoseDrafts(), store = createSceneStore(doc);
+    drafts.capture(doc, new Map([["joint", pose(2)]]));
+    let current = new Map<string, AnimationPose>();
+    store.subscribe((next, previous) => { current = drafts.restore(next.document, previous.document, next.editLabel); });
+    setJointOrientation(store, "joint", [10, 20, 30]); expect(current.size).toBe(0);
+    store.temporal.getState().undo(); expect(current.get("joint")!.position[0]).toBe(2);
+    store.temporal.getState().redo(); expect(current.size).toBe(0);
+  });
+
+  it.each(["orientation", "rotation", "position", "parentId", "animation", "constraints", "nodes"])("invalidates previews if local-axis metadata also changes %s", field => {
+    const initial = rigFixture(), drafts = new PoseDrafts(); drafts.capture(initial, poses(4));
+    const changed: SceneDocument = { ...initial, joints: initial.joints!.map(joint => ({ ...joint, showLocalAxes: true })) };
+    if (field === "orientation") changed.joints![0].orientation = [0, 0, 20];
+    if (field === "rotation") changed.joints![0].rotation = [0, 0, 5];
+    if (field === "position") changed.joints![0].position = [1, 0, 0];
+    if (field === "parentId") changed.joints![1].parentId = null;
+    if (field === "animation") changed.animation = defaultAnimation();
+    if (field === "constraints") changed.constraints = [];
+    if (field === "nodes") changed.nodes = { ...initial.nodes };
+    expect(drafts.restore(changed, initial, "Show joint local axes").size).toBe(0);
+  });
+
+  it("does not widen draft retention for identical replacement joint arrays", () => {
+    const initial = fixture(), drafts = new PoseDrafts(); drafts.capture(initial, poses(4));
+    const clone = { ...initial, joints: initial.joints!.map(joint => ({ ...joint })) };
+    expect(drafts.restore(clone, initial, "Show joint local axes").size).toBe(0);
+  });
+
   it("retains unkeyed FK inputs through preferred-angle capture, editing, clearing and undo", () => {
     const initial = rigFixture(), drafts = new PoseDrafts(), input = new Map([["joint", { ...pose(0), rotation: [0, 0, 35] as [number, number, number] }]]);
     drafts.capture(initial, input);
