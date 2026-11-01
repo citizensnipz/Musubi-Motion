@@ -44,6 +44,8 @@ import {
 import type WaButton from "@awesome.me/webawesome/dist/components/button/button.js";
 import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.js";
 import type WaDropdown from "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
+import type WaDialog from "@awesome.me/webawesome/dist/components/dialog/dialog.js";
+import packageInfo from "../package.json";
 import "./style.css";
 import { defaultAnimation, editingTracks, evaluateChannels, evaluateSceneAnimation, keyChannels, setKeys, type AnimationPose } from "./animation.ts";
 import { evaluateDrivenKeys } from "./driven-keys.ts";
@@ -631,6 +633,30 @@ async function start() {
   }
   const panelHost = element<HTMLElement>("properties");
   const panel = createPropertiesPanel(panelHost, element("outliner-panel"), {
+    previewChannel(id, channel, axis) {
+      if (loading || dragId) return;
+      const doc = store.getState().document;
+      if (doc.drivenKeys?.some(r => r.driven.targetId === id && r.driven.channel === `${channel}.${"xyz"[axis]}`)) return;
+      if (channel === "scale" && doc.joints?.some(j => j.id === id)) return;
+      setPlaying(false);
+      const original = poseOverrides.get(id);
+      const pose = structuredClone(currentPose(id));
+      return {
+        update(value) {
+          if (store.getState().document !== doc) return;
+          const next = structuredClone(pose);
+          next[channel][axis] = value;
+          poseOverrides.set(id, { ...normalizedChannels(next), visibility: next.visibility });
+          updateTime();
+        },
+        end() {
+          if (store.getState().document !== doc) return;
+          if (original) poseOverrides.set(id, original);
+          else poseOverrides.delete(id);
+          updateTime();
+        },
+      };
+    },
     reparent(id, parentId) {
       if (loading || dragId) return;
       try { skeleton.reparent(id, parentId); }
@@ -1946,11 +1972,19 @@ async function start() {
   }
   element("file-menu").addEventListener("wa-select", (event) => {
     switch ((event as WaSelectEvent).detail.item.id) {
+      case "about":
+        closeFileMenu();
+        element<WaDialog>("about-dialog").open = true;
+        break;
       case "scene-new":
         void newProject();
         break;
       case "scene-open":
         void openProject();
+        break;
+      case "open":
+        closeFileMenu();
+        if (!loading && !dragId) fileInput.click();
         break;
       case "scene-save":
         void saveProject();
@@ -1960,6 +1994,16 @@ async function start() {
         break;
     }
   });
+  element("about-version").textContent = `Version ${packageInfo.version}`;
+  element("about-close").addEventListener("click", () => { element<WaDialog>("about-dialog").open = false; });
+  let notificationTimer: ReturnType<typeof setTimeout>;
+  new MutationObserver(() => {
+    const notification = element("file-notification");
+    notification.textContent = element("file-status").textContent;
+    notification.hidden = !notification.textContent;
+    clearTimeout(notificationTimer);
+    notificationTimer = setTimeout(() => { notification.hidden = true; }, 6000);
+  }).observe(element("file-status"), { childList: true, characterData: true, subtree: true });
   sceneInput.addEventListener("change", () => {
     const file = sceneInput.files?.[0];
     sceneInput.value = "";
@@ -2027,7 +2071,6 @@ async function start() {
       updateHistoryButtons();
     }
   }
-  element("open").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
     fileInput.value = "";

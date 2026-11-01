@@ -10,6 +10,7 @@ export function createPropertiesPanel(
     reparent: (id: string, parentId: string | null) => void;
     select: (id: string, additive: boolean) => void;
     rename: (id: string, name: string) => void;
+    previewChannel: (id: string, channel: keyof TransformChannels, axis: number) => { update: (value: number) => void; end: () => void } | undefined;
     channel: (
       id: string,
       channel: keyof TransformChannels,
@@ -53,7 +54,8 @@ export function createPropertiesPanel(
       label.className = "axis-scrub";
       label.innerHTML = `<span aria-hidden="true">${letter}</span><span class="sr-only">${legend.textContent} ${letter}</span>`;
       const row=document.createElement("div");row.className="property-axis-row";row.append(label,input);
-      refreshLocks.push(propertyInteraction(input,()=>`${activeId}/${channel}/${axis}`,label));
+      refreshLocks.push(propertyInteraction(input,()=>`${activeId}/${channel}/${axis}`,label,
+        () => activeId ? handlers.previewChannel(activeId, channel, axis) : undefined));
       input.dataset.channel = channel;
       input.dataset.axis = String(axis);
       input.addEventListener("change", () => {

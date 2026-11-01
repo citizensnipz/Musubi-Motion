@@ -7,10 +7,8 @@
     <link
       rel="icon"
       type="image/png"
-      sizes="512x512"
-      href="/musubi-logo-512.png"
+      href="/musubi-logo-2.png"
     />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta
       name="description"
       content="Musubi Motion — a monochrome Gaussian splat animation workspace."
@@ -30,9 +28,7 @@
     <div id="app">
       <header>
         <div class="brand">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 16V8l8 8V8l8 8V8" />
-          </svg>
+          <img class="brand-logo" src="/musubi-logo-2.png" alt="" />
           <h1>Musubi <span>Motion</span></h1>
         </div>
         <nav aria-label="Workspace controls">
@@ -53,6 +49,9 @@
                 >Ctrl+O</kbd
               ></wa-dropdown-item
             >
+            <wa-dropdown-item id="open"
+              ><span slot="icon" data-icon="import"></span>Import splat…</wa-dropdown-item
+            >
             <wa-dropdown-item id="scene-save"
               ><span slot="icon" data-icon="save"></span>Save<kbd slot="details"
                 >Ctrl+S</kbd
@@ -64,6 +63,7 @@
                 >Ctrl+Shift+S</kbd
               ></wa-dropdown-item
             >
+            <wa-dropdown-item id="about">About Musubi Motion…</wa-dropdown-item>
           </wa-dropdown>
           <wa-dropdown id="edit-menu" size="s" placement="bottom-start">
             <wa-button
@@ -126,15 +126,6 @@
             ><span class="action-label">Add demo</span></wa-button
           >
           <wa-button
-            id="open"
-            aria-label="Import splat"
-            size="s"
-            appearance="outlined"
-            variant="neutral"
-            ><span slot="start" data-icon="import"></span
-            ><span class="action-label">Import splat</span></wa-button
-          >
-          <wa-button
             id="theme"
             size="s"
             appearance="plain"
@@ -142,15 +133,11 @@
             aria-label="Switch to light theme"
           ></wa-button>
           <wa-tooltip for="demo">Add the built-in splat study</wa-tooltip
-          ><wa-tooltip for="open">Import a splat file</wa-tooltip
           ><wa-tooltip for="theme">Toggle light / dark theme</wa-tooltip>
         </nav>
       </header>
       <div id="workspace" aria-label="Editor panels"></div>
-      <div class="statusbar">
-        <span id="file-status" role="status" aria-live="polite"></span
-        ><span>THREE.JS / SPARK · WEBGL2</span>
-      </div>
+
     </div>
     <div id="panel-staging" hidden>
       <main id="viewport" aria-label="3D splat viewport">
@@ -256,6 +243,15 @@
         <output id="time" for="timeline">00.00 / 12.00</output>
       </section>
     </div>
+    <wa-dialog id="about-dialog" label="About Musubi Motion">
+      <img class="about-logo" src="/musubi-logo-2.png" alt="Musubi Motion logo" />
+      <p>Musubi Motion · <span id="about-version"></span></p>
+      <p>A workspace for Gaussian splat scenes, rigging, and animation.</p>
+      <dl class="about-details"><dt>Rendering</dt><dd>Three.js / Spark · WebGL2</dd><dt>Scene format</dt><dd>.msb · scene and embedded assets</dd><dt>Splat imports</dt><dd>PLY, SPZ, SPLAT, KSPLAT, SOG</dd></dl>
+      <p id="file-status" role="status" aria-live="polite"></p>
+      <wa-button slot="footer" id="about-close" size="s" variant="neutral">Close</wa-button>
+    </wa-dialog>
+    <div id="file-notification" role="status" hidden></div>
     <wa-dialog id="discard-dialog" label="Unsaved changes">
       <p>
         Discard unsaved changes to this scene? Cancel to return and save your

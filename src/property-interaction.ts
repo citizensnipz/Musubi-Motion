@@ -1,7 +1,7 @@
 // Shared inspector behavior. Locks are per object/field for this editor session.
 const locks=new Set<string>();
 let menu:HTMLElement|undefined;
-export function propertyInteraction(input:any,key:()=>string,handle?:HTMLElement) {
+export function propertyInteraction(input:any,key:()=>string,handle?:HTMLElement,beginPreview?:()=>{update:(value:number)=>void;end:()=>void}|undefined) {
   const refresh=()=>{input.readOnly=locks.has(key());input.readonly=input.readOnly;input.toggleAttribute("data-locked",input.readOnly);};
   input.addEventListener("contextmenu",(event:MouseEvent)=>{
     event.preventDefault();menu?.remove();refresh();
@@ -25,17 +25,22 @@ export function propertyInteraction(input:any,key:()=>string,handle?:HTMLElement
       const bound=(raw:unknown,fallback:number)=>raw==null||raw===""?fallback:Number(raw);
       const min=bound(input.min,-Infinity),max=bound(input.max,Infinity);
       surface.setPointerCapture(e.pointerId);
+      const preview=beginPreview?.();
       let finished=false;
       const move=(m:PointerEvent)=>{
         if(key()!==id||locks.has(id))return;
         const ticks=Math.round((m.clientX-start)/10);
         input.value=String(Math.min(max,Math.max(min,Number((value+ticks*step).toFixed(6)))));
+        preview?.update(Number(input.value));
       };
       const finish=(cancel:boolean)=>{
         if(finished)return;finished=true;
         surface.removeEventListener("pointermove",move);surface.removeEventListener("pointerup",end);surface.removeEventListener("pointercancel",cancelled);surface.removeEventListener("lostpointercapture",cancelled);surface.removeEventListener("keydown",escape);
         if(surface.hasPointerCapture(e.pointerId))surface.releasePointerCapture(e.pointerId);
+        const finalValue=input.value;
+        preview?.end();
         if(key()!==id)return;
+        input.value=finalValue;
         if(cancel||locks.has(id))input.value=String(value);
         else if(Number(input.value)!==value)input.dispatchEvent(new Event("change",{bubbles:true}));
       };

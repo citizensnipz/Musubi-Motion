@@ -13,3 +13,21 @@
 #workspace-preset { font-size: 11px; max-width: 100px; }
 .timeline-keys { position: absolute; left: 5px; right: 5px; top: 18px; height: 7px; pointer-events: none; }
 .timeline-keys button { position: absolute; width: 4px; height: 7px; border: 0; padding: 0; background: #dfac63; transform: translateX(-50%); pointer-events: auto; cursor: pointer; }
+
+#timeline-panel.timeline-editor { padding: 8px 12px; gap: 10px; justify-content: center; align-items: stretch; }
+.timeline-transport { gap: 12px; min-width: 540px; }
+.timeline-transport .timeline { padding: 0 5px; min-width: 140px; }
+.timeline-transport .transport { flex-shrink: 0; gap: 2px; }
+.timeline-transport .transport button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+.timeline-transport .transport button:hover { background: var(--line); }
+.timeline-transport .transport button:disabled { opacity: .4; cursor: default; }
+.forward-control svg { transform: rotate(180deg); }
+.timeline-current-frame { display: flex; flex-direction: column; gap: 3px; font-size: 9px; text-transform: uppercase; color: var(--muted); }
+.timeline-current-frame input { width: 64px; padding: 5px; font: 12px monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; }
+.timeline-transport .ticks { display: block; position: relative; height: 24px; margin: 4px 0 0; border-top: 1px solid var(--line); }
+.timeline-transport .ticks span { position: absolute; top: 0; height: 5px; border-left: 1px solid var(--line); font: 10px monospace; padding: 8px 0 0 3px; }
+.timeline-transport .ticks span.major { height: 10px; border-color: var(--muted); }
+.timeline-keys { left: 10px; right: 10px; top: 12px; }
+.timeline-summary { color: var(--muted); font: 10px monospace; white-space: nowrap; }
+.timeline-hint { display: none; }
+.timeline-options #time { margin-left: auto; }
