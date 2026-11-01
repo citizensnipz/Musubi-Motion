@@ -13,7 +13,7 @@ A browser-based Gaussian splat animation engine and editor, built on **Three.js 
 
 Musubi Motion treats Gaussian splats as named, selectable scene objects with their own transforms and asset references. The goal is a focused browser workspace for composing and animating splat scenes, with familiar Maya-style controls and a minimal monochrome interface.
 
-**Current status: working editor prototype.** The editor supports transform and joint animation, a Graph Editor and Dope Sheet, Set Driven Keys, FK joints, CCD and analytic two-bone inverse kinematics, constraints, splat binding, elasticity, polygon mesh editing, and deterministic particle FX. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU is not implemented.
+**Current status: working editor prototype.** The editor supports layered transform and joint animation, time and driven-key Graph editing, Euler cleanup, joint orientation and pose mirroring, CCD and analytic two-bone inverse kinematics, constraints, skin-weight and influence editing, elasticity, polygon mesh editing, and deterministic particle FX. These are useful subsets of established DCC workflows, not full Maya parity. The renderer uses WebGL2; WebGPU is not implemented.
 
 **Topics:** `gaussian-splatting` · `3d-animation` · `3d-editor` · `threejs` · `sparkjs` · `webgl2` · `typescript` · `dockview`
 
@@ -34,11 +34,11 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 - **Two-bone IK:** select the analytic solver for a root/middle/end chain and move its pole target to control the bend plane. Target and pole markers support viewport dragging, numeric editing, undo, and saving. Unreachable targets preserve bone lengths; existing handles keep their CCD behavior.
 - **Preferred joint angles:** **Rigging → Joint Settings** captures a prepared FK pose or edits preferred XYZ angles. CCD and analytic IK use stored preferences as their starting pose while blending against current FK animation. Capture, clear, and key a joint or its hierarchy with undo and persistence. This stabilizes the demonstrated FK zero-crossing flips; pole singularities and other blend discontinuities remain separate limitations.
 - **Animated IK controls:** link existing transforms or create editable curve controls for targets and poles, preserving their world positions with optional offsets. Animate the controls with ordinary position keys, the Graph Editor, or Set Driven Key; supported upstream constraints run before IK. Linked markers select their controls, and viewport drags preview the chain live. **Match controls to FK and key** captures control positions at the current frame in one undo step.
-- **Animated FK/IK blend:** **Key blend** creates an ordinary `ik.blend` time track on the handle; **Edit blend curve** opens it in the Graph Editor. Keys stay within 0–1, and playback clamps tangent overshoot. Once keyed, panel blend edits key the current frame even with auto-key off; an unkeyed handle keeps its static fallback. The Graph Editor, Dope Sheet, timeline, undo, and native scenes share the same track.
+- **Animated FK/IK blend:** **Key blend** creates an ordinary `ik.blend` time track on the handle; **Edit blend curve** opens it in the Graph Editor. Base keys stay within 0–1; layers store raw contributions and playback clamps the final blend. Once keyed, panel blend edits key the current frame even with auto-key off; an unkeyed handle keeps its static fallback. The Graph Editor, Dope Sheet, timeline, undo, and native scenes share the same track.
 - **Bake IK to FK:** a dedicated Animation panel samples a frame range into editable joint rotation curves and disables the handle globally. Choose the sample interval, retain outside keys, and minimize Euler jumps. Progress and cancellation keep longer bakes responsive; sampled world poses are verified before one undoable commit. Between-sample motion is interpolated, and outside-range motion may change.
 - **Constraints:** dedicated **Rigging → Constraints** controls create point, orient, aim, scale, and parent relationships with optional maintain-offset. Aim selects a signed local axis and world-up axis. Each output group has one source; dependency cycles are rejected.
 - **Curve controllers:** Circle, Square, and Arrow controls with editable local CVs, rational weights, degree, closure, and color. Their ordinary transforms support animation, SDK, and constraints; curve data saves directly in the scene without asset files.
-- **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, add/subtract selections, inspect weights, restore automatic weights, and view sampled colors. Edits support undo and persistence; the elasticity pipeline inherits them.
+- **Skin Weights:** a dedicated Rigging panel edits normalized influences over component ranges or exact viewport selections. Click or box-select posed components, inspect weights, restore automatic weights, and view sampled colors. Add bound joints at zero weight or remove influences with proportional redistribution and an explicit replacement for sole-influence components. Palette edits preserve effective weights on assets up to 200,000 components. Edits support undo and persistence; the elasticity pipeline inherits them.
 - **Paint Skin Weights:** a separate Rigging panel provides Replace, Add, and Subtract brushes with adjustable radius, strength, and smooth falloff. Color previews remain outside the scene until release; each stroke applies deformation with one undo step. Escape cancels a stroke.
 - **Polygon modeling:** create cubes, planes, spheres, and cylinders alongside splats. **Modeling → Mesh Tools** provides component selection and transform gizmos, numeric edits, connected face extrusion, Merge to Center, face deletion, interior-edge deletion into n-gons, shell-normal reversal, shading, and wire display. Validated edits commit as one undo step; stable component IDs persist through saving. See [the modeling guide](docs/MODELING.md) and [topology study](examples/mesh-topology-study.msb).
 - **Particle FX:** **FX → Particle Emitters** creates omni, directional, box/sphere volume, and polygon-surface emitters. Edit rate, lifetime, seeded variation, gravity/acceleration, drag, curl noise, attraction/repulsion, and lifetime size/color/opacity. Fixed-step replay supports backward scrubbing; particles retain their historical birth positions when emitters animate. Settings support undo and saving. See [the particle guide](docs/PARTICLES.md).
@@ -94,7 +94,31 @@ Command can replace Ctrl for the application shortcuts on macOS. Text fields ret
 
 Use **Animation → Graph Editor / Dope Sheet / Set Driven Key** for dedicated animation tools. The Graph Editor has its own shortcuts when focused: **S** inserts a key on its active curve, **F** frames keys, and arrow keys retime selected keys. See [the animation guide](docs/ANIMATION.md) for workflows, tangent behavior, and current limitations.
 
+| Workflow | UI location |
+| --- | --- |
+| Edit a driven response curve | Graph Editor → Graph source → Driven keys, or Set Driven Key → Edit curve in Graph Editor |
+| Filter Euler jumps or choose rotation interpolation | Animation → Rotation Curves |
+| Add, blend, reorder, mute, solo or lock layers | Animation → Animation Layers |
+| Edit joint orientation, show local axes or freeze FK rotation | Rigging → Joint Settings |
+| Duplicate mirrored joints or mirror/key an FK pose | Rigging → Mirror Joints / Pose |
+| Add or remove bound joint influences | Rigging → Skin Weights → Bound joint influences |
+
+Time keying and curve editors use the active animation layer. Driven curves use
+fractional driver values and a separate cursor that leaves scene time unchanged.
+Euler filtering is explicit because it can remove intentional spins. Mirroring
+reflects joint frames across a world-origin plane and pairs existing joints by
+name; it does not duplicate a complete control rig. Layer weights are static;
+animated weights and layer flattening remain future work.
+
 Open [examples/animation-study.msb](examples/animation-study.msb) for a procedural bounce/spin animation, a driven rotation, and a keyed three-joint FK chain. Rebuild it with `node scripts/create-animation-example.mjs`.
+
+Open [examples/driven-curves-study.msb](examples/driven-curves-study.msb) to edit
+weighted lift, rotation, scale and visibility responses driven by a time-animated
+controller. Rebuild and verify with `node scripts/create-driven-curves-example.mjs`.
+
+Open [examples/layered-rig-study.msb](examples/layered-rig-study.msb) for oriented
+joints, additive arm adjustment, an override layer of mirrored poses, and a bound
+splat object. Rebuild and verify with `node scripts/create-layered-rig-example.mjs`.
 
 Open [examples/animated-ik-controls.msb](examples/animated-ik-controls.msb) for an analytic chain with animated target/pole controls and a moving constrained root. Rebuild it with `node scripts/create-ik-controls-example.mjs`. The generator checks 241 half-frame samples before and after archive readback, with endpoint error below 1.7 × 10⁻⁸ scene units; this is model verification, not a browser performance result.
 
@@ -110,7 +134,7 @@ Drag a **panel title tab** toward another panel's edge to split the space, or to
 
 Use **File → New scene / Open scene / Save / Save as**. An asterisk beside the scene name indicates unsaved edits.
 
-An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, polygon topology and appearance, controller curves, particle settings, joints and binding, elasticity, animation/SDK/IK data, constraints, the viewport camera, and the timeline position. It does not store undo history, unkeyed animation previews, live particle buffers, or the UI panel arrangement.
+An `.msb` file includes object names and IDs, hierarchy, transforms, shape offsets, original splat assets, polygon topology and appearance, controller curves, particle settings, joints and binding, elasticity, animation/SDK/IK data, constraints, the viewport camera, and the timeline position. Joint orientation and axis visibility, edited influences/weights, animation layers and the active layer are included. It does not store undo history, unkeyed animation previews, live particle buffers, or the UI panel arrangement.
 
 Supported browsers can save back to a selected file through native file pickers. Other browsers download an `.msb` copy. New/Open asks before discarding unsaved edits; opening stages the scene before replacing the current one. Undo history starts fresh after opening.
 
@@ -152,6 +176,13 @@ General, Animation, Rigging, Modeling, and FX workspace presets are available. E
 Local CPU measurements were approximately **0.56 ms for 1,000 animation tracks**, **2.62 ms for 20 IK chains**, and **0.44 ms for 100 parent constraints**. These development measurements exclude WebGL/Spark rendering, binding, elasticity, editor drawing, and large asset loads; they are not a browser frame-rate or production performance guarantee. See [the animation guide](docs/ANIMATION.md#performance-and-verification).
 
 The dated [validation record](docs/VALIDATION.md) separates model tests, browser workflows, small-scene playback measurements, and remaining verification limits.
+
+The latest animation/rigging checkpoint passed **714 tests across 62 files**, plus
+TypeScript and the production build. Browser checks covered SDK curve edits,
+layer keying/blending, mirroring, influence edits and native `.msb` save/reopen.
+Independent review agents checked command behavior and cross-system integration.
+The reproducible `node scripts/benchmark-animation-layers.mjs` benchmark measures
+CPU curve evaluation only; viewport rendering and skinning are excluded.
 
 Capture reconstruction, model training, and recorded 4D splat playback are outside the current scope. A future WebGPU backend needs a compatible splat rendering path; switching the Three.js renderer alone is insufficient.
 
