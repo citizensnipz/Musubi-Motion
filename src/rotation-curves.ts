@@ -1,4 +1,4 @@
-import { replaceTracks, type AnimationTrack, type CurveKey } from "./animation.ts";
+import { replaceTracks, editingTracks, type AnimationTrack, type CurveKey } from "./animation.ts";
 import { unwrapEuler } from "./animation-edit.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
@@ -12,7 +12,7 @@ function rotationTracks(doc: SceneDocument, targetIds: Iterable<string>): Animat
   if (ids.size > 100000) throw Error("Too many rotation targets.");
   for (const id of ids) if (doc.nodes[id]?.type !== "transform" && !doc.joints?.some(joint => joint.id === id))
     throw Error("Rotation target is missing or is not an object or joint.");
-  return (doc.animation?.tracks ?? []).filter(track => ids.has(track.targetId) && track.channel.startsWith("rotation."));
+  return editingTracks(doc).filter(track => ids.has(track.targetId) && track.channel.startsWith("rotation."));
 }
 
 /** Explicit destructive cleanup: intentional turns may be removed. No runtime

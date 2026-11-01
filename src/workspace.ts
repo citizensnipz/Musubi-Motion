@@ -18,6 +18,8 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", "ik-bake": "Bake IK to FK", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools", particles: "Particle Emitters" };
   animationPanels["joint-settings"] = "Joint Settings";
   animationPanels["rotation-curves"] = "Rotation Curves";
+  animationPanels["animation-layers"] = "Animation Layers";
+  animationPanels["joint-mirror"] = "Mirror Joints / Pose";
   for (const id of Object.keys(animationPanels)) {
     const wrapper = document.createElement("div"); wrapper.className = "animation-dock-host";
     contents.set(id, wrapper);
@@ -177,6 +179,8 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     const attributeIds = ["driven-keys", "ik-handles", "ik-bake", "constraints", "controllers", "skin-weights", "paint-skin-weights", "modeling", "particles"];
     attributeIds.push("joint-settings");
     attributeIds.push("rotation-curves");
+    attributeIds.push("animation-layers");
+    attributeIds.push("joint-mirror");
     const attribute = attributeIds.includes(id);
     const sidePanel = attribute ? ["properties", "outliner", "rigging", ...attributeIds].find(candidate => api.getPanel(candidate)) : undefined;
     const reference = sidePanel ?? (api.getPanel("viewport") ? "viewport" : api.panels[0]?.id);

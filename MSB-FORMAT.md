@@ -64,7 +64,7 @@ application builds are not guaranteed to preserve extensions when resaving.
 | `ParticleShape` | `type: "particleShape"`, identity/parent, emission type/source, seed/timing, rate/lifetime, motion and fields, size/color/opacity endpoints |
 | `animation` | `fps`, `start`, `end`, `loop`, `tracks` |
 | Animation track | `id`, `targetId`, `channel`, ordered `keys` |
-| IK blend track | Existing animation-track schema, handle `targetId`, `channel: "ik.blend"`; key values within 0–1 |
+| IK blend track | Existing animation-track schema, handle `targetId`, `channel: "ik.blend"`; Base keys within 0–1, raw layer contributions use ordinary curve bounds |
 | Curve key | `id`, `time`, `value`, `interpolation`, `tangentMode`, optional `inSlope`, `outSlope`, `inWeight`, `outWeight`, `broken` |
 | `drivenKeys` | Relationship `id`, `driver` and `driven` property references, and curve `keys` |
 | `ikHandles` | `id`, `name`, `rootId`, `endId`, world-space `target`, `enabled`, `iterations`, `blend`, optional `solver`, `poleTarget`, `targetControl`, `poleControl` |
@@ -140,11 +140,26 @@ playback range. Camera view/orthographic height remain optional extensions.
 
 Animation validation requires valid targets/channels, finite bounded numbers,
 ordered unique key coordinates, unique track/key IDs, and one track per target
-channel. Frame rate is 1–240; start/end are within ±1,000,000 frames and end must
+channel per layer. Frame rate is 1–240; start/end are within ±1,000,000 frames and end must
 be greater than start. Curve values and slopes are bounded by an absolute
-1,000,000,000,000, except that authored `ik.blend` key values must be within 0–1;
+1,000,000,000,000, except that Base `ik.blend` key values must be within 0–1;
 weights are within 0–1. There may be at most 100,000 animation
 keys in total and at most 100,000 driven keys in total.
+
+Optional `animation.layers` contains at most 1,000 records with unique `id`,
+`name` (1–200 nonblank characters), `mode` (`additive` or `override`), `weight`
+(0–1), and boolean `mute`, `solo`, `locked`. Array order defines composition.
+Optional `animation.activeLayerId` references an existing layer; absence means
+Base. A track's optional `layerId` assigns it to that layer, otherwise Base.
+Track/key IDs and total budgets remain global. Raw layer values use the ordinary
+finite curve bounds; effective scale/visibility/IK blend clamp after composition.
+Old archives without these optional fields retain their original behavior.
+
+Joints optionally store `orientation: [x,y,z]` in finite XYZ degrees and boolean
+`showLocalAxes`. Missing orientation is identity; local quaternion is orientation
+multiplied by channel rotation. Mirror operations create ordinary joint records
+and optional time curves, requiring no separate mirror schema. Influence edits
+use the existing binding palette/rest matrices and weight override records.
 
 Driven graphs permit one driver per output, reject property cycles, and reject
 outputs that also have time curves. Relationship count is capped at 10,000.

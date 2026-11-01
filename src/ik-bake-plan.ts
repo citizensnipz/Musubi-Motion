@@ -63,11 +63,13 @@ export function planIKBake(doc: SceneDocument, handleId: string, settings: IKBak
     throw Error("This bake exceeds 2,000,000 estimated pose evaluations. Shorten the range, increase the step or simplify the scene.");
 
   const tracks = doc.animation?.tracks ?? [];
+  const layered = !!doc.animation?.layers?.length;
+  if (layered && doc.animation!.layers!.length >= 1000) throw Error("Remove an animation layer before creating the IK bake override layer.");
   const outputs = new Set<string>();
   const keysWritten = frames.length * chainIds.length * 3;
   let resultKeyCount = keysWritten;
   for (const track of tracks) {
-    if (chain.has(track.targetId) && rotationChannels.has(track.channel)) {
+    if (!layered && chain.has(track.targetId) && rotationChannels.has(track.channel)) {
       outputs.add(`${track.targetId}:${track.channel}`);
       if (preserveOutsideKeys) for (const key of track.keys) if (key.time < start || key.time > end) resultKeyCount++;
     } else resultKeyCount += track.keys.length;

@@ -1,5 +1,6 @@
 import { filterEulerRotations, setRotationInterpolation, type EulerFilterMode, type RotationInterpolation } from "./rotation-curves.ts";
 import type { SceneStore } from "./scene-store.ts";
+import { editingTracks } from "./animation.ts";
 
 type Options = { available: () => boolean; getSelection: () => string[]; onStatus?: (message: string) => void };
 
@@ -21,7 +22,7 @@ export function createRotationPanel(store: SceneStore, options: Options) {
   function targets() {
     const doc = store.getState().document;
     const valid = (id: string) => doc.nodes[id]?.type === "transform" || doc.joints?.some(joint => joint.id === id);
-    return [...new Set(scope.value === "all" ? (doc.animation?.tracks ?? []).filter(track => track.channel.startsWith("rotation.")).map(track => track.targetId) : options.getSelection().filter(valid))];
+    return [...new Set(scope.value === "all" ? editingTracks(doc).filter(track => track.channel.startsWith("rotation.")).map(track => track.targetId) : options.getSelection().filter(valid))];
   }
   function run(action: () => void) {
     if (!options.available()) return;
@@ -36,7 +37,7 @@ export function createRotationPanel(store: SceneStore, options: Options) {
   function label(text: string, node: HTMLElement) { const result = document.createElement("label"); result.append(text, node); return result; }
   element.append(style, explanation, label("Scope", scope), summary, label("Continuity cleanup", filterMode), filterHelp, filter, label("Euler interpolation", interpolation), apply, status);
   function refresh() {
-    const ids = targets(), doc = store.getState().document, curves = (doc.animation?.tracks ?? []).filter(track => ids.includes(track.targetId) && track.channel.startsWith("rotation."));
+    const ids = targets(), doc = store.getState().document, curves = editingTracks(doc).filter(track => ids.includes(track.targetId) && track.channel.startsWith("rotation."));
     summary.textContent = `${ids.length} target${ids.length === 1 ? "" : "s"} · ${curves.length} time rotation curves · ${curves.reduce((sum, track) => sum + track.keys.length, 0)} keys`;
     for (const control of [scope, filterMode, interpolation]) control.disabled = !options.available();
     filter.disabled = apply.disabled = !options.available() || !curves.some(track => track.keys.length);

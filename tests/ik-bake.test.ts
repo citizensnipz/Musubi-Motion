@@ -8,6 +8,7 @@ import { bakeIKToFK, type IKBakeProgress, type IKBakeSettings } from "../src/ik-
 import { decodeProject, encodeProject } from "../src/project-archive.ts";
 import { emptyScene, type SceneDocument, type Vec3 } from "../src/scene-document.ts";
 import { createSceneStore } from "../src/scene-store.ts";
+import { addAnimationLayer, updateAnimationLayer } from "../src/animation-layers.ts";
 
 const key = (id: string, time: number, value: number): CurveKey => ({ id, time, value, interpolation: "linear", tangentMode: "auto" });
 const settings = (patch: Partial<IKBakeSettings> = {}): IKBakeSettings => ({ start: 0, end: 4, step: 1, preserveOutsideKeys: true, minimizeRotation: true, ...patch });
@@ -34,6 +35,21 @@ function expectWorlds(before: SceneDocument, after: SceneDocument, frames: numbe
 }
 
 describe("atomic sampled IK-to-FK bake", () => {
+  it("bakes layered and soloed animation to a top override while retaining original curves", async () => {
+    const store = fixture();
+    const layerId = addAnimationLayer(store, "FK adjustment", "additive");
+    updateAnimationLayer(store, layerId, { weight: .5, solo: true });
+    upsertTrack(store, { id: "layer-root", layerId, targetId: "root", channel: "rotation.z", keys: [key("layer0", 0, 12), key("layer4", 4, -20)] });
+    const before = store.getState().document;
+    await bakeIKToFK(store, "ik", settings());
+    const after = store.getState().document;
+    expect(after.animation!.layers!.at(-1)).toMatchObject({ mode: "override", weight: 1, solo: true, mute: false });
+    expect(after.animation!.activeLayerId).toBe(after.animation!.layers!.at(-1)!.id);
+    for (const track of before.animation!.tracks) expect(after.animation!.tracks.find(item => item.id === track.id)).toBe(track);
+    expectWorlds(before, after, [0, 1, 2, 3, 4]);
+    store.temporal.getState().undo(); expect(store.getState().document).toBe(before);
+    store.temporal.getState().redo(); expect(store.getState().document).toBe(after);
+  });
   it("bakes mixed blend samples into linear rotation keys and disables the handle in one undo step", async () => {
     const store = fixture(), original = store.getState().document, snapshot = JSON.stringify(original), events: IKBakeProgress[] = [];
     const result = await bakeIKToFK(store, "ik", settings(), { onProgress: progress => events.push(progress) });

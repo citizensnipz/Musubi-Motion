@@ -45,13 +45,13 @@ import type WaButton from "@awesome.me/webawesome/dist/components/button/button.
 import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.js";
 import type WaDropdown from "@awesome.me/webawesome/dist/components/dropdown/dropdown.js";
 import "./style.css";
-import { defaultAnimation, evaluateChannels, evaluateSceneAnimation, keyChannels, setKeys, type AnimationPose } from "./animation.ts";
+import { defaultAnimation, editingTracks, evaluateChannels, evaluateSceneAnimation, keyChannels, setKeys, type AnimationPose } from "./animation.ts";
 import { evaluateDrivenKeys } from "./driven-keys.ts";
 import { mountTimeline } from "./timeline-panel.ts";
 import { advanceFrame } from "./animation-playback.ts";
 import { mountAnimationEditors } from "./graph-editor.ts";
 import { createDrivenKeyPanel } from "./driven-key-panel.ts";
-import { prepareJointAnimationEdit, unwrapEuler } from "./animation-edit.ts";
+import { prepareJointAnimationEdit, prepareTransformAnimationEdit, unwrapEuler } from "./animation-edit.ts";
 import { evaluateRigStages, getIKTargetPoints, validateIKHandles, updateIKHandle, deleteIKHandle } from "./ik.ts";
 import { ikInputConstraintTargets } from "./ik-control-plan.ts";
 import { createIKPanel } from "./ik-panel.ts";
@@ -59,6 +59,8 @@ import { createIKBakePanel } from "./ik-bake-panel.ts";
 import { createJointSettingsPanel } from "./joint-settings-panel.ts";
 import { createRotationPanel } from "./rotation-panel.ts";
 import { jointRotationFromQuaternion } from "./joint-transform.ts";
+import { createAnimationLayersPanel } from "./animation-layers-panel.ts";
+import { createJointMirrorPanel } from "./joint-mirror-panel.ts";
 import { validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
@@ -261,6 +263,8 @@ async function start() {
   let ikBakePanel: ReturnType<typeof createIKBakePanel> | undefined;
   let jointSettingsPanel: ReturnType<typeof createJointSettingsPanel> | undefined;
   let rotationPanel: ReturnType<typeof createRotationPanel> | undefined;
+  let animationLayersPanel: ReturnType<typeof createAnimationLayersPanel> | undefined;
+  let jointMirrorPanel: ReturnType<typeof createJointMirrorPanel> | undefined;
   let constraintsPanel: ReturnType<typeof createConstraintsPanel> | undefined;
   let controllerPanel: ReturnType<typeof createControllerPanel> | undefined;
   let skinWeightsPanel: ReturnType<typeof createSkinWeightsPanel> | undefined;
@@ -320,14 +324,13 @@ async function start() {
     const node = doc.nodes[id];
     if (node?.type !== "transform") return;
     const pose = { ...normalizedChannels(channels), visibility: currentPose(id).visibility };
-    doc = { ...doc, nodes: { ...doc.nodes, [id]: { ...node, position: pose.position, rotation: pose.rotation, scale: pose.scale } } };
     try {
+      doc = prepareTransformAnimationEdit(doc, id, pose, getFrame(), timelinePanel?.autoKey ?? false);
       if (doc.constraints) validateConstraints(doc.constraints, doc);
     } catch (error) {
       syncScene(); notice.textContent = (error as Error).message; return;
     }
     poseOverrides.set(id, pose);
-    if (timelinePanel?.autoKey) doc = keyChannels(doc, id, pose, Math.round(getFrame()));
     poseDrafts.capture(doc, poseOverrides);
     store.setState({ document: doc, editLabel: label });
   }
@@ -352,6 +355,14 @@ async function start() {
     blendPreview = undefined;
     poseOverrides.clear();
     poseDrafts.clear();
+  }
+  function preserveUnconsumedDrafts(consumedIds: string[], action: () => void) {
+    const retained = poseDrafts.preserveAcrossEdit(store.getState().document, poseOverrides, consumedIds, () => {
+      action(); return store.getState().document;
+    });
+    poseOverrides.clear();
+    for (const [id, pose] of retained) poseOverrides.set(id, pose);
+    updateTime();
   }
   const bindings = new Map<string, { binding: SplatShapeNode["binding"]; elasticity: SplatShapeNode["elasticity"]; structure: string; mesh: SplatMesh; skin: ReturnType<typeof createBinding> }>();
   let cachedJoints: SceneDocument["joints"], jointStructure = "";
@@ -717,6 +728,8 @@ async function start() {
     controllerPanel?.refresh();
     jointSettingsPanel?.refresh();
     rotationPanel?.refresh();
+    animationLayersPanel?.refresh();
+    jointMirrorPanel?.refresh();
     skinWeightsPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
@@ -808,6 +821,8 @@ async function start() {
     ikBakePanel?.refresh();
     jointSettingsPanel?.refresh();
     rotationPanel?.refresh();
+    animationLayersPanel?.refresh();
+    jointMirrorPanel?.refresh();
     undoButton.disabled =
       loading || !!dragId || history.pastStates.length === 0;
     redoButton.disabled =
@@ -873,7 +888,7 @@ async function start() {
       const doc = store.getState().document, handle = doc.ikHandles?.find(handle => handle.id === id);
       if (!handle || loading || dragId || playing) return;
       selectAnimationTarget(handle.rootId);
-      const track = doc.animation?.tracks.find(track => track.targetId === handle.rootId && track.channel.startsWith("rotation."));
+      const track = editingTracks(doc).find(track => track.targetId === handle.rootId && track.channel.startsWith("rotation."));
       if (track) animationEditors?.focusTrack(track.id);
       element("view-graph").click();
     },
@@ -882,7 +897,7 @@ async function start() {
   jointSettingsPanel = createJointSettingsPanel(store, {
     available: () => !loading && !dragId && !playing,
     getSelection: allSelection, getFKPoses: () => fkPoses, getFrame,
-    onFreeze: () => { clearPoseDraft(); updateTime(); },
+    preserveDrafts: preserveUnconsumedDrafts,
     canKey: () => !timelinePanel?.turntable,
     onSelect: selectAnimationTarget,
     onStatus: message => { notice.textContent = message; },
@@ -894,6 +909,20 @@ async function start() {
     onStatus: message => { notice.textContent = message; },
   });
   workspace.registerPanel("rotation-curves", "Rotation Curves", rotationPanel.element);
+  animationLayersPanel = createAnimationLayersPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    onActiveChange: () => { clearPoseDraft(); updateTime(); },
+    onStatus: message => { notice.textContent = message; },
+  });
+  workspace.registerPanel("animation-layers", "Animation Layers", animationLayersPanel.element);
+  jointMirrorPanel = createJointMirrorPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    getSelection: allSelection, getFKPoses: () => fkPoses, getFrame,
+    canKey: () => !timelinePanel?.turntable,
+    onSelect: selectAnimationTarget,
+    preserveDrafts: preserveUnconsumedDrafts,
+  });
+  workspace.registerPanel("joint-mirror", "Mirror Joints / Pose", jointMirrorPanel.element);
   ikPanel.element.addEventListener("ik-range-bake", event => {
     ikBakePanel?.selectHandle((event as CustomEvent<string>).detail);
     element("view-ik-bake").click();
@@ -930,7 +959,7 @@ async function start() {
   ikPanel.element.addEventListener("ik-blend-select", event => selectAnimationTarget((event as CustomEvent<string>).detail));
   ikPanel.element.addEventListener("ik-blend-curve", event => {
     const id = (event as CustomEvent<string>).detail;
-    const track = store.getState().document.animation?.tracks.find(track => track.targetId === id && track.channel === "ik.blend");
+    const track = editingTracks(store.getState().document).find(track => track.targetId === id && track.channel === "ik.blend");
     if (!track) return;
     selectAnimationTarget(id); animationEditors?.focusTrack(track.id); element("view-graph").click();
   });
@@ -973,6 +1002,15 @@ async function start() {
     queueMicrotask(collectUnusedResources);
   });
   skinWeightsPanel = createSkinWeightsPanel(store, {
+    getInfluenceRestMatrix: (shapeId, jointId) => {
+      const shape = store.getState().document.nodes[shapeId];
+      const object = shape?.parentId ? runtime.get(shape.parentId) : undefined;
+      const bone = skeleton.boneMatrix(jointId);
+      if (!object || object.kind !== "splat" || !bone) throw Error("Load the splat and joint before adding an influence.");
+      object.mesh.updateWorldMatrix(true, false);
+      if (Math.abs(object.mesh.matrixWorld.determinant()) < 1e-12) throw Error("The splat transform is singular.");
+      return object.mesh.matrixWorld.clone().invert().multiply(bone).toArray();
+    },
     available: () => !loading && !dragId && !playing,
     getSelection: allSelection,
     getComponents: shapeId => {
@@ -1591,6 +1629,8 @@ async function start() {
     skinWeightsPanel?.refresh();
     jointSettingsPanel?.refresh();
     rotationPanel?.refresh();
+    animationLayersPanel?.refresh();
+    jointMirrorPanel?.refresh();
     skinPaintPanel?.refresh();
     modelingPanel?.refresh();
     updateWeightPreview();
@@ -1653,6 +1693,8 @@ async function start() {
     particlePanel?.refresh();
     jointSettingsPanel?.refresh();
     rotationPanel?.refresh();
+    animationLayersPanel?.refresh();
+    jointMirrorPanel?.refresh();
   }
   function updateParticles() {
     if (loading) return;

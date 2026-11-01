@@ -12,7 +12,7 @@ type Options = {
   canKey: () => boolean;
   onSelect?: (id: string) => void;
   onStatus?: (message: string) => void;
-  onFreeze?: () => void;
+  preserveDrafts?: (consumedIds: string[], action: () => void) => void;
 };
 
 /** Preferred-angle metadata is separate from authored FK and its animation. */
@@ -69,9 +69,9 @@ export function createJointSettingsPanel(store: SceneStore, options: Options) {
   const freezeHelp = document.createElement("p");
   freezeHelp.textContent = "Freeze absorbs prepared FK rotation into orientation and zeroes rotation channels, preserving that FK pose. It applies to the descendant scope. Rotation curves, SDK dependencies, active rotation constraints and IK must be removed, baked or disabled first.";
   const freeze = button("Freeze FK rotations into orientation", () => run(() => {
-    const ids = scopeIds(), before = store.getState().document;
-    freezeJointRotations(store, ids, options.getFKPoses());
-    if (store.getState().document !== before) options.onFreeze?.();
+    const ids = scopeIds();
+    const action = () => freezeJointRotations(store, ids, options.getFKPoses());
+    if (options.preserveDrafts) options.preserveDrafts(ids, action); else action();
     return `Frozen FK rotations for ${ids.length} joint${ids.length === 1 ? "" : "s"}.`;
   }));
   const localAxes = document.createElement("input"); localAxes.type = "checkbox";

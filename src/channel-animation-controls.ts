@@ -1,4 +1,4 @@
-import { setKeys, type AnimationChannel, type AnimationPose } from "./animation.ts";
+import { setKeys, editingTracks, type AnimationChannel, type AnimationPose } from "./animation.ts";
 import type { SceneStore } from "./scene-store.ts";
 import "./channel-animation-controls.css";
 
@@ -73,7 +73,7 @@ export function mountChannelKeyControls(host: HTMLElement, store: SceneStore, op
     if (previousSelection !== signature) { feedback = ""; error = false; previousSelection = signature; }
     const doc = store.getState().document, frame = Math.round(options.getFrame());
     for (const { button, channel, label } of controls) {
-      const reason = blocked(id, channel), track = doc.animation?.tracks.find(item => item.targetId === id && item.channel === channel);
+      const reason = blocked(id, channel), track = editingTracks(doc).find(item => item.targetId === id && item.channel === channel);
       const keyed = track?.keys.some(key => key.time === frame), animated = !!track?.keys.length;
       const driven = doc.drivenKeys?.some(relation => relation.driven.targetId === id && relation.driven.channel === channel);
       const state = driven ? "driven" : keyed ? "keyed" : animated ? "animated" : "unanimated";

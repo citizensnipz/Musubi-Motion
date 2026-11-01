@@ -692,3 +692,32 @@ documented in the modeling guide.
   seeds, rotated reparenting, freeze guards/preservation and unchanged skin rest matrices.
 - Independent agents reviewed SDK commands, Graph domain isolation and rotation filtering.
   Existing production bundle-size warning remains. No dependencies were added.
+
+## Animation layers, mirroring and influence management checkpoint
+
+- Full regression suite: 714 tests in 62 files passed; TypeScript/build passed.
+- Layer tests cover additive/override composition, inverse pose keying, locks,
+  mute/solo/weights/order, raw contributions, legacy files, SDK ownership, cache
+  revision isolation and native archives. Cross-system tests cover historical
+  SDK/constraint samples, authored fallback preservation and layered IK baking.
+- Browser: additive +1 Y adjustment keyed at frame 12; weight 0.5 produces 0.75
+  from Base 0.25. Native Save As/reopen retains layers/keys/weight. Escape on
+  weight 0.8 restores 0.5 without dirtying the clean project. A raw scale layer
+  key -0.5 was dragged from frame 12 to 13 while scene frame stayed 12.
+- Browser: mirrored a three-joint subtree and keyed its counterpart through the
+  active override layer. Mirroring an unkeyed 135-degree source keeps its source
+  preview. Scoped draft lifecycle tests cover synchronous subscribers and undo.
+- Browser: added R_Tip as zero-weight influence on the 11,629-component example,
+  preserving all rows, then removed it. Save readback contains all 11,629 rows,
+  nine joints and both animation layers. No browser console errors observed.
+- Layered rig generator checks reflected world matrices at five keyed frames:
+  maximum error 1.34e-15 before and after native archive roundtrip.
+- CPU-only layer benchmark (compile excluded, 30 warmups/300 samples for the
+  two representative scenes; 100 samples for the 1,000-layer stress case): see
+  scripts/benchmark-animation-layers.mjs. Representative measured medians were
+  0.103 ms for 100 objects/10 layers/3,000 tracks and 1.118 ms for 1,000 objects/
+  10 layers/30,000 tracks. Rendering, skinning and UI are excluded.
+- Independent agents reviewed commands, rotation math, layer integration,
+  historical sampling, influence preservation and UI draft handling. Review found
+  and resolved authored-fallback mutation, raw-layer preview bounds and accidental
+  source draft consumption. No new dependencies; existing bundle warning remains.

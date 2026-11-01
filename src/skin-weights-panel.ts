@@ -1,3 +1,4 @@
+import { addSkinInfluence, removeSkinInfluence } from "./skin-influences.ts";
 import { editSkinWeight, resetSkinWeights, MAX_WEIGHT_EDIT_COMPONENTS, type SkinInfluence } from "./skin-weights.ts";
 import type { SplatShapeNode } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
@@ -8,6 +9,7 @@ type Options = {
   available: () => boolean;
   getSelection: () => string[];
   getComponents: (shapeId: string) => Components | undefined;
+  getInfluenceRestMatrix?: (shapeId: string, jointId: string) => number[];
   onPreview: (preview: Preview | undefined) => void;
   onPickMode: (shapeId: string | undefined) => void;
 };
@@ -33,6 +35,26 @@ export function createSkinWeightsPanel(store: SceneStore, options: Options) {
   const intro=document.createElement("p");intro.textContent="Edit normalized joint weights by splat component index. Each component supports up to four active influences. Edits preserve the proportions of its other influences.";element.append(intro);
   const objects=document.createElement("select");objects.setAttribute("aria-label","Bound splat object");element.append(label("Bound splat object",objects));
   const empty=document.createElement("p");empty.textContent="Bind a splat object to joints, then select it here or in the Outliner.";element.append(empty);
+  const palette = group("Bound joint influences");
+  const addJoint = document.createElement("select"); addJoint.setAttribute("aria-label", "Joint to add as influence");
+  const removeJoint = document.createElement("select"); removeJoint.setAttribute("aria-label", "Influence to remove");
+  const replacement = document.createElement("select"); replacement.setAttribute("aria-label", "Sole influence replacement");
+  const addInfluence = button("Add influence with zero weight", () => run(() => {
+    const shape = current(), context = requiredContext();
+    if (!options.getInfluenceRestMatrix) throw Error("Current joint bind matrices are unavailable.");
+    stopPicking(); clearPreview(true);
+    addSkinInfluence(store, shape.id, addJoint.value, options.getInfluenceRestMatrix(shape.id, addJoint.value), context);
+  }, "Influence added with zero weight. Existing effective weights are preserved; assign weights using numeric editing or painting."));
+  const removeInfluence = button("Remove bound influence", () => run(() => {
+    const shape = current(), context = requiredContext(); stopPicking(); clearPreview(true);
+    removeSkinInfluence(store, shape.id, removeJoint.value, context, replacement.value || undefined);
+  }, "Influence removed. Remaining weights were normalized proportionally; sole-influence rows use the chosen replacement."));
+  const paletteHelp = document.createElement("p");
+  paletteHelp.textContent = "Palette edits preserve effective weights by storing every component row (up to 200,000 components). Add starts at zero weight. Remove normalizes surviving weights; components weighted only to the removed joint require an explicit replacement. Reset to automatic later recomputes weights from the edited palette.";
+  palette.append(label("Unbound joint", addJoint), addInfluence, label("Remove influence", removeJoint), label("Replacement for sole-influence components", replacement), removeInfluence, paletteHelp);
+  element.append(palette);
+  let paletteSignature = "";
+  removeJoint.onchange = () => { paletteSignature = ""; refresh(); };
   const details=group("Component weights");
   const summary=document.createElement("p");details.append(summary);
   const mode=document.createElement("select");mode.setAttribute("aria-label","Component selection mode");mode.add(new Option("Range","range"));mode.add(new Option("Viewport selection","viewport"));details.append(label("Selection mode",mode));
@@ -188,7 +210,7 @@ export function createSkinWeightsPanel(store: SceneStore, options: Options) {
     }
     const shape=shapes.find(shape=>shape.id===shapeId);
     if(!shape){shapeId="";stopPicking();if(componentSelection.length)replaceSelection([]);clearPreview(true);}
-    objects.value=shapeId;details.hidden=!shape;empty.hidden=!!shape;
+    objects.value=shapeId;palette.hidden=details.hidden=!shape;empty.hidden=!!shape;
     for(const control of Array.from(element.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>("input,select,button")))control.disabled=!available;
     objects.disabled=!available||!shapes.length;
     if(!available)stopPicking();
@@ -202,8 +224,23 @@ export function createSkinWeightsPanel(store: SceneStore, options: Options) {
       if(shape.binding!.jointIds.includes(before))influence.value=before;
       inspectionSignature="";
     }
+    const nextPaletteSignature = JSON.stringify([shape.id, shape.binding!.jointIds, doc.joints?.map(joint => [joint.id, joint.name]), removeJoint.value]);
+    if (nextPaletteSignature !== paletteSignature) {
+      const oldAdd = addJoint.value, oldRemove = removeJoint.value, oldReplacement = replacement.value;
+      const bound = new Set(shape.binding!.jointIds), names = new Map(doc.joints?.map(joint => [joint.id, joint.name]));
+      addJoint.replaceChildren(...(doc.joints ?? []).filter(joint => !bound.has(joint.id)).map(joint => new Option(joint.name, joint.id)));
+      if (Array.from(addJoint.options).some(option => option.value === oldAdd)) addJoint.value = oldAdd;
+      removeJoint.replaceChildren(...shape.binding!.jointIds.map(id => new Option(names.get(id) ?? id, id)));
+      if (bound.has(oldRemove)) removeJoint.value = oldRemove;
+      replacement.replaceChildren(new Option("Reject if any component has no surviving weight", ""), ...shape.binding!.jointIds.filter(id => id !== removeJoint.value).map(id => new Option(names.get(id) ?? id, id)));
+      if (oldReplacement !== removeJoint.value && bound.has(oldReplacement)) replacement.value = oldReplacement;
+      paletteSignature = JSON.stringify([shape.id, shape.binding!.jointIds, doc.joints?.map(joint => [joint.id, joint.name]), removeJoint.value]);
+    }
     const context=options.getComponents(shape.id),count=context?.count??0;
     const validContext=!!context&&Number.isSafeInteger(count)&&count>0;
+    const paletteAvailable = available && validContext && count <= 200000;
+    addJoint.disabled = addInfluence.disabled = !paletteAvailable || !addJoint.value || !options.getInfluenceRestMatrix || shape.binding!.jointIds.length >= 256;
+    removeJoint.disabled = replacement.disabled = removeInfluence.disabled = !paletteAvailable || shape.binding!.jointIds.length <= 1;
     if(validContext){
       rangeStart=Math.min(Math.max(0,rangeStart),count-1);rangeEnd=Math.min(Math.max(rangeStart,rangeEnd),count-1);
       if(componentSelection.some(index=>index>=count)){replaceSelection(componentSelection.filter(index=>index<count));stopPicking();}

@@ -15,6 +15,27 @@ const pose = (x: number): AnimationPose => ({ position:[x,0,0], rotation:[0,0,0]
 const poses = (x: number) => new Map([["object",pose(x)]]);
 const moved = (doc: SceneDocument): SceneDocument => ({ ...doc, nodes:{...doc.nodes} });
 
+describe("scoped draft consumption across synchronous scene edits", () => {
+  it("retains source previews, consumes only destinations, and restores both through undo", () => {
+    const drafts = new PoseDrafts(), before = fixture(), after = moved(before);
+    const input = new Map([["object", pose(3)], ["joint", pose(7)]]);
+    const retained = drafts.preserveAcrossEdit(before, input, ["joint"], () => {
+      input.clear(); // Store subscribers may clear the live map synchronously.
+      return after;
+    });
+    expect(retained.get("object")!.position[0]).toBe(3);
+    expect(retained.has("joint")).toBe(false);
+    expect(drafts.restore(before, after, "Undo").get("joint")!.position[0]).toBe(7);
+    expect(drafts.restore(after, before, "Redo").has("joint")).toBe(false);
+    retained.get("object")!.position[0] = 99;
+    expect(drafts.restore(after, before, "Redo").get("object")!.position[0]).toBe(3);
+  });
+  it("does not consume drafts when an edit is a no-op", () => {
+    const drafts = new PoseDrafts(), before = fixture();
+    expect(drafts.preserveAcrossEdit(before, poses(4), ["object"], () => before).get("object")!.position[0]).toBe(4);
+  });
+});
+
 function rigFixture(): SceneDocument {
   const doc = fixture();
   doc.joints!.push({ id: "end", name: "End", parentId: "joint", position: [0, 1, 0] });

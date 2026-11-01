@@ -31,8 +31,9 @@ export async function bakeIKToFK(store: SceneStore, id: string, settings: IKBake
   check();
   const plan = planIKBake(original, id, settings), options = { ...settings };
   const animation = original.animation ?? defaultAnimation();
+  const bakeLayerId = animation.layers?.length ? crypto.randomUUID() : undefined;
   const previous = new Map<string, Vec3>();
-  const existing = new Map(animation.tracks.map(track => [`${track.targetId}:${track.channel}`, track]));
+  const existing = new Map((bakeLayerId ? [] : animation.tracks).map(track => [`${track.targetId}:${track.channel}`, track]));
   const channels = ["rotation.x", "rotation.y", "rotation.z"] as const;
   const pending = plan.chainIds.flatMap(targetId => channels.map(channel => {
     const track = existing.get(`${targetId}:${channel}`);
@@ -71,15 +72,20 @@ export async function bakeIKToFK(store: SceneStore, id: string, settings: IKBake
     const outside = options.preserveOutsideKeys ? (entry.track?.keys ?? []).filter(key => key.time < options.start || key.time > options.end) : [];
     replacements.set(`${entry.targetId}:${entry.channel}`, {
       id: entry.track?.id ?? crypto.randomUUID(), targetId: entry.targetId, channel: entry.channel,
+      ...(bakeLayerId ? { layerId: bakeLayerId } : {}),
       keys: [...outside, ...entry.samples].sort((a, b) => a.time - b.time),
     });
   }
   const tracks = animation.tracks.map(track => {
+    if (bakeLayerId) return track;
     const key = `${track.targetId}:${track.channel}`, replacement = replacements.get(key);
     replacements.delete(key); return replacement ?? track;
   });
   tracks.push(...replacements.values());
-  const candidate: SceneDocument = { ...original, animation: { ...animation, tracks },
+  const candidate: SceneDocument = { ...original, animation: { ...animation, tracks,
+    ...(bakeLayerId ? { layers: [...animation.layers!, { id: bakeLayerId, name: "Baked IK to FK", mode: "override" as const, weight: 1, mute: false,
+      solo: animation.layers!.some(layer => layer.solo && !layer.mute), locked: false }], activeLayerId: bakeLayerId } : {}),
+  },
     ikHandles: original.ikHandles!.map(handle => handle.id === id ? { ...handle, enabled: false } : handle) };
   validateIKHandles(candidate.ikHandles, candidate);
   validateAnimation(candidate.animation, candidate);

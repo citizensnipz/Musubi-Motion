@@ -88,6 +88,18 @@ export class PoseDrafts {
   private readonly snapshots = new WeakMap<SceneDocument, DraftSnapshot>();
   private readonly seen = new WeakSet<SceneDocument>();
 
+  /** Snapshot before synchronous store subscribers run, then consume only the
+   * channels' destination poses. Mirroring must retain the source preview. */
+  preserveAcrossEdit(previous: SceneDocument, poses: ReadonlyMap<string, AnimationPose>, consumedIds: Iterable<string>, action: () => SceneDocument): Map<string, AnimationPose> {
+    const saved = copyExistingPoses(previous, poses), consumed = new Set(consumedIds);
+    this.capture(previous, saved);
+    const next = action();
+    const retained = copyExistingPoses(next, saved);
+    if (next !== previous) for (const id of consumed) retained.delete(id);
+    this.capture(next, retained);
+    return retained;
+  }
+
   /** Capture before committing the corresponding immutable document revision. */
   capture(document: SceneDocument, poses: ReadonlyMap<string, AnimationPose>): void {
     this.snapshots.set(document, { epoch: this.epoch, poses: copyExistingPoses(document, poses) });

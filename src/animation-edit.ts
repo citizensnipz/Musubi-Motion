@@ -1,5 +1,5 @@
 import { keyChannels, type AnimationPose } from "./animation.ts";
-import type { SceneDocument, Vec3 } from "./scene-document.ts";
+import type { SceneDocument, Vec3, TransformChannels } from "./scene-document.ts";
 import type { Joint } from "./skeleton.ts";
 
 /** Keep quaternion-derived gizmo angles on the nearest authored Euler revolution.
@@ -38,6 +38,18 @@ export function mergeJointPose(
   return pose;
 }
 
+/** Layered pose edits must not overwrite the authored fallback underneath the
+ * layer stack. Unkeyed changes remain document-scoped previews until keyed. */
+export function prepareTransformAnimationEdit(document: SceneDocument, id: string, pose: TransformChannels & { visibility: number }, frame: number, autoKey: boolean): SceneDocument {
+  const node = document.nodes[id];
+  if (node?.type !== "transform") throw Error("Transform target is missing.");
+  let next = document.animation?.layers?.length ? { ...document } : {
+    ...document, nodes: { ...document.nodes, [id]: { ...node, position: [...pose.position] as Vec3, rotation: [...pose.rotation] as Vec3, scale: [...pose.scale] as Vec3 } },
+  };
+  if (autoKey) next = keyChannels(next, id, pose, Math.round(frame));
+  return next;
+}
+
 /** Prepare all joint edits and auto keys as one immutable document for one history commit. */
 export function prepareJointAnimationEdit(
   document: SceneDocument, nextJoints: Joint[], label: string, frame: number, autoKey: boolean,
@@ -52,6 +64,7 @@ export function prepareJointAnimationEdit(
     if (!before || before === joint) return joint;
     const pose = mergeJointPose(before, joint, currentPose(joint.id), kind, kind === "rotation");
     overrides.set(joint.id, pose);
+    if (document.animation?.layers?.length) return before;
     return kind === "rotation" ? { ...joint, rotation: [...pose.rotation] as Vec3 } : joint;
   });
   let next: SceneDocument = { ...document, joints };

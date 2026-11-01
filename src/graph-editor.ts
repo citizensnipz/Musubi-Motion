@@ -3,7 +3,7 @@ import {
   defaultAnimation, evaluateCurve, tangentSlope, upsertTrack, deleteKeys, moveKeys,
   patchKeys, replaceTracks, copyKeys, pasteKeys,
   validateCurveKeys, scaleKeys, withTangent, insertKey, setKeys, channelsForTarget,
-  evaluateSceneAnimation, readChannel,
+  evaluateSceneAnimation, readChannel, editingTracks,
 } from "./animation.ts";
 import type { AnimationTrack, CurveKey, AnimationPose } from "./animation.ts";
 import type { SceneDocument } from "./scene-document.ts";
@@ -77,7 +77,7 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
   const sourcePicker = document.createElement("select"); sourcePicker.setAttribute("aria-label", "Graph source");
   sourcePicker.add(new Option("Time animation", "time")); sourcePicker.add(new Option("Driven keys", "driven")); sourceLabel.append(sourcePicker); sourceBar.append(sourceLabel); graph.append(sourceBar);
   const time = mountCurveEditors(store, options, {
-    kind: "time", tracks: doc => doc.animation?.tracks ?? [],
+    kind: "time", tracks: editingTracks,
     copy: ids => copyKeys(store.getState().document, ids), paste: (clipboard, at) => pasteKeys(store, clipboard, at),
     remove: ids => deleteKeys(store, ids), insert: (id, at) => insertKey(store, id, at), upsert: track => upsertTrack(store, track),
     patch: (ids, patch) => patchKeys(store, ids, patch), replace: (tracks, label) => replaceTracks(store, tracks, label),
@@ -97,7 +97,14 @@ export function mountAnimationEditors(store: SceneStore, options: EditorOptions)
     time.refresh(); driven.refresh();
   }
   sourcePicker.onchange = () => switchSource(sourcePicker.value as "time" | "driven");
-  return { graph, dopeSheet: time.dopeSheet, refresh() { time.refresh(); driven.refresh(); },
+  const layerLabel = document.createElement("span"); layerLabel.setAttribute("aria-label", "Graph animation layer"); sourceBar.append(layerLabel);
+  function refresh() {
+    const animation = store.getState().document.animation;
+    layerLabel.textContent = source === "time" ? `Layer: ${animation?.layers?.find(layer => layer.id === animation.activeLayerId)?.name ?? "Base animation"}` : "";
+    time.refresh(); driven.refresh();
+  }
+  store.subscribe(refresh);
+  return { graph, dopeSheet: time.dopeSheet, refresh,
     focusTrack(id: string) { switchSource("time"); time.focusTrack(id); },
     focusDrivenRelationship(id: string) {
       const relation = store.getState().document.drivenKeys?.find(item => item.id === id); if (!relation) return;
@@ -194,6 +201,7 @@ function mountCurveEditors<Clipboard>(store: SceneStore, options: EditorOptions,
     } else options.setFrame(snap(value));
   }
   const steppedVisibility = (track: AnimationTrack) => !isDriven && track.channel === "visibility";
+  const layerTrack = (track: AnimationTrack) => !isDriven && track.layerId !== undefined;
   const keyEntries = () => tracks().flatMap(track => track.keys.filter(key => selected.has(key.id)).map(key => ({ track, key })));
   const colorFor = (track: AnimationTrack) => colors[Math.max(0, animation().tracks.findIndex(t => t.id === track.id)) % colors.length];
   const plot = (sheet = false) => ({ left: sheet ? 190 : 54, right: (sheet ? dopeWidth : graphWidth) - 16, top: 24, bottom: graphHeight - 30 });
@@ -335,11 +343,17 @@ function mountCurveEditors<Clipboard>(store: SceneStore, options: EditorOptions,
   }
   function updateFields() {
     const entries = keyEntries(), entry = entries[0], key = entry?.key;
-    const blendActive = animation().tracks.find(track => track.id === activeTrack)?.channel === "ik.blend";
-    blendHelp.hidden = !blendActive && !entries.some(item => item.track.channel === "ik.blend");
-    dopeBlendHelp.hidden = !visibleTracks().some(track => track.channel === "ik.blend");
-    if (entry?.track.channel === "ik.blend") { keyValue.min = "0"; keyValue.max = "1"; keyValue.step = ".01"; keyValue.title = "IK blend key: 0 = FK, 1 = IK. Playback clamps tangent overshoot."; }
-    else { keyValue.removeAttribute("min"); keyValue.removeAttribute("max"); keyValue.step = "any"; keyValue.title = "Selected key value"; }
+    const active = animation().tracks.find(track => track.id === activeTrack);
+    const rawLayer = !!active && layerTrack(active);
+    const layerHelp = "Raw layer values: additive position/rotation are offsets; additive scale is a factor; override values are blend targets. Visibility and IK blend clamp to 0-1, and scale to at least 0.001, after the stack is mixed.";
+    const baseHelp = "IK blend: 0 = FK, 1 = IK. Keys must be 0-1; tangent overshoot is shown here but clamped during playback.";
+    blendHelp.textContent = rawLayer ? layerHelp : baseHelp;
+    blendHelp.hidden = !rawLayer && active?.channel !== "ik.blend" && !entries.some(item => item.track.channel === "ik.blend");
+    const dopeLayer = visibleTracks().some(layerTrack);
+    dopeBlendHelp.textContent = dopeLayer ? layerHelp : baseHelp;
+    dopeBlendHelp.hidden = !dopeLayer && !visibleTracks().some(track => track.channel === "ik.blend");
+    if (entry?.track.channel === "ik.blend" && !layerTrack(entry.track)) { keyValue.min = "0"; keyValue.max = "1"; keyValue.step = ".01"; keyValue.title = "IK blend key: 0 = FK, 1 = IK. Playback clamps tangent overshoot."; }
+    else { keyValue.removeAttribute("min"); keyValue.removeAttribute("max"); keyValue.step = "any"; keyValue.title = entry && layerTrack(entry.track) ? "Raw layer key value before weight and stack mixing" : "Selected key value"; }
     const hasVisibility=entries.some(item=>steppedVisibility(item.track));
     interpolation.disabled = tangents.disabled = !key||hasVisibility;
     for (const input of [keyTime, keyValue, inSlope, outSlope, inWeight, outWeight, broken]) input.disabled = entries.length !== 1;
@@ -473,7 +487,18 @@ function mountCurveEditors<Clipboard>(store: SceneStore, options: EditorOptions,
       } else if(drag.kind==="key"){
         const dt=snap(atTime(drag.current.x,sheet)-atTime(drag.start.x,sheet)),dv=sheet?0:atValue(drag.current.y)-atValue(drag.start.y);
         const next=drag.tracks.map(track=>({...track,keys:track.keys.map(key=>selected.has(key.id)?{...key,time:key.time+dt,value:key.value+dv}:key).sort((a,b)=>a.time-b.time)}));
-        try { for(const track of next) { validateCurveKeys(track.keys); if ((track.channel === "ik.blend" || track.channel === "visibility") && track.keys.some(key => key.value < 0 || key.value > 1)) throw Error("Blend and visibility keys must be between 0 and 1."); if (track.channel.startsWith("scale.") && track.keys.some(key => key.value < .001)) throw Error("Scale keys must be at least 0.001."); } previewTracks=next; }
+        try {
+          for (const track of next) {
+            validateCurveKeys(track.keys);
+            // Layer keys are raw contributions; only the mixed result is clamped.
+            if (layerTrack(track)) continue;
+            if ((track.channel === "ik.blend" || track.channel === "visibility") && track.keys.some(key => key.value < 0 || key.value > 1))
+              throw Error("Blend and visibility keys must be between 0 and 1.");
+            if (track.channel.startsWith("scale.") && track.keys.some(key => key.value < .001))
+              throw Error("Scale keys must be at least 0.001.");
+          }
+          previewTracks=next;
+        }
         catch { previewTracks=undefined;announce("This move would overlap key times or exceed the supported range.",true); }
       } else if(drag.kind==="tangent"){
         const track=drag.tracks.find(t=>t.keys.some(k=>k.id===drag!.keyId));

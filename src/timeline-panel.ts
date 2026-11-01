@@ -1,4 +1,4 @@
-import { defaultAnimation, setAnimationSettings, deleteKeys } from "./animation.ts";
+import { defaultAnimation, setAnimationSettings, deleteKeys, editingTracks } from "./animation.ts";
 import type { SceneStore } from "./scene-store.ts";
 import type WaSlider from "@awesome.me/webawesome/dist/components/slider/slider.js";
 import "./timeline-panel.css";
@@ -37,7 +37,7 @@ export function mountTimeline(store: SceneStore, options: {
   tools.querySelector<HTMLButtonElement>('[data-action="key"]')!.onclick = () => run(options.setKey);
   tools.querySelector<HTMLButtonElement>('[data-action="delete"]')!.onclick = () => run(() => {
     const selection = new Set(options.getSelection());
-    const ids = store.getState().document.animation?.tracks.filter(t => selection.has(t.targetId))
+    const ids = editingTracks(store.getState().document).filter(t => selection.has(t.targetId))
       .flatMap(t => t.keys.filter(k => k.time === Math.round(options.getFrame())).map(k => k.id)) ?? [];
     deleteKeys(store, ids);
   });
@@ -73,7 +73,7 @@ export function mountTimeline(store: SceneStore, options: {
     markers.replaceChildren();
     if (!turntable) {
       const selected = new Set(options.getSelection());
-      const frames = new Set(store.getState().document.animation?.tracks.filter(t => selected.has(t.targetId)).flatMap(t => t.keys.map(k => k.time)));
+      const frames = new Set(editingTracks(store.getState().document).filter(t => selected.has(t.targetId)).flatMap(t => t.keys.map(k => k.time)));
       for (const frame of [...frames].sort((a, b) => a - b)) if (frame >= settings.start && frame <= settings.end) {
         const button = document.createElement("button"); button.type = "button";
         button.title = `Go to key at frame ${frame}`; button.setAttribute("aria-label", button.title);

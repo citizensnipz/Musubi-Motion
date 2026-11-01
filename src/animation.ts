@@ -23,8 +23,9 @@ export type CurveKey = {
   outWeight?: number;
   broken?: boolean;
 };
-export type AnimationTrack = { id: string; targetId: string; channel: AnimationChannel; keys: CurveKey[] };
-export type AnimationData = { fps: number; start: number; end: number; loop: boolean; tracks: AnimationTrack[] };
+export type AnimationTrack = { id: string; targetId: string; channel: AnimationChannel; keys: CurveKey[]; layerId?: string };
+export type AnimationLayer = { id: string; name: string; mode: "additive" | "override"; weight: number; mute: boolean; solo: boolean; locked: boolean };
+export type AnimationData = { fps: number; start: number; end: number; loop: boolean; tracks: AnimationTrack[]; layers?: AnimationLayer[]; activeLayerId?: string };
 export type AnimationPose = TransformChannels & { visibility: number };
 export type KeyClipboard = { tracks: AnimationTrack[]; origin: number };
 
@@ -64,6 +65,15 @@ export function validateAnimation(value: unknown, doc: SceneDocument): asserts v
   if (handles.size !== (doc.ikHandles?.length ?? 0) || [...handles.keys()].some(id => Object.hasOwn(doc.nodes, id) || joints.has(id))) throw Error("IK handle, joint and object IDs must be distinct.");
   if (!record(value) || !finite(value.fps, 240) || value.fps < 1 || !finite(value.start, 1e6) || !finite(value.end, 1e6)
     || value.end <= value.start || typeof value.loop !== "boolean" || !Array.isArray(value.tracks) || value.tracks.length > 100000) throw Error("Invalid animation settings.");
+  const layerIds = new Set<string>();
+  if (value.layers !== undefined && (!Array.isArray(value.layers) || value.layers.length > 1000)) throw Error("Invalid animation layers.");
+  for (const layer of value.layers as unknown[] ?? []) {
+    if (!record(layer) || !validId(layer.id) || layerIds.has(layer.id) || typeof layer.name !== "string" || !layer.name.trim() || layer.name.length > 200
+      || !["additive", "override"].includes(layer.mode as string) || !finite(layer.weight, 1) || layer.weight < 0
+      || typeof layer.mute !== "boolean" || typeof layer.solo !== "boolean" || typeof layer.locked !== "boolean") throw Error("Invalid animation layer.");
+    layerIds.add(layer.id);
+  }
+  if (value.activeLayerId !== undefined && (!validId(value.activeLayerId) || !layerIds.has(value.activeLayerId))) throw Error("Active animation layer is missing.");
   const trackIds = new Set<string>(), keyIds = new Set<string>(), channels = new Set<string>();
   const driven = new Set((doc.drivenKeys ?? []).map(relation => `${relation.driven.targetId}:${relation.driven.channel}`));
   let totalKeys = 0;
@@ -74,18 +84,19 @@ export function validateAnimation(value: unknown, doc: SceneDocument): asserts v
     if (node?.type !== "transform" && !joint && !handle) throw Error("Animation target is missing.");
     if ((track.channel === "ik.blend") !== !!handle) throw Error("IK blend tracks require an IK handle; pose channels require an object or joint.");
     if (joint && (track.channel as string).startsWith("scale.")) throw Error("Joint scale animation is not supported.");
-    const channelKey = `${track.targetId}:${track.channel}`;
-    if (channels.has(channelKey)) throw Error("Duplicate animated channel.");
+    if (track.layerId !== undefined && (!validId(track.layerId) || !layerIds.has(track.layerId))) throw Error("Animation track layer is missing.");
+    const channelKey = `${track.targetId}:${track.channel}`, layeredChannel = JSON.stringify([track.layerId ?? null, track.targetId, track.channel]);
+    if (channels.has(layeredChannel)) throw Error("Duplicate animated channel in a layer.");
     if (driven.has(channelKey)) throw Error("A channel cannot have both time keys and driven keys.");
     validateCurveKeys(track.keys);
     totalKeys += track.keys.length;
     if (totalKeys > 100000) throw Error("Too many animation keys.");
     for (const key of track.keys) {
-      if (track.channel === "ik.blend" && (key.value < 0 || key.value > 1)) throw Error("IK blend key values must be between zero and one.");
+      if (track.layerId === undefined && track.channel === "ik.blend" && (key.value < 0 || key.value > 1)) throw Error("Base IK blend key values must be between zero and one.");
       if (keyIds.has(key.id)) throw Error("Duplicate animation key ID.");
       keyIds.add(key.id);
     }
-    trackIds.add(track.id); channels.add(channelKey);
+    trackIds.add(track.id); channels.add(layeredChannel);
   }
 }
 
@@ -204,20 +215,119 @@ export function baseChannels(doc: SceneDocument, id: string): AnimationPose {
   };
 }
 
-// Reuse the index while the immutable animation document is unchanged.
-const trackIndexes = new WeakMap<AnimationData, Map<string, AnimationTrack[]>>();
-function tracksFor(doc: SceneDocument, id: string): AnimationTrack[] {
-  if (!doc.animation) return [];
-  let index = trackIndexes.get(doc.animation);
-  if (!index) {
-    index = new Map();
-    for (const track of doc.animation.tracks) {
-      const tracks = index.get(track.targetId) ?? [];
-      tracks.push(track); index.set(track.targetId, tracks);
-    }
-    trackIndexes.set(doc.animation, index);
+// Compile immutable animation revisions once. A channel stores only its own
+// enabled layer contributions, so per-frame evaluation is linear in tracks;
+// unrelated layers and other objects are never searched in the inner loop.
+type LayerContribution = { layer: AnimationLayer; track?: AnimationTrack };
+type CompiledChannel = { base?: AnimationTrack; layers: LayerContribution[] };
+type CompiledTarget = { channels: Map<AnimationChannel, CompiledChannel> };
+type CompiledAnimation = { targets: Map<string, CompiledTarget>; enabled: Map<string, AnimationLayer>; order: Map<string, number> };
+const animationIndexes = new WeakMap<AnimationData, CompiledAnimation>();
+const emptyAnimationIndex: CompiledAnimation = { targets: new Map(), enabled: new Map(), order: new Map() };
+function animationIndex(animation?: AnimationData): CompiledAnimation {
+  if (!animation) return emptyAnimationIndex;
+  const cached = animationIndexes.get(animation); if (cached) return cached;
+  const enabled = new Map(activeLayers(animation).map(layer => [layer.id, layer]));
+  const order = new Map((animation.layers ?? []).map((layer, index) => [layer.id, index]));
+  const targets = new Map<string, CompiledTarget>();
+  for (const track of animation.tracks) {
+    let target = targets.get(track.targetId);
+    if (!target) { target = { channels: new Map() }; targets.set(track.targetId, target); }
+    let channel = target.channels.get(track.channel);
+    if (!channel) { channel = { layers: [] }; target.channels.set(track.channel, channel); }
+    if (track.layerId === undefined) channel.base = track;
+    else { const layer = enabled.get(track.layerId); if (layer) channel.layers.push({ layer, track }); }
   }
-  return index.get(id) ?? [];
+  for (const target of targets.values()) for (const channel of target.channels.values())
+    channel.layers.sort((a, b) => order.get(a.layer.id)! - order.get(b.layer.id)!);
+  const compiled = { targets, enabled, order }; animationIndexes.set(animation, compiled); return compiled;
+}
+/** Base has no layerId. All editors use this view; ownership validation scans
+ * the complete flat track list, including muted and locked layers. */
+export function editingTracks(doc: SceneDocument): AnimationTrack[] {
+  const animation = doc.animation;
+  return (animation?.tracks ?? []).filter(track => track.layerId === animation?.activeLayerId);
+}
+export function assertAnimationLayerEditable(doc: SceneDocument): void {
+  const id = doc.animation?.activeLayerId;
+  if (id === undefined) return;
+  const layer = doc.animation?.layers?.find(layer => layer.id === id);
+  if (!layer) throw Error("Active animation layer is missing.");
+  if (layer.locked) throw Error("The active animation layer is locked. Unlock it before editing keys.");
+}
+function assertActiveTracks(doc: SceneDocument, tracks: readonly AnimationTrack[]) {
+  assertAnimationLayerEditable(doc);
+  if (tracks.some(track => track.layerId !== doc.animation?.activeLayerId)) throw Error("Select the curve's active layer before editing its keys.");
+}
+function activeLayerFields(doc: SceneDocument): { layerId?: string } {
+  return doc.animation?.activeLayerId === undefined ? {} : { layerId: doc.animation.activeLayerId };
+}
+const enabledLayerCache = new WeakMap<AnimationData, AnimationLayer[]>();
+function activeLayers(animation?: AnimationData): AnimationLayer[] {
+  if (!animation) return [];
+  const cached = enabledLayerCache.get(animation); if (cached) return cached;
+  const layers = animation?.layers ?? [], solo = layers.some(layer => layer.solo && !layer.mute);
+  const result = layers.filter(layer => !layer.mute && (!solo || layer.solo) && layer.weight > 0);
+  enabledLayerCache.set(animation, result); return result;
+}
+function trackValue(track: AnimationTrack, frame: number): number | undefined {
+  // Time visibility is held at key boundaries. Layer values stay scalar until
+  // the complete stack is mixed; rendering uses the final .5 threshold.
+  return track.channel === "visibility" && track.layerId === undefined ? evaluateVisibility(track.keys, frame)
+    : track.channel === "visibility" ? evaluateHeld(track.keys, frame) : evaluateCurve(track.keys, frame);
+}
+function evaluateHeld(keys: CurveKey[], frame: number): number | undefined {
+  if (!keys.length) return undefined;
+  let low = 0, high = keys.length;
+  while (low + 1 < high) { const middle = (low + high) >>> 1; if (keys[middle].time <= frame) low = middle; else high = middle; }
+  return keys[low].value;
+}
+/** Affine stack in one prospective active-layer value. This powers both
+ * evaluation and exact inverse keying without temporary document mutations. */
+function channelStack(doc: SceneDocument, id: string, channel: AnimationChannel, frame: number, fallback: number, variable = false): { offset: number; gain: number } {
+  const index = animationIndex(doc.animation), compiled = index.targets.get(id)?.channels.get(channel), active = doc.animation?.activeLayerId;
+  const base = compiled?.base, baseValue = base ? trackValue(base, frame) : undefined;
+  let contributions = compiled?.layers ?? [];
+  // Keying a previously absent curve introduces one prospective contribution.
+  // This does not mutate the cached plan or any authored scene data.
+  const prospective = variable && active !== undefined ? index.enabled.get(active) : undefined;
+  if (prospective && !contributions.some(entry => entry.layer.id === active))
+    contributions = [...contributions, { layer: prospective }].sort((a, b) => index.order.get(a.layer.id)! - index.order.get(b.layer.id)!);
+  let offset = variable && active === undefined ? 0 : baseValue ?? fallback, gain = variable && active === undefined ? 1 : 0;
+  for (const { layer, track } of contributions) {
+    const isVariable = variable && active === layer.id;
+    const value = track ? trackValue(track, frame) : undefined;
+    if (value === undefined && !isVariable) continue;
+    const w = layer.weight, override = layer.mode === "override" || channel === "visibility";
+    if (isVariable) {
+      if (override) { offset *= 1 - w; gain = w; }
+      else if (channel.startsWith("scale.")) { gain = offset * w; offset *= 1 - w; }
+      else gain = w;
+    } else if (override) { offset = offset * (1 - w) + value! * w; gain *= 1 - w; }
+    else if (channel.startsWith("scale.")) { const factor = 1 + w * (value! - 1); offset *= factor; gain *= factor; }
+    else offset += value! * w;
+  }
+  return { offset, gain };
+}
+function effectiveValue(channel: AnimationChannel, value: number): number {
+  if (!finite(value)) throw Error("Animation layer evaluation exceeds the supported value range.");
+  if (channel.startsWith("scale.")) return Math.max(0.001, value);
+  if (channel === "visibility" || channel === "ik.blend") return Math.max(0, Math.min(1, value));
+  return value;
+}
+function keyedLayerValue(doc: SceneDocument, id: string, channel: AnimationChannel, frame: number, requested: number): number {
+  assertAnimationLayerEditable(doc);
+  if (!finite(requested)) throw Error("Animation values must be finite.");
+  if (!doc.animation?.layers?.length) return requested;
+  const fallback = channel === "ik.blend" ? doc.ikHandles!.find(handle => handle.id === id)!.blend : readChannel(baseChannels(doc, id), channel);
+  const { offset, gain } = channelStack(doc, id, channel, frame, fallback, true);
+  if (!Number.isFinite(gain) || Math.abs(gain) < 1e-12) throw Error("The active layer has no influence on this channel: it is muted, has zero weight, is excluded by solo, or is masked by another layer.");
+  const value = (requested - offset) / gain;
+  if (!finite(value)) throw Error("The requested pose requires an unsupported layer value. Increase the layer weight.");
+  if (channel === "visibility" && doc.animation.activeLayerId === undefined
+    && Math.abs(effectiveValue(channel, offset + gain * (value >= 0.5 ? 1 : 0)) - requested) > 1e-9)
+    throw Error("Base visibility is discrete and cannot produce this layered result. Key visibility on an override layer or adjust the other layers.");
+  return value;
 }
 /** Blend is an ordinary curve with bounded effective output, independent of
  * the handle's enabled state. Empty tracks retain the literal fallback. */
@@ -225,17 +335,14 @@ export function evaluateIKBlend(doc: SceneDocument, id: string, frame: number): 
   if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
   const handle = doc.ikHandles?.find(handle => handle.id === id);
   if (!handle) throw Error("IK animation target is missing.");
-  const track = tracksFor(doc, id).find(track => track.channel === "ik.blend");
-  const value = track ? evaluateCurve(track.keys, frame) ?? handle.blend : handle.blend;
-  if (!Number.isFinite(value)) throw Error("IK blend must be finite.");
-  return Math.max(0, Math.min(1, value));
+  return effectiveValue("ik.blend", channelStack(doc, id, "ik.blend", frame, handle.blend).offset);
 }
 export function evaluateChannels(doc: SceneDocument, id: string, frame: number): AnimationPose {
   if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
   const pose = baseChannels(doc, id);
-  for (const track of tracksFor(doc, id)) {
-    const value = track.channel === "visibility" ? evaluateVisibility(track.keys, frame) : evaluateCurve(track.keys, frame);
-    if (value !== undefined) applyChannel(pose, track.channel, value);
+  for (const channel of animationIndex(doc.animation).targets.get(id)?.channels.keys() ?? []) {
+    const value = channelStack(doc, id, channel, frame, readChannel(pose, channel)).offset;
+    applyChannel(pose, channel, effectiveValue(channel, value));
   }
   return pose;
 }
@@ -250,11 +357,11 @@ export function evaluateSceneAnimation(doc: SceneDocument, frame: number): Map<s
   for (const joint of doc.joints ?? []) {
     poses.set(joint.id, { position: [...joint.position], rotation: [...joint.rotation ?? [0, 0, 0]], scale: [1, 1, 1], visibility: 1 });
   }
-  for (const track of doc.animation?.tracks ?? []) {
-    const pose = poses.get(track.targetId);
-    if (!pose) continue;
-    const value = track.channel === "visibility" ? evaluateVisibility(track.keys, frame) : evaluateCurve(track.keys, frame);
-    if (value !== undefined) applyChannel(pose, track.channel, value);
+  for (const [id, pose] of poses) {
+    for (const channel of animationIndex(doc.animation).targets.get(id)?.channels.keys() ?? []) {
+      const value = channelStack(doc, id, channel, frame, readChannel(pose, channel)).offset;
+      applyChannel(pose, channel, effectiveValue(channel, value));
+    }
   }
   return poses;
 }
@@ -306,14 +413,14 @@ export function keyChannels(doc: SceneDocument, id: string, channels: (Transform
   const animation = doc.animation ?? defaultAnimation();
   let tracks = [...animation.tracks];
   for (const channel of targetChannels(doc, id)) {
-    const index = tracks.findIndex(track => track.targetId === id && track.channel === channel);
+    const index = tracks.findIndex(track => track.targetId === id && track.channel === channel && track.layerId === animation.activeLayerId);
     if (index < 0 && onlyExisting) continue;
-    const track = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel, keys: [] } : tracks[index];
+    const track = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel, keys: [], ...activeLayerFields(doc) } : tracks[index];
     if (onlyExisting && !track.keys.length) continue;
     const value = typeof channels === "number" ? channels : readChannel(channels, channel);
-    const evaluated = isHandle ? evaluateIKBlend(doc, id, frame) : evaluateCurve(track.keys, frame) ?? value;
+    const evaluated = isHandle ? evaluateIKBlend(doc, id, frame) : readChannel(evaluateChannels(doc, id, frame), channel);
     if (onlyExisting && Math.abs(evaluated - value) < 1e-10) continue;
-    const next = withKey(track, frame, value);
+    const next = withKey(track, frame, keyedLayerValue(doc, id, channel, frame, value));
     if (index < 0) tracks.push(next); else tracks[index] = next;
   }
   if (JSON.stringify(animation.tracks) === JSON.stringify(tracks)) return doc;
@@ -333,9 +440,10 @@ export function setKeys(store: SceneStore, targetIds: Iterable<string>, frame: n
     for (const channel of channels ?? targetChannels(doc, targetId)) {
       if (channel.startsWith("scale.") && doc.joints?.some(joint => joint.id === targetId)) throw Error("Joint scale animation is not supported.");
       if (!supported.includes(channel)) throw Error("The selected animation channel is not supported by this target.");
-      const index = tracks.findIndex(track => track.targetId === targetId && track.channel === channel);
-      const track = index < 0 ? { id: crypto.randomUUID(), targetId, channel, keys: [] } : tracks[index];
-      const next = withKey(track, frame, channel === "ik.blend" ? evaluateIKBlend(doc, targetId, frame) : readChannel(pose!, channel));
+      const index = tracks.findIndex(track => track.targetId === targetId && track.channel === channel && track.layerId === animation.activeLayerId);
+      const track = index < 0 ? { id: crypto.randomUUID(), targetId, channel, keys: [], ...activeLayerFields(doc) } : tracks[index];
+      const requested = channel === "ik.blend" ? evaluateIKBlend(doc, targetId, frame) : readChannel(pose!, channel);
+      const next = withKey(track, frame, keyedLayerValue(doc, targetId, channel, frame, requested));
       if (index < 0) tracks.push(next); else tracks[index] = next;
     }
   }
@@ -349,16 +457,29 @@ export function setIKBlendKey(store: SceneStore, id: string, frame: number, valu
   const doc = store.getState().document;
   if (channelsForTarget(doc, id)[0] !== "ik.blend") throw Error("Choose an IK handle to key its blend.");
   const animation = doc.animation ?? defaultAnimation(), tracks = [...animation.tracks];
-  const index = tracks.findIndex(track => track.targetId === id && track.channel === "ik.blend");
-  const track: AnimationTrack = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel: "ik.blend", keys: [] } : tracks[index];
-  const next = withKey(track, frame, value);
+  const index = tracks.findIndex(track => track.targetId === id && track.channel === "ik.blend" && track.layerId === animation.activeLayerId);
+  const track: AnimationTrack = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel: "ik.blend", keys: [], ...activeLayerFields(doc) } : tracks[index];
+  const next = withKey(track, frame, keyedLayerValue(doc, id, "ik.blend", frame, value));
   if (index < 0) tracks.push(next); else tracks[index] = next;
   saveAnimation(store, { ...animation, tracks }, "Key IK blend");
 }
 
 export function replaceTracks(store: SceneStore, replacements: AnimationTrack[], label = "Edit animation curves") {
-  const animation = store.getState().document.animation ?? defaultAnimation();
-  const byId = new Map(replacements.map(track => [track.id, structuredClone(track)]));
+  const doc = store.getState().document, animation = doc.animation ?? defaultAnimation();
+  assertAnimationLayerEditable(doc);
+  const existing = new Map(animation.tracks.map(track => [track.id, track]));
+  const normalized = replacements.map(track => {
+    const original = existing.get(track.id);
+    if (original) {
+      assertActiveTracks(doc, [original]);
+      if (track.layerId !== original.layerId || track.targetId !== original.targetId || track.channel !== original.channel)
+        throw Error("Editing keys cannot change the track's layer, target or channel.");
+      return track;
+    }
+    if (track.layerId !== undefined && track.layerId !== animation.activeLayerId) throw Error("New curves belong to the active layer.");
+    return { ...track, ...activeLayerFields(doc) };
+  });
+  const byId = new Map(normalized.map(track => [track.id, structuredClone(track)]));
   if (byId.size !== replacements.length) throw Error("Duplicate animation track ID.");
   const tracks = animation.tracks.map(track => {
     const replacement = byId.get(track.id);
@@ -376,6 +497,7 @@ export function insertKey(store: SceneStore, trackId: string, time: number): str
   const animation = store.getState().document.animation ?? defaultAnimation();
   const track = animation.tracks.find(track => track.id === trackId);
   if (!track) throw Error("Select an existing animation curve.");
+  assertActiveTracks(store.getState().document, [track]);
   const { keys, id } = insertCurveKey(track.keys, time, { discrete: track.channel === "visibility" });
   if (track.keys.some(key => key.id === id)) return id;
   saveAnimation(store, { ...animation, tracks: animation.tracks.map(candidate => candidate.id === trackId ? { ...track, keys } : candidate) }, "Insert keyframe");
@@ -448,16 +570,20 @@ export function insertCurveKey(source: readonly CurveKey[], time: number, option
 
 export function deleteKeys(store: SceneStore, keyIds: Iterable<string>) {
   const animation = store.getState().document.animation ?? defaultAnimation(), selected = new Set(keyIds);
-  saveAnimation(store, { ...animation, tracks: animation.tracks.map(track => ({ ...track, keys: track.keys.filter(key => !selected.has(key.id)) })).filter(track => track.keys.length) }, "Delete keyframes");
+  assertActiveTracks(store.getState().document, animation.tracks.filter(track => track.keys.some(key => selected.has(key.id))));
+  saveAnimation(store, { ...animation, tracks: animation.tracks.map(track => track.layerId === animation.activeLayerId
+    ? { ...track, keys: track.keys.filter(key => !selected.has(key.id)) } : track).filter(track => track.layerId !== animation.activeLayerId || track.keys.length) }, "Delete keyframes");
 }
 export function patchKeys(store: SceneStore, keyIds: Iterable<string>, patch: Partial<Omit<CurveKey, "id">>) {
   const animation = store.getState().document.animation ?? defaultAnimation(), selected = new Set(keyIds);
+  assertActiveTracks(store.getState().document, animation.tracks.filter(track => track.keys.some(key => selected.has(key.id))));
   const tracks = animation.tracks.map(track => ({ ...track, keys: track.keys.map(key => selected.has(key.id) ? { ...key, ...patch, id: key.id } : key).sort((a, b) => a.time - b.time) }));
   saveAnimation(store, { ...animation, tracks }, "Edit keyframes");
 }
 export function moveKeys(store: SceneStore, keyIds: Iterable<string>, timeDelta: number, valueDelta = 0) {
   if (!finite(timeDelta, 2e6) || !finite(valueDelta)) throw Error("Invalid keyframe movement.");
   const animation = store.getState().document.animation ?? defaultAnimation(), selected = new Set(keyIds);
+  assertActiveTracks(store.getState().document, animation.tracks.filter(track => track.keys.some(key => selected.has(key.id))));
   const tracks = animation.tracks.map(track => ({ ...track, keys: track.keys.map(key => selected.has(key.id)
     ? { ...key, time: key.time + timeDelta, value: key.value + valueDelta } : key).sort((a, b) => a.time - b.time) }));
   saveAnimation(store, { ...animation, tracks }, "Move keyframes");
@@ -466,6 +592,7 @@ export function moveKeys(store: SceneStore, keyIds: Iterable<string>, timeDelta:
 export function scaleKeys(store: SceneStore, keyIds: Iterable<string>, factor: number, pivot?: number) {
   if (!finite(factor) || factor <= 0 || (pivot !== undefined && !finite(pivot, 1e6))) throw Error("Keyframe scale must be positive and finite.");
   const animation = store.getState().document.animation ?? defaultAnimation(), selected = new Set(keyIds);
+  assertActiveTracks(store.getState().document, animation.tracks.filter(track => track.keys.some(key => selected.has(key.id))));
   let origin = pivot ?? Infinity;
   if (pivot === undefined) for (const track of animation.tracks) for (const key of track.keys) if (selected.has(key.id)) origin = Math.min(origin, key.time);
   if (!Number.isFinite(origin)) return;
@@ -503,21 +630,23 @@ export function scaleCurveKeys(keys: readonly CurveKey[], selected: ReadonlySet<
   validateCurveKeys(result);
   return result;
 }
-export function setAnimationSettings(store: SceneStore, settings: Partial<Omit<AnimationData, "tracks">>) {
+export function setAnimationSettings(store: SceneStore, settings: Partial<Pick<AnimationData, "fps" | "start" | "end" | "loop">>) {
+  if (Object.keys(settings).some(key => !["fps", "start", "end", "loop"].includes(key))) throw Error("Unsupported animation setting.");
   saveAnimation(store, { ...(store.getState().document.animation ?? defaultAnimation()), ...settings }, "Animation settings");
 }
 export function copyKeys(doc: SceneDocument, keyIds: Iterable<string>): KeyClipboard {
-  const selected = new Set(keyIds), tracks = (doc.animation?.tracks ?? []).map(track => ({ ...track, keys: track.keys.filter(key => selected.has(key.id)) })).filter(track => track.keys.length);
+  const selected = new Set(keyIds), tracks = editingTracks(doc).map(track => ({ ...track, keys: track.keys.filter(key => selected.has(key.id)) })).filter(track => track.keys.length);
   return { tracks: structuredClone(tracks), origin: tracks.length ? tracks.reduce((first, track) => Math.min(first, track.keys[0].time), Infinity) : 0 };
 }
 /** Paste replaces keys at matching times and preserves relative key timing. */
 export function pasteKeys(store: SceneStore, clipboard: KeyClipboard, frame: number, targetId?: string): string[] {
   if (!finite(frame, 1e6) || !finite(clipboard.origin, 1e6)) throw Error("Invalid paste frame.");
+  assertAnimationLayerEditable(store.getState().document);
   const animation = store.getState().document.animation ?? defaultAnimation(), tracks = [...animation.tracks], ids: string[] = [];
   for (const source of clipboard.tracks) {
     const destination = targetId ?? source.targetId;
-    const index = tracks.findIndex(track => track.targetId === destination && track.channel === source.channel);
-    const track = index < 0 ? { id: crypto.randomUUID(), targetId: destination, channel: source.channel, keys: [] } : tracks[index];
+    const index = tracks.findIndex(track => track.targetId === destination && track.channel === source.channel && track.layerId === animation.activeLayerId);
+    const track = index < 0 ? { id: crypto.randomUUID(), targetId: destination, channel: source.channel, keys: [], ...activeLayerFields(store.getState().document) } : tracks[index];
     const pasted = source.keys.map(key => ({ ...key, id: crypto.randomUUID(), time: frame + key.time - clipboard.origin }));
     ids.push(...pasted.map(key => key.id));
     const times = new Set(pasted.map(key => key.time));

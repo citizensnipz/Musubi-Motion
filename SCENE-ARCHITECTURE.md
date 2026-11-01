@@ -110,7 +110,7 @@ UI / keyboard → shared commands → immutable SceneDocument → undo history
                                       ↓
                      authored local transform and joint channels
                                       ↓
-                           absolute-frame animation curves
+                    absolute-frame Base and animation layer curves
                                       ↓
                        temporary unkeyed editing overrides
                                       ↓
@@ -130,6 +130,19 @@ transforms and joints through the same pose representation. Evaluation creates
 a pose map without changing the document, so scrubbing and repeated evaluation
 of a frame are deterministic and do not fill history. The viewport, Properties,
 timeline, Graph Editor, and Dope Sheet refer to the same scene and frame.
+
+Layers retain one flat authoritative track store with optional layer IDs. A
+compiled WeakMap plan groups active contributions by target/channel for ordered
+scalar mixing. Keying uses the inverse affine stack to produce requested composite
+poses; editable-track views scope Graph/Dope/Timeline/Channel Box operations.
+Layered pose edits retain authored fallbacks and use temporary overrides before
+keying. Layered IK baking writes a new top override and verifies world samples.
+
+`joint-transform.ts` owns orientation composition and rotation-channel extraction
+for skeleton, IK and constraints. Joint mirroring reflects right-handed world
+frames and derives destination-local channels before whole-rig verification.
+Influence palette edits first materialize effective component rows, preserving
+automatic weights across palette changes within the existing override budget.
 
 IK handles additionally accept an `ik.blend` track whose `targetId` is the handle
 ID. These scalar tracks are evaluated separately from transform poses; no fake

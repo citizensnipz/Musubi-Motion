@@ -4,7 +4,7 @@ Musubi implements a practical subset of Maya-style animation workflows. The
 current editor has a frame timeline, editable transform/joint curves, driven
 keys, FK, CCD and analytic two-bone IK with pole targets, numeric and painted skin
 weights, and point/orient/aim/scale/parent constraints. Targets and poles can use
-animated curve controls. Animation layers remain future work; polygon tools and
+animated curve controls and additive/override animation layers. Polygon tools and
 particle FX have separate [modeling](MODELING.md) and [particle](PARTICLES.md) guides.
 
 ## Start with the example
@@ -106,6 +106,41 @@ the frame when you intend to keep the animation change.
 Rewind seeks to the playback start. The separate **Turntable preview** mode
 retains the original 12-second presentation rotation. Turntable playback is not
 a keyframe curve and is not saved as animation.
+
+## Animation layers
+
+Open **Animation → Animation Layers**. Base animation evaluates first. Additional
+layers evaluate in list order; **Earlier/Later** reorder them. Add, rename, remove,
+choose Additive/Override, set weight 0–1, mute, solo or lock. Base stays under solo
+layers; muted solo layers do not suppress others. Layer selection changes the
+editing destination, not playback, and is saved with the project.
+
+Additive position and XYZ Euler rotation curves contain offsets. Additive scale
+curves contain factors, with 1 neutral. Override curves contain target values.
+Visibility uses held scalar override blending, followed by the viewport's 0.5
+threshold. Missing channels pass through. Scale stays positive and effective IK
+blend stays within 0–1 after mixing; raw layer contributions can exceed these
+effective bounds. These are scalar Euler layers, not quaternion rotation layers.
+
+Timeline keying, Auto Key, channel diamonds, Graph Editor, Dope Sheet and rotation
+cleanup operate on the active layer. Keying solves the raw contribution needed to
+produce the requested composite pose; muted, zero-weight, locked, solo-excluded or
+fully masked destinations reject unachievable edits. Unkeyed layered pose edits
+are temporary previews and do not overwrite authored base transforms. Auto Key
+updates existing active-layer channels only. Copy/paste transfers raw values into
+the active layer, so pasting between blend modes may change the resulting pose.
+
+SDK channel ownership applies across every layer, including muted layers. Layered
+IK range baking creates a top override layer and retains the original tracks;
+the same sampled whole-scene verification runs before committing. As before,
+disabling the IK handle affects the entire timeline and outside-range motion may
+change. Layer weights/settings are static; animated weights, merge/flatten and
+per-object layer membership tools remain future extensions. Limits: 1,000 layers,
+100,000 total tracks and 100,000 total keys.
+
+Open [examples/layered-rig-study.msb](../examples/layered-rig-study.msb) for joint
+orientation, additive arm adjustment and keyed mirrored poses on an override
+layer. Regenerate with `node scripts/create-layered-rig-example.mjs`.
 
 ## Graph Editor
 
@@ -432,6 +467,22 @@ must first be removed, baked or disabled; the command rejects incompatible cases
 atomically. Existing captured skin rest matrices are retained. Manual orientation
 edits intentionally change the pose. Automatic orient-to-child is not yet provided.
 
+## Joint and pose mirroring
+
+Open **Rigging → Mirror Joints / Pose**. Choose a source subtree, an X/Y/Z world
+origin plane and literal name substitution (for example `L_` to `R_`).
+**Mirror joint subtree** creates a detached mirrored root with remapped descendants,
+orientation and preferred angles. It mirrors authored joint frames, leaving time
+animation, controls, constraints, IK handles and skin bindings on the source.
+
+For existing named counterparts, **Mirror FK pose** reflects current prepared FK
+onto the paired joints; **Mirror FK pose and key** keys their position/rotation
+through the active layer. Name ambiguity, ownership conflicts and inconsistent
+composed results reject atomically. The operation reflects world frames using
+`R * M * R`, preserving proper handedness. It is not Maya's equal-channel Behavior
+mode. Source/destination parents may differ; target-local channels compensate.
+The command verifies final world poses before one undoable commit.
+
 ## Preferred joint angles
 
 Open **Rigging → Joint Settings** and choose a joint, or use the current viewport
@@ -598,6 +649,20 @@ and [interactive normalization](https://help.autodesk.com/cloudhelp/2026/ENU/May
 concepts, with normalization always enabled in this subset.
 The rectangle-selection workflow follows Autodesk's [component marquee selection](https://help.autodesk.com/cloudhelp/2024/ENU/Maya-Basics/files/GUID-ABB00438-68A6-4108-8D79-C362F690E808.htm),
 adapted here to original splat centers rather than polygon vertices, edges, or faces.
+
+### Add and remove bound influences
+
+The **Skin Weights → Bound joint influences** section adds joints at zero weight
+using their current shape-local bind matrix. Remove redistributes surviving
+weights proportionally. If a component uses only the removed influence, choose
+an explicit replacement or the command rejects without changes. The last bound
+influence cannot be removed; use Unbind instead.
+
+Palette edits materialize every current effective row, preserving existing
+automatic and authored weights. This supports loaded assets up to 200,000 source
+components and retains the four-active-influence limit. Larger assets reject
+atomically. Resetting to automatic later intentionally recomputes against the
+edited influence palette. Each palette edit is one undo step and saves in `.msb`.
 
 ## Paint Skin Weights
 
@@ -800,9 +865,8 @@ small-scene playback results.
    and multi-chain/adaptive IK/FK baking.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
-3. Influence management, weight smoothing/locks and mirrored transfer,
-   joint/pose mirroring, and conventional deformers.
-4. Animation layers, camera/custom-property animation, Euler filtering, richer
+3. Weight smoothing/locks, mirrored weight transfer and conventional deformers.
+4. Animated layer weights/flattening, camera/custom-property animation, richer
    clipboard/retargeting.
 5. Additional polygon tools, materials/UVs, mesh skinning, and mesh import/export;
    see the [modeling guide](MODELING.md) for the implemented subset.
