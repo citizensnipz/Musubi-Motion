@@ -3,13 +3,19 @@ import type { SceneDocument } from "./scene-document.ts";
 
 type DraftSnapshot = { epoch: number; poses: Map<string, AnimationPose> };
 
+/** Transform drafts must not mask independent edits to mesh blend shapes. */
+export function applyTransformPoseDraft(evaluated: AnimationPose, draft: AnimationPose): AnimationPose {
+  const { morphWeights: _previousWeights, ...transform } = draft;
+  return { ...transform, ...(evaluated.morphWeights ? { morphWeights: [...evaluated.morphWeights] } : {}) };
+}
+
 function copyExistingPoses(document: SceneDocument, poses: ReadonlyMap<string, AnimationPose>) {
   const joints = new Set(document.joints?.map(joint => joint.id));
   const copy = new Map<string, AnimationPose>();
   for (const [id, pose] of poses) {
     if (document.nodes[id]?.type !== "transform" && !joints.has(id)) continue;
     copy.set(id, {
-      position: [...pose.position], rotation: [...pose.rotation], scale: [...pose.scale], visibility: pose.visibility,
+      ...(pose.morphWeights ? { morphWeights: [...pose.morphWeights] } : {}), position: [...pose.position], rotation: [...pose.rotation], scale: [...pose.scale], visibility: pose.visibility,
     });
   }
   return copy;

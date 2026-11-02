@@ -3,3 +3,37 @@ dist/
 *.log
 .DS_Store
 .playwright-mcp/
+
+# Personal AI-tool configuration, sessions, skills, and caches.
+# Shared contributor instructions (e.g. AGENTS.md) remain trackable.
+.codex/
+.agents/
+.claude/
+.cursor/
+.windsurf/
+.cline/
+.roo/
+.continue/
+.opencode/
+.aider*
+.clinerules/
+.roorules/
+.cursorrules
+.windsurfrules
+.clinerules
+.roorules
+.roomodes
+AGENTS.local.md
+AGENTS.override.md
+CLAUDE.local.md
+
+# Local MCP connections may contain machine paths or credentials.
+.mcp.json
+mcp.json
+mcp.local.json
+
+# Local environment values; keep sanitized examples shareable.
+.env
+.env.*
+!.env.example
+!.env.*.example

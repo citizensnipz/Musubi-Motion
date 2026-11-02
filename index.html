@@ -50,7 +50,7 @@
               ></wa-dropdown-item
             >
             <wa-dropdown-item id="open"
-              ><span slot="icon" data-icon="import"></span>Import splat…</wa-dropdown-item
+              ><span slot="icon" data-icon="import"></span>Import</wa-dropdown-item
             >
             <wa-dropdown-item id="scene-save"
               ><span slot="icon" data-icon="save"></span>Save<kbd slot="details"
@@ -186,7 +186,7 @@
             ><span data-icon="fit"></span></wa-button
           ><wa-tooltip for="reset">Fit the scene or selection</wa-tooltip>
         </div>
-        <div id="notice" role="status" aria-live="polite"></div>
+        <div id="notice" hidden></div>
         <div class="viewport-footer">
           <span
             >Alt + left: orbit / middle: pan / right: dolly · Scroll: zoom</span
@@ -251,7 +251,6 @@
       <p id="file-status" role="status" aria-live="polite"></p>
       <wa-button slot="footer" id="about-close" size="s" variant="neutral">Close</wa-button>
     </wa-dialog>
-    <div id="file-notification" role="status" hidden></div>
     <wa-dialog id="discard-dialog" label="Unsaved changes">
       <p>
         Discard unsaved changes to this scene? Cancel to return and save your
@@ -307,7 +306,7 @@
     <input
       id="file"
       type="file"
-      accept=".ply,.spz,.splat,.ksplat,.sog"
+      accept=".msb,.ply,.spz,.splat,.ksplat,.sog,.fbx,.png,.jpg,.jpeg,.webp,.gif,.bmp" multiple
       hidden
     />
     <input id="scene-file" type="file" accept=".msb" hidden />

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { Group, LineSegments, Mesh, Points } from "three";
+import { Group, LineSegments, Mesh, MeshStandardMaterial, Points } from "three";
+import { captureMaterials } from "../src/mesh-materials.ts";
 import { createMeshComponentPreview } from "../src/mesh-component-preview.ts";
 import { createMeshRenderable } from "../src/mesh-renderer.ts";
 import { createMeshPrimitive, extrudeMeshFaces, findMeshShape, setMeshVertexPositions, updateMeshAppearance } from "../src/mesh-modeling.ts";
@@ -10,6 +11,37 @@ function fixture() {
   const shape = findMeshShape(store.getState().document, id)!;
   return { store, id, shape, renderer: createMeshRenderable(shape) };
 }
+
+describe("imported mesh material batches", () => {
+  it("retains UV coordinates and batches adjacent triangles into material groups", () => {
+    const { shape, renderer } = fixture();
+    const materials = captureMaterials([new MeshStandardMaterial({ color: "#ff0000" }), new MeshStandardMaterial({ color: "#0000ff" })]);
+    const uvs = Object.fromEntries(shape.vertices.map((v, i) => [v.id, [i / 8, i / 16] as [number, number]]));
+    const next = { ...shape, materials, uvs, faces: shape.faces.map((f, i) => ({ ...f, materialIndex: i < 3 ? 0 : 1 })) };
+    renderer.update(next);
+    expect(Array.isArray(renderer.mesh.material)).toBe(true);
+    expect(renderer.mesh.geometry.groups).toEqual([{ start: 0, count: 18, materialIndex: 0 }, { start: 18, count: 18, materialIndex: 1 }]);
+    expect(Array.from(renderer.mesh.geometry.getAttribute("uv").array)).toEqual(shape.vertices.flatMap(v => uvs[v.id]));
+    expect(renderer.triangleFaceIds).toHaveLength(12);
+    expect(renderer.triangleFaceIds.slice(0, 2)).toEqual([shape.faces[0].id, shape.faces[0].id]);
+    renderer.update({ ...next, uvSets: { "1": uvs, "2": uvs, "3": uvs } });
+    for (const channel of [1, 2, 3]) expect(Array.from(renderer.mesh.geometry.getAttribute(`uv${channel}`).array)).toEqual(shape.vertices.flatMap(v => uvs[v.id]));
+    renderer.dispose();
+  });
+  it("uses a single material draw for single-material imported meshes and updates back to defaults", () => {
+    const { shape, renderer } = fixture();
+    const materials = captureMaterials([new MeshStandardMaterial({ color: "#ff0000" })]);
+    const next = { ...shape, materials, faces: shape.faces.map(f => ({ ...f, materialIndex: 0 })) };
+    renderer.update(next);
+    expect(Array.isArray(renderer.mesh.material)).toBe(false);
+    expect(renderer.mesh.geometry.groups).toEqual([]);
+    expect(renderer.mesh.material.color.getHexString()).toBe("ff0000");
+    const dispose = vi.spyOn(renderer.mesh.material, "dispose");
+    renderer.update(shape); expect(dispose).toHaveBeenCalledTimes(1);
+    expect(renderer.mesh.material.color.getHexString()).toBe(shape.color.slice(1));
+    renderer.dispose();
+  });
+});
 
 describe("polygon mesh rendering", () => {
   it("keeps mesh, material and buffers stable through appearance-only commands", () => {

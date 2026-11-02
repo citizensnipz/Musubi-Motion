@@ -1,5 +1,7 @@
 import { BoxGeometry, CylinderGeometry, PlaneGeometry, ShapeUtils, SphereGeometry, Vector2, Vector3, type BufferGeometry } from "three";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
+import { validateMeshMaterials } from "./mesh-materials.ts";
+import { validateMeshSkin } from "./mesh-skin.ts";
 import { normalizedChannels, uniqueName, type MeshFace, type MeshShapeNode, type MeshVertex, type SceneDocument, type TransformChannels, type TransformNode, type Vec3 } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 export type { MeshFace, MeshShapeNode, MeshVertex } from "./scene-document.ts";
@@ -99,6 +101,13 @@ export function validateMeshShape(value: unknown): asserts value is MeshShapeNod
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Invalid polygon mesh.");
   const shape = value as MeshShapeNode;
   if (shape.type !== "meshShape" || !Array.isArray(shape.vertices) || !Array.isArray(shape.faces) || shape.vertices.length > MAX_COMPONENTS || shape.faces.length > MAX_COMPONENTS) throw Error("Meshes support at most 100,000 vertices and 100,000 faces.");
+  validateMeshSkin(shape);
+  if (shape.normals !== undefined && (!shape.normals || typeof shape.normals !== "object" || Object.keys(shape.normals).length !== shape.vertices.length || shape.vertices.some(v => !validPosition(shape.normals![v.id]) || Math.abs(Math.hypot(...shape.normals![v.id]) - 1) > .01))) throw Error("Invalid imported mesh normals.");
+  if (shape.materials !== undefined) validateMeshMaterials(shape.materials);
+  if (shape.uvs !== undefined && (!shape.uvs || typeof shape.uvs !== "object" || Object.keys(shape.uvs).length !== shape.vertices.length || shape.vertices.some(v => !Array.isArray(shape.uvs![v.id]) || shape.uvs![v.id].length !== 2 || shape.uvs![v.id].some(n => !Number.isFinite(n))))) throw Error("Invalid mesh UV coordinates.");
+  for (const [channel, set] of Object.entries(shape.uvSets ?? {})) if (!["1", "2", "3"].includes(channel) || !set || Object.keys(set).length !== shape.vertices.length || shape.vertices.some(v => !Array.isArray(set[v.id]) || set[v.id].length !== 2 || set[v.id].some(n => !Number.isFinite(n)))) throw Error("Invalid additional mesh UV coordinates.");
+  if (shape.morphTargets !== undefined && (!Array.isArray(shape.morphTargets) || shape.morphTargets.length > 128 || shape.morphTargets.some(m => !m || typeof m.name !== "string" || !m.name.trim() || !Number.isFinite(m.weight) || Math.abs(m.weight) > 1e6 || !m.deltas || Object.keys(m.deltas).length !== shape.vertices.length || shape.vertices.some(v => !validPosition(m.deltas[v.id]))))) throw Error("Invalid mesh blend shapes.");
+  if (shape.faces.some(f => f.materialIndex !== undefined && (!Number.isInteger(f.materialIndex) || f.materialIndex < 0 || f.materialIndex >= (shape.materials?.length ?? 1)))) throw Error("Invalid face material assignment.");
   if (typeof shape.color !== "string" || !/^#[0-9a-f]{6}$/i.test(shape.color) || !["flat", "smooth"].includes(shape.shading) || typeof shape.wireframe !== "boolean") throw Error("Invalid mesh color, shading or wireframe setting.");
   const vertices = new Map<string, MeshVertex>(), faceIds = new Set<string>(), directed = new Set<string>(), incident = new Map<string, string[]>();
   for (const vertex of shape.vertices) {
@@ -133,6 +142,10 @@ function pruneVertices(shape: MeshShapeNode): MeshShapeNode {
   const used = new Set(shape.faces.flatMap(face => face.vertices)); return { ...shape, vertices: shape.vertices.filter(vertex => used.has(vertex.id)) };
 }
 function commitShape(store: SceneStore, shape: MeshShapeNode, editLabel: string, copyTopology = false) {
+  const previous = store.getState().document.nodes[shape.id];
+  if (previous?.type === "meshShape" && (previous.skin || previous.morphTargets || previous.uvs || previous.uvSets || previous.normals)
+    && (shape.vertices.length !== previous.vertices.length || shape.vertices.some((v, i) => v.id !== previous.vertices[i].id)))
+    throw Error("Topology edits that add or remove vertices are not supported on skinned meshes or meshes with imported UVs/blend shapes.");
   validateMeshShape(shape);
   const doc = store.getState().document;
   if (JSON.stringify(shape) === JSON.stringify(doc.nodes[shape.id])) return;
@@ -208,7 +221,7 @@ export function setMeshVertexPositions(store: SceneStore, shapeId: string, chang
 }
 export function updateMeshAppearance(store: SceneStore, shapeId: string, patch: Partial<Pick<MeshShapeNode, "color" | "shading" | "wireframe">>): void {
   const shape = selectedShape(store, shapeId);
-  commitShape(store, { ...shape, ...(patch.color !== undefined ? { color: patch.color } : {}), ...(patch.shading !== undefined ? { shading: patch.shading } : {}), ...(patch.wireframe !== undefined ? { wireframe: patch.wireframe } : {}) }, "Edit mesh appearance");
+  commitShape(store, { ...shape, ...(patch.color !== undefined && shape.materials ? { materials: shape.materials.map(m => ({ ...m, color: patch.color! })) } : {}), ...(patch.color !== undefined ? { color: patch.color } : {}), ...(patch.shading !== undefined ? { shading: patch.shading } : {}), ...(patch.wireframe !== undefined ? { wireframe: patch.wireframe } : {}) }, "Edit mesh appearance");
 }
 export function deleteMeshFaces(store: SceneStore, shapeId: string, faceIds: string[]): void {
   const shape = selectedShape(store, shapeId); selectedFaces(shape, faceIds); const removed = new Set(faceIds);

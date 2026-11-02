@@ -5,6 +5,7 @@ import { validateAnimation } from "./animation.ts";
 import { validateDrivenKeys } from "./driven-keys.ts";
 import { validateIKHandles } from "./ik.ts";
 import { validateMeshShape } from "./mesh-modeling.ts";
+import { validateMeshSkin } from "./mesh-skin.ts";
 import { validateParticleShape, validateParticleEmitters } from "./particle-emitter.ts";
 import { validateConstraints } from "./constraints.ts";
 import { validateCurveShape } from "./controller-curves.ts";
@@ -162,6 +163,7 @@ export function validateScene(value: unknown): SceneDocument {
     } else if (node.type === "meshShape") {
       if (parent === null) fail("Mesh shape has no transform.");
       validateMeshShape(node);
+      validateMeshSkin(node, new Set(((doc.joints ?? []) as import("./skeleton.ts").Joint[]).map(j => j.id)));
       shapeCounts.set(parent as string, (shapeCounts.get(parent as string) ?? 0) + 1);
     } else if (node.type === "particleShape") {
       if (parent === null) fail("Particle shape has no transform.");

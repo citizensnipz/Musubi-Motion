@@ -38,8 +38,14 @@ export type CurveShapeNode = {
   color: string;
 };
 export type MeshVertex = { id: string; position: Vec3 };
-export type MeshFace = { id: string; vertices: string[] };
+export type MeshFace = { id: string; vertices: string[]; materialIndex?: number };
 export type MeshShapeNode = {
+  normals?: Record<string, Vec3>;
+  materials?: import("./mesh-materials.ts").MeshMaterialData[];
+  uvs?: Record<string, [number, number]>;
+  uvSets?: Record<string, Record<string, [number, number]>>;
+  morphTargets?: { name: string; weight: number; deltas: Record<string, Vec3> }[];
+  skin?: import("./mesh-skin.ts").MeshSkin;
   id: string;
   type: "meshShape";
   name: string;
@@ -170,6 +176,10 @@ export function deleteSceneItems(doc: SceneDocument, ids: Iterable<string>,
     }
   }
   const nodes = Object.fromEntries(Object.entries(doc.nodes).filter(([id]) => !removed.has(id)));
+  for (const node of Object.values(nodes)) if (node.type === "meshShape" && node.skin?.jointIds.some(id => removed.has(id))) {
+    const { skin: _skin, ...unbound } = node;
+    nodes[node.id] = unbound;
+  }
   for (const handle of doc.ikHandles ?? []) if (removed.has(handle.rootId) || removed.has(handle.endId)) removed.add(handle.id);
   const retainedAssets = new Set(Object.values(nodes).filter(n => n.type === "splatShape").map(n => n.assetId));
   const freezePoint = (point: Vec3 | undefined, fallback: Vec3): Vec3 =>

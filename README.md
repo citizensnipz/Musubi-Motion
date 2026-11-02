@@ -20,6 +20,7 @@ Musubi Motion treats Gaussian splats as named, selectable scene objects with the
 ## Features
 
 - **Splat scenes:** import local PLY, SPZ, SPLAT, KSPLAT, and SOG files; add multiple named objects; start with the included grayscale knot. Format variants depend on Spark's decoder support.
+- **FBX import:** File → Import imports textured polygon meshes, material slots, blend shapes, skeletons, skin weights, and baked animation as native, editable scene data. Files are parsed locally and the imported data survives `.msb` save/reopen and undo/redo. See [FBX import](docs/FBX-IMPORT.md) for supported features and limits.
 - **Selection and transforms:** click or marquee selection, an Outliner, editable position/rotation/scale properties, and full X/Y/Z transform gizmos, including non-uniform scaling.
 - **Customizable workspace:** General, Animation, Rigging, Modeling, and FX presets arrange relevant panels. Drag Dockview tabs to split or combine panels, resize with dividers, and reopen editors from their menus. Layouts and the selected preset are remembered in local browser storage.
 - **Floating tools:** icon-only selection and transform controls sit inside the viewport. Unlock the panel to move it by its grip, then lock it in place.

@@ -18,6 +18,8 @@ import {
   createSceneStore,
   renameObject,
 } from "./scene-store.ts";
+import { mountViewportFileDrop } from "./viewport-file-drop.ts";
+import { createMorphPanel } from "./morph-panel.ts";
 import { createPropertiesPanel } from "./properties-panel.ts";
 import { makeDemo, prepareSplat } from "./splat-assets.ts";
 import {
@@ -62,11 +64,11 @@ import { createJointSettingsPanel } from "./joint-settings-panel.ts";
 import { createRotationPanel } from "./rotation-panel.ts";
 import { jointRotationFromQuaternion } from "./joint-transform.ts";
 import { createAnimationLayersPanel } from "./animation-layers-panel.ts";
-import { createJointMirrorPanel } from "./joint-mirror-panel.ts";
+import { bindJointMirrorControls, createJointMirrorPanel } from "./joint-mirror-panel.ts";
 import { validateConstraints } from "./constraints.ts";
 import { createConstraintsPanel } from "./constraints-panel.ts";
 import { mountChannelKeyControls } from "./channel-animation-controls.ts";
-import { PoseDrafts } from "./pose-drafts.ts";
+import { applyTransformPoseDraft, PoseDrafts } from "./pose-drafts.ts";
 import { createIKTargets, type IKControlKind } from "./ik-targets.ts";
 import { createControllerRenderable } from "./controller-renderer.ts";
 import { createControllerPanel } from "./controller-panel.ts";
@@ -104,6 +106,7 @@ const element = <T extends HTMLElement>(id: string) =>
 const viewport = element<HTMLDivElement>("viewport");
 const notice = element<HTMLDivElement>("notice");
 terminal.watchNotices(notice);
+terminal.watchNotices(element("file-status"));
 const play = element<WaButton>("play");
 const rewind = element<WaButton>("rewind");
 const timeline = element<WaSlider>("timeline");
@@ -325,7 +328,7 @@ async function start() {
     let doc = store.getState().document;
     const node = doc.nodes[id];
     if (node?.type !== "transform") return;
-    const pose = { ...normalizedChannels(channels), visibility: currentPose(id).visibility };
+    const pose = { ...normalizedChannels(channels), visibility: currentPose(id).visibility, morphWeights: currentPose(id).morphWeights };
     try {
       doc = prepareTransformAnimationEdit(doc, id, pose, getFrame(), timelinePanel?.autoKey ?? false);
       if (doc.constraints) validateConstraints(doc.constraints, doc);
@@ -631,6 +634,7 @@ async function start() {
       scale: object.scale.toArray() as Vec3,
     };
   }
+  let morphPanel: ReturnType<typeof createMorphPanel> | undefined;
   const panelHost = element<HTMLElement>("properties");
   const panel = createPropertiesPanel(panelHost, element("outliner-panel"), {
     previewChannel(id, channel, axis) {
@@ -646,7 +650,7 @@ async function start() {
           if (store.getState().document !== doc) return;
           const next = structuredClone(pose);
           next[channel][axis] = value;
-          poseOverrides.set(id, { ...normalizedChannels(next), visibility: next.visibility });
+          poseOverrides.set(id, { ...normalizedChannels(next), visibility: next.visibility, ...(next.morphWeights ? { morphWeights: [...next.morphWeights] } : {}) });
           updateTime();
         },
         end() {
@@ -704,6 +708,7 @@ async function start() {
     if(value)validateElasticity(value);
     store.setState({document:{...doc,nodes:{...doc.nodes,[id]:{...shape,elasticity:value}}},editLabel:value?"Edit Elasticity":"Remove Elasticity"});
   });
+  morphPanel = createMorphPanel(panelHost, store, { getFrame, available: () => !loading && !playing && !dragId, canKey: () => !timelinePanel?.turntable, onStatus: message => { notice.textContent = message; } });
   function updatePanel(preview?: TransformChannels) {
     const doc = store.getState().document,
       id = singleId();
@@ -718,6 +723,7 @@ async function start() {
     const emitters = new Set(Object.values(doc.nodes).filter(node => node.type === "particleShape").map(node => node.parentId));
     panel.update([...transformNodes(doc).map(node => ({ ...node, curve: curves.has(node.id), mesh: meshes.has(node.id), particle: emitters.has(node.id) })), ...jointNodes], new Set(ids), shape?.name, preview ?? (ids.length === 1 ? currentPose(ids[0]) : undefined));
     elasticityPanel.update(shape?.type === "splatShape" ? shape : undefined, new Map((doc.joints??[]).map(j=>[j.id,j.name])));
+    morphPanel?.update(shape?.type === "meshShape" ? shape : undefined);
     channelKeys?.refresh();
   }
   function selectObjects(ids: string[], additive = false) {
@@ -949,6 +955,13 @@ async function start() {
     preserveDrafts: preserveUnconsumedDrafts,
   });
   workspace.registerPanel("joint-mirror", "Mirror Joints / Pose", jointMirrorPanel.element);
+  bindJointMirrorControls([
+    ...Array.from(document.querySelectorAll<WaButton>("[data-rig-action='Mirror joints']")),
+    ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action='Mirror joints']")),
+  ], () => {
+    jointMirrorPanel?.useSelection();
+    element("view-joint-mirror").click();
+  });
   ikPanel.element.addEventListener("ik-range-bake", event => {
     ikBakePanel?.selectHandle((event as CustomEvent<string>).detail);
     element("view-ik-bake").click();
@@ -1675,7 +1688,7 @@ async function start() {
       doc = { ...doc, ikHandles: doc.ikHandles?.map(handle => handle.id === selectedIKId ? { ...handle, ...patch } : handle) };
     }
     evaluated = evaluateSceneAnimation(doc, getFrame());
-    for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, pose);
+    for (const [id, pose] of poseOverrides) if (evaluated.has(id)) evaluated.set(id, applyTransformPoseDraft(evaluated.get(id)!, pose));
     if (dragControlPose) evaluated.set(dragControlPose.id, dragControlPose.pose);
     evaluateDrivenKeys(doc, evaluated);
     drivenPoses = new Map(evaluated);
@@ -1701,6 +1714,7 @@ async function start() {
       object.preview.rotation.y = timelinePanel?.turntable ? (time / duration) * Math.PI * 2 : 0;
     }
     skeleton.applyPose(evaluated);
+    for (const object of runtime.values()) if (object.kind === "mesh") object.polygon.applySkin(id => skeleton.boneMatrix(id), evaluated.get(object.shape.parentId)?.morphWeights);
     ikTargets.sync(doc, evaluated, getFrame());
   }
   function updateTime(apply = true) {
@@ -1996,14 +2010,6 @@ async function start() {
   });
   element("about-version").textContent = `Version ${packageInfo.version}`;
   element("about-close").addEventListener("click", () => { element<WaDialog>("about-dialog").open = false; });
-  let notificationTimer: ReturnType<typeof setTimeout>;
-  new MutationObserver(() => {
-    const notification = element("file-notification");
-    notification.textContent = element("file-status").textContent;
-    notification.hidden = !notification.textContent;
-    clearTimeout(notificationTimer);
-    notificationTimer = setTimeout(() => { notification.hidden = true; }, 6000);
-  }).observe(element("file-status"), { childList: true, characterData: true, subtree: true });
   sceneInput.addEventListener("change", () => {
     const file = sceneInput.files?.[0];
     sceneInput.value = "";
@@ -2071,10 +2077,48 @@ async function start() {
       updateHistoryButtons();
     }
   }
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
-    fileInput.value = "";
+  async function importFBXFile(file: File, sidecars: File[] = []) {
+    if (loading || dragId) return;
+    busy(true, "Importing FBX meshes, skeletons, and animation…");
+    let message = "";
+    try {
+      // Let the loading message paint before parsing and sampling animation.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const { importFBX } = await import("./fbx-import.ts");
+      const result = await importFBX(file, store.getState().document, sidecars);
+      clearPoseDraft();
+      store.setState({ document: result.document, editLabel: "Import FBX" });
+      if (result.objectIds.length) selectObjects(result.objectIds);
+      else if (result.jointIds.length) selectAnimationTarget(result.jointIds[0]);
+      if (result.clips.length) {
+        const mode = document.querySelector<HTMLSelectElement>("select[aria-label='Playback mode']")!;
+        mode.value = "animation"; mode.dispatchEvent(new Event("change"));
+        time = result.clips[0].start / animationSettings().fps;
+      }
+      updateTime(); fitView();
+      message = `Imported ${file.name}: ${result.objectIds.length} meshes, ${result.jointIds.length} joints, ${result.clips.length} animation clip${result.clips.length === 1 ? "" : "s"}.`;
+      for (const clip of result.clips) terminal.log(`${clip.name}: frames ${clip.start}–${clip.end}`);
+      if (result.warnings.length) message += ` ${result.warnings.join(" ")}`;
+      element("file-status").textContent = message;
+      message = "";
+    } catch (error) {
+      message = `Could not import FBX. ${error instanceof Error ? error.message : String(error)}`;
+    } finally { busy(false, message); }
+  }
+  function importFiles(files: File[]) {
+    if (loading || dragId || dialogOpen()) return;
+    const projects = files.filter(f => /\.msb$/i.test(f.name));
+    const models = files.filter(f => /\.fbx$/i.test(f.name));
+    if (projects.length) {
+      if (projects.length !== 1 || files.length !== 1) { notice.textContent = "Drop one MSB project at a time. FBX files and their textures can be dropped together."; return; }
+      void loadProject(projects[0]); return;
+    }
+    const splats = files.filter(f => /\.(ply|spz|splat|ksplat|sog)$/i.test(f.name));
+    if (models.length + splats.length > 1) { notice.textContent = "Import one model at a time. Select texture images together with their FBX."; return; }
+    const file = files.find(f => /\.fbx$/i.test(f.name)) ?? files[0];
     if (!file || loading) return;
+    if (!/\.(fbx|ply|spz|splat|ksplat|sog)$/i.test(file.name)) { notice.textContent = "Import an FBX, MSB, or supported splat file. Select texture images together with their FBX."; return; }
+    if (/\.fbx$/i.test(file.name)) { void importFBXFile(file, files.filter(f => f !== file)); return; }
     void importObject(
       async () =>
         new SplatMesh({
@@ -2092,7 +2136,11 @@ async function start() {
       },
       file,
     );
+  }
+  fileInput.addEventListener("change", () => {
+    const files = Array.from(fileInput.files ?? []); fileInput.value = ""; importFiles(files);
   });
+  mountViewportFileDrop(viewport, importFiles);
   element("demo").addEventListener(
     "click",
     () =>

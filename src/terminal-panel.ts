@@ -23,7 +23,7 @@ export function createTerminal() {
    previous = message; clearTimeout(timer);
    if (!message) return;
    log(message, /could not|cannot|failed|unavailable/i.test(message) ? "error" : "info");
-   // Progress stays visible until the operation replaces or clears it.
+   // Keep progress until replaced; clear completed messages so repeated actions can log again.
    if (!message.endsWith("…")) timer = setTimeout(() => {
     if (notice.textContent?.trim() === message) notice.textContent = "";
    }, 5000);

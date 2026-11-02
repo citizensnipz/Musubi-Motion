@@ -2,6 +2,17 @@ import { buildJointMirrorPairs, mirrorJointPose, mirrorJointSubtree, type Mirror
 import type { AnimationPose } from "./animation.ts";
 import type { SceneStore } from "./scene-store.ts";
 
+export function bindJointMirrorControls(
+  controls: Iterable<EventTarget & { disabled: boolean; title: string }>,
+  open: () => void,
+) {
+  for (const control of new Set(controls)) {
+    control.disabled = false;
+    control.title = "Mirror a joint subtree or pose";
+    control.addEventListener("click", open);
+  }
+}
+
 export function createJointMirrorPanel(store: SceneStore, options: {
   available(): boolean; getSelection(): string[]; getFKPoses(): ReadonlyMap<string, AnimationPose>;
   getFrame(): number; canKey(): boolean; onSelect?(id: string): void;
@@ -25,5 +36,6 @@ export function createJointMirrorPanel(store: SceneStore, options: {
   element.append(style,intro,label("Source subtree",root),selected,label("World mirror plane",axis),label("Find in source names",search),label("Replace with",replace),details,duplicate,apply,key,status);
   let joints:unknown;
   function refresh(){const doc=store.getState().document;if(joints!==doc.joints){const value=root.value;root.replaceChildren(...(doc.joints??[]).map(joint=>new Option(joint.name,joint.id)));if(doc.joints?.some(joint=>joint.id===value))root.value=value;joints=doc.joints;}const available=options.available();[root,axis,search,replace,selected].forEach(node=>node.disabled=!available);duplicate.disabled=apply.disabled=!available||!root.value;key.disabled=apply.disabled||!options.canKey();}
-  const unsubscribe=store.subscribe(refresh);refresh();return {element,refresh,dispose:unsubscribe};
+  function useSelection(){refresh();const id=options.getSelection().find(id=>store.getState().document.joints?.some(joint=>joint.id===id));if(id)root.value=id;refresh();}
+  const unsubscribe=store.subscribe(refresh);refresh();return {element,refresh,useSelection,dispose:unsubscribe};
 }

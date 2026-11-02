@@ -21,6 +21,7 @@ export function mergeJointPose(
   kind: "position" | "rotation" | "transform", unwrapRotation = false,
 ): AnimationPose {
   const pose: AnimationPose = {
+    ...(current.morphWeights ? { morphWeights: [...current.morphWeights] } : {}),
     position: [...current.position], rotation: [...current.rotation], scale: [...current.scale], visibility: current.visibility,
   };
   if (kind === "position") {
