@@ -1641,7 +1641,7 @@ async function start() {
       if (!timelinePanel?.turntable && getFrame() >= settings.end) time = settings.start / settings.fps;
     }
     playing = value;
-    buttonContent(play, value ? "pause" : "play", value ? "Pause" : "Play");
+    buttonContent(play, value ? "pause" : "play");
     play.setAttribute(
       "aria-label",
       value ? "Pause animation" : "Play animation",

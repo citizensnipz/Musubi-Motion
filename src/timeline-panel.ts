@@ -36,8 +36,8 @@ export function mountTimeline(store: SceneStore, options: {
   const summary = document.createElement("span"); summary.className = "timeline-summary"; tools.append(summary);
   const navigation: HTMLButtonElement[] = [];
   for (const [action, label, symbol] of [
-    ["previous-key", "Previous keyframe", "key"], ["previous-frame", "Previous frame", "rewind"],
-    ["next-frame", "Next frame", "rewind"], ["next-key", "Next keyframe", "key"], ["end", "Go to end", "rewind"],
+    ["previous-key", "Previous keyframe", "previousKey"], ["previous-frame", "Previous frame", "rewind"],
+    ["next-frame", "Next frame", "rewind"], ["next-key", "Next keyframe", "previousKey"], ["end", "Go to end", "timelineStart"],
   ] as const) {
     const button = document.createElement("button"); button.type = "button"; button.title = label; button.setAttribute("aria-label", label);
     button.dataset.navigate = action; button.append(icon(symbol));

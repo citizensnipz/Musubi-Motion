@@ -9,7 +9,7 @@ export function mountViewportTools(host:HTMLElement,visibility:(kind:"grid"|"giz
   const button=(id:string,label:string,icon:IconName,click:()=>void,text?:string)=>{
     const b=document.createElement("button");b.id=id;b.type="button";b.title=label;b.setAttribute("aria-label",label);buttonContent(b,icon,text);b.onclick=click;panel.append(b);return b;
   };
-  for(const [kind,icon] of [["grid","grid"],["gizmos","translate"],["joints","bone"]] as const) {
+  for(const [kind,icon] of [["grid","grid"],["gizmos","translate"],["joints","joint"]] as const) {
     const b=button(`visibility-${kind}`,`Show ${kind}`,icon,()=>{const visible=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",String(visible));visibility(kind,visible);});b.setAttribute("aria-pressed","true");
   }
   const resetButton=button("viewport-reset","Reset camera","rest",reset);

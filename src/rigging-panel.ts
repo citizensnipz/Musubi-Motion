@@ -3,10 +3,10 @@ import { mountToolPalette } from "./tool-palette.ts";
 
 const groups: { title: string; tools: [string, IconName][] }[] = [
   { title: "Deformation", tools: [["Elasticity", "scale"]] },
-  { title: "Skeleton", tools: [["Create joints", "bone"], ["Parent joints", "chain"], ["Mirror joints", "mirror"]] },
+  { title: "Skeleton", tools: [["Create joints", "joint"], ["Parent joints", "chain"], ["Mirror joints", "mirror"]] },
   { title: "Binding & weights", tools: [["Bind splats", "bind"], ["Unbind splats", "unbind"], ["Automatic weights", "weight"], ["Paint weights", "paint"]] },
   { title: "FK / IK", tools: [["FK rotate", "rotate"], ["Create IK chain", "chain"], ["Move IK target", "target"], ["Pole target", "pin"], ["Joint limits", "limits"], ["IK / FK blend", "scale"]] },
-  { title: "Pose", tools: [["Set rest pose", "bone"], ["Reset pose", "rest"], ["Keyframe pose", "key"]] },
+  { title: "Pose", tools: [["Set rest pose", "joint"], ["Reset pose", "rest"], ["Keyframe pose", "key"]] },
 ];
 
 export function createRiggingPanel() {

@@ -165,7 +165,7 @@ export function createPropertiesPanel(
             const path=document.createElementNS("http://www.w3.org/2000/svg","path");
             path.setAttribute("d","M3 11C3 2 13 2 13 11M1.5 9.5h3v3h-3zM11.5 9.5h3v3h-3z");
             path.setAttribute("fill","none");path.setAttribute("stroke","currentColor");path.setAttribute("stroke-width","1.3");svg.append(path);symbol.append(svg);
-          }else symbol.append(icon(node.joint ? "bone" : "object"));
+          }else symbol.append(icon(node.joint ? "joint" : "object"));
           const label = document.createElement("span");
           label.className = "object-name";
           label.textContent = node.name;

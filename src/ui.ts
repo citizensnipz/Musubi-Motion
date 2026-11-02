@@ -10,13 +10,13 @@ import "@awesome.me/webawesome/dist/components/slider/slider.js";
 import "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
 import {
   createElement,
+  type IconNode,
   MousePointer2,
   Move,
   Rotate3d,
   Scaling,
   Undo2,
   Redo2,
-  Play,
   Pause,
   SkipBack,
   Sun,
@@ -34,7 +34,6 @@ import {
   LockKeyhole,
   LockKeyholeOpen,
   PanelLeft,
-  Bone,
   Link,
   Unlink,
   Paintbrush,
@@ -50,6 +49,25 @@ import {
   House,
 } from "lucide";
 
+// The two limbs meet at a 75° angle, with a larger circle marking the pivot.
+const Joint: IconNode = [
+  ["path", { d: "M8 13V6.25M10.898 15.224l6.52-1.747" }],
+  ["circle", { cx: "8", cy: "16", r: "3" }],
+  ["circle", { cx: "8", cy: "5", r: "1.25" }],
+  ["circle", { cx: "18.625", cy: "13.153", r: "1.25" }],
+];
+
+const PlayTriangle: IconNode = [
+  ["path", { d: "M6 4L20 12L6 20Z", fill: "currentColor", stroke: "none" }],
+];
+const PreviousKey: IconNode = [
+  ...SkipBack,
+  ["rect", { x: "1", y: "8", width: "4", height: "8", fill: "currentColor", stroke: "none" }],
+];
+const TimelineStart: IconNode = [
+  ["path", { d: "M3 4v16M13 5l-8 7 8 7ZM22 5l-8 7 8 7Z" }],
+];
+
 const icons = {
   select: MousePointer2,
   translate: Move,
@@ -57,9 +75,11 @@ const icons = {
   scale: Scaling,
   undo: Undo2,
   redo: Redo2,
-  play: Play,
+  play: PlayTriangle,
   pause: Pause,
   rewind: SkipBack,
+  previousKey: PreviousKey,
+  timelineStart: TimelineStart,
   sun: Sun,
   moon: Moon,
   import: Upload,
@@ -75,7 +95,7 @@ const icons = {
   lock: LockKeyhole,
   unlock: LockKeyholeOpen,
   sidebar: PanelLeft,
-  bone: Bone,
+  joint: Joint,
   bind: Link,
   unbind: Unlink,
   paint: Paintbrush,
