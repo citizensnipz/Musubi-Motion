@@ -55,10 +55,10 @@ export async function saveDestination(
   return requested === null ? null : { name: msbName(requested) };
 }
 export async function writeScene(
-  bytes: Uint8Array,
+  bytes: Uint8Array | Blob,
   destination: { name: string; handle?: SceneFileHandle },
 ) {
-  const blob = new Blob([new Uint8Array(bytes).buffer], {
+  const blob = bytes instanceof Blob ? bytes : new Blob([new Uint8Array(bytes).buffer], {
     type: "application/octet-stream",
   });
   if (destination.handle) {

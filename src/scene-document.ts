@@ -6,6 +6,9 @@ export type TransformChannels = {
   scale: Vec3;
 };
 export type TransformNode = TransformChannels & {
+  affine?: number[]; // Optional column-major 3×3 linear compensation for world-axis transforms.
+  pivot?: Vec3;
+  pivotCompensation?: Vec3;
   id: string;
   type: "transform";
   name: string;

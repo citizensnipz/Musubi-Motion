@@ -1,6 +1,6 @@
 # Musubi scene files (.msb), version 1
 
-An `.msb` file is a standard ZIP archive, written using fflate. File > Save uses
+An `.msb` file is a standard ZIP or ZIP64 archive. New saves use STORE entries assembled as Blob references; legacy compressed ZIPs also remain readable. File > Save uses
 the current file handle where supported. Save As requests a new destination.
 Browsers without the native file picker download a named `.msb` copy instead;
 the status says "Scene download started" because the app cannot confirm that
@@ -262,8 +262,7 @@ and releases old runtime objects. No network asset downloads occur during Open.
 
 ## Limits and future work
 
-- Packaging is in memory. Files and total unpacked data are capped at 512 MiB;
-  JSON metadata is capped at 128 MiB and scene nodes at 10,000. These are guardrails,
+- Asset data and archives have no fixed application byte cap. Assets use chunked CRC32/SHA-256 and Blob slices/references. JSON metadata remains capped at 128 MiB and scene nodes at 10,000. These are guardrails,
   not a performance guarantee: actual memory includes staging and GPU data too.
 - Saves use ZIP STORE entries because splat files often have their own
   compression. Each save rewrites the portable package. Streaming/project-folder
@@ -308,3 +307,9 @@ frames before and after readback and measures approximation between samples.
 ### Imported mesh appearance and blend shapes
 
 Mesh materials store Standard material settings and raster texture data URIs (never remote URLs or blob references). UVs, additional UV sets, and source normals map vertex IDs to coordinates. Faces optionally reference a material slot with `materialIndex`. `morphTargets` contain a name, default weight, and per-vertex position deltas in the same bind frame as the mesh. Animation channels `morph.N` target the owning transform and animate the corresponding weight; morph displacement is applied before skinning. Older builds may discard these optional extensions when resaving.
+
+### Object pivots
+
+Transform nodes optionally store `pivot` and `pivotCompensation` as finite local XYZ vectors, defaulting to zero. Their evaluated matrix is `T(position + pivotCompensation + pivot) * A * R * S * T(-pivot)`. Relocating a pivot balances compensation at the current evaluated pose, preserving geometry and descendants while leaving existing keys intact. Subsequent rotation and scale evaluate around the newly authored pivot.
+
+Transform nodes may also store `affine`: a finite nonsingular orientation-preserving column-major 3×3 matrix A, defaulting to identity. This retains the full geometric effect of world-axis scaling on rotated objects. Pivot relocation compensation uses `(A*R*S - I) * deltaPivot`. Rendering, hierarchy/world matrices, and saving retain A; older builds without this extension may not reproduce affine objects.

@@ -1,4 +1,6 @@
-import { strFromU8, strToU8, unzip, zip } from "fflate";
+import { Matrix3 } from "three";
+import { BlobReader, BlobWriter, ZipReader, type FileEntry } from "@zip.js/zip.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { validateJoints } from "./skeleton.ts";
 import { validateElasticity } from "./elasticity";
 import { validateAnimation } from "./animation.ts";
@@ -12,7 +14,8 @@ import { validateCurveShape } from "./controller-curves.ts";
 import { validateSkinWeights } from "./skin-weights.ts";
 import type { SceneDocument, Vec3 } from "./scene-document.ts";
 
-export const MAX_PROJECT_BYTES = 512 * 1024 * 1024;
+// Retained as a compatibility export; project size is limited by the browser, not 512 MiB.
+export const MAX_PROJECT_BYTES = Number.MAX_SAFE_INTEGER;
 const MAX_JSON_BYTES = 128 * 1024 * 1024;
 const MAX_NODES = 10000;
 export type EditorSnapshot = {
@@ -99,10 +102,9 @@ export function validateScene(value: unknown): SceneDocument {
         fail("Unsupported splat filename.");
       if (
         !Number.isSafeInteger(asset.byteLength) ||
-        (asset.byteLength as number) <= 0 ||
-        (asset.byteLength as number) > MAX_PROJECT_BYTES
+        (asset.byteLength as number) <= 0
       )
-        fail("Invalid asset size.");
+        fail(`Invalid asset size for ${asset.fileName}: expected a positive whole number of bytes.`);
     } else fail("Unsupported asset type.");
   }
   for (const [key, value] of Object.entries(nodes)) {
@@ -128,6 +130,13 @@ export function validateScene(value: unknown): SceneDocument {
       vector(node.position);
       vector(node.rotation);
       vector(node.scale);
+      if (node.pivot !== undefined) vector(node.pivot);
+      if (node.pivotCompensation !== undefined) vector(node.pivotCompensation);
+      if (node.affine !== undefined) {
+        if (!Array.isArray(node.affine) || node.affine.length !== 9 || node.affine.some(n => typeof n !== "number" || !Number.isFinite(n) || Math.abs(n) > 1e12)) fail("Invalid object affine transform.");
+        const values = node.affine as number[], magnitude = Math.max(...values.map(Math.abs));
+        if (!magnitude || new Matrix3().fromArray(values.map(n => n / magnitude)).determinant() <= 1e-15) fail("Object affine transform must be nonsingular and preserve orientation.");
+      }
       if (node.rotationOrder !== "XYZ" || node.scale.some((n) => n < 0.001))
         fail("Unsupported rotation order or scale.");
       parents.set(key, parent as string | null);
@@ -226,147 +235,152 @@ function validateEditor(value: unknown): EditorSnapshot {
     fail("Invalid saved viewport.");
   return value as EditorSnapshot;
 }
-async function digest(bytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new Uint8Array(bytes).buffer,
-  );
-  return Array.from(new Uint8Array(hash), (n) =>
-    n.toString(16).padStart(2, "0"),
-  ).join("");
+const encoder = new TextEncoder();
+const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
+  let n = value; for (let bit = 0; bit < 8; bit++) n = (n >>> 1) ^ ((n & 1) ? 0xedb88320 : 0); return n >>> 0;
+});
+async function digestBlob(blob: Blob): Promise<{ sha256: string; crc32: number }> {
+  const hash = sha256.create(); let crc = 0xffffffff;
+  // Slicing bounds JS memory even for large disk-backed Files and repeated-part Blobs.
+  for (let offset = 0; offset < blob.size; offset += 1024 * 1024) {
+    const bytes = new Uint8Array(await blob.slice(offset, offset + 1024 * 1024).arrayBuffer());
+    hash.update(bytes);
+    for (const byte of bytes) crc = crcTable[(crc ^ byte) & 255] ^ (crc >>> 8);
+  }
+  return { sha256: Array.from(hash.digest(), n => n.toString(16).padStart(2, "0")).join(""), crc32: (crc ^ 0xffffffff) >>> 0 };
 }
-export async function encodeProject(
-  scene: SceneDocument,
-  sources: ReadonlyMap<string, Blob>,
-  editor: EditorSnapshot,
-): Promise<Uint8Array> {
-  validateScene(scene);
-  validateEditor(editor);
-  const entries: Record<string, Uint8Array> = Object.create(null);
-  const files: Manifest["files"] = Object.create(null);
-  let total = 0;
+function bytes(size: number) { const array = new Uint8Array(size); return { array, view: new DataView(array.buffer) }; }
+const ZIP32_MAX = 0xffffffff;
+type StoredEntry = { name: string; source: Blob; crc32: number };
+
+/** STORE archive made of Blob references: original asset bytes are never concatenated in JS. */
+function storedArchive(entries: StoredEntry[]): Blob {
+  const parts: BlobPart[] = [], directory: Uint8Array[] = []; let offset = 0;
+  for (const entry of entries) {
+    const name = encoder.encode(entry.name), size = entry.source.size;
+    const bigSize = size >= ZIP32_MAX, bigOffset = offset >= ZIP32_MAX;
+    const localExtra = bigSize ? 20 : 0, local = bytes(30 + name.length + localExtra);
+    local.view.setUint32(0, 0x04034b50, true); local.view.setUint16(4, bigSize ? 45 : 20, true);
+    local.view.setUint16(6, 0x800, true); local.view.setUint16(12, 33, true); local.view.setUint32(14, entry.crc32, true);
+    local.view.setUint32(18, bigSize ? ZIP32_MAX : size, true); local.view.setUint32(22, bigSize ? ZIP32_MAX : size, true);
+    local.view.setUint16(26, name.length, true); local.view.setUint16(28, localExtra, true); local.array.set(name, 30);
+    if (bigSize) {
+      const extra = 30 + name.length; local.view.setUint16(extra, 1, true); local.view.setUint16(extra + 2, 16, true);
+      local.view.setBigUint64(extra + 4, BigInt(size), true); local.view.setBigUint64(extra + 12, BigInt(size), true);
+    }
+    parts.push(local.array.buffer, entry.source);
+    const extraSize = (bigSize ? 16 : 0) + (bigOffset ? 8 : 0), central = bytes(46 + name.length + (extraSize ? 4 + extraSize : 0));
+    central.view.setUint32(0, 0x02014b50, true); central.view.setUint16(4, 45, true); central.view.setUint16(6, bigSize || bigOffset ? 45 : 20, true);
+    central.view.setUint16(8, 0x800, true); central.view.setUint16(14, 33, true); central.view.setUint32(16, entry.crc32, true);
+    central.view.setUint32(20, bigSize ? ZIP32_MAX : size, true); central.view.setUint32(24, bigSize ? ZIP32_MAX : size, true);
+    central.view.setUint16(28, name.length, true); central.view.setUint16(30, extraSize ? 4 + extraSize : 0, true);
+    central.view.setUint32(42, bigOffset ? ZIP32_MAX : offset, true); central.array.set(name, 46);
+    if (extraSize) {
+      let cursor = 46 + name.length; central.view.setUint16(cursor, 1, true); central.view.setUint16(cursor + 2, extraSize, true); cursor += 4;
+      if (bigSize) { central.view.setBigUint64(cursor, BigInt(size), true); central.view.setBigUint64(cursor + 8, BigInt(size), true); cursor += 16; }
+      if (bigOffset) central.view.setBigUint64(cursor, BigInt(offset), true);
+    }
+    directory.push(central.array); offset += local.array.length + size;
+    if (!Number.isSafeInteger(offset)) fail("Project exceeds the browser's safely addressable size.");
+  }
+  const directoryOffset = offset, directorySize = directory.reduce((sum, item) => sum + item.length, 0);
+  parts.push(...directory.map(part => part.buffer as ArrayBuffer)); offset += directorySize;
+  const zip64 = directoryOffset >= ZIP32_MAX || directorySize >= ZIP32_MAX || entries.some(e => e.source.size >= ZIP32_MAX);
+  if (zip64) {
+    const end64 = bytes(56); end64.view.setUint32(0, 0x06064b50, true); end64.view.setBigUint64(4, 44n, true);
+    end64.view.setUint16(12, 45, true); end64.view.setUint16(14, 45, true);
+    end64.view.setBigUint64(24, BigInt(entries.length), true); end64.view.setBigUint64(32, BigInt(entries.length), true);
+    end64.view.setBigUint64(40, BigInt(directorySize), true); end64.view.setBigUint64(48, BigInt(directoryOffset), true);
+    const locator = bytes(20); locator.view.setUint32(0, 0x07064b50, true); locator.view.setBigUint64(8, BigInt(offset), true); locator.view.setUint32(16, 1, true);
+    parts.push(end64.array.buffer, locator.array.buffer);
+  }
+  const end = bytes(22); end.view.setUint32(0, 0x06054b50, true);
+  end.view.setUint16(8, entries.length, true); end.view.setUint16(10, entries.length, true);
+  end.view.setUint32(12, zip64 ? ZIP32_MAX : directorySize, true); end.view.setUint32(16, zip64 ? ZIP32_MAX : directoryOffset, true);
+  parts.push(end.array.buffer); return new Blob(parts, { type: "application/octet-stream" });
+}
+export async function encodeProjectBlob(scene: SceneDocument, sources: ReadonlyMap<string, Blob>, editor: EditorSnapshot): Promise<Blob> {
+  validateScene(scene); validateEditor(editor);
+  const entries: StoredEntry[] = [], files: Manifest["files"] = Object.create(null);
   for (const asset of Object.values(scene.assets)) {
     if (asset.kind !== "file") continue;
     const source = sources.get(asset.id);
-    if (!source || source.size !== asset.byteLength)
-      fail(`Missing source file: ${asset.fileName}`);
-    total += source!.size;
-    if (total > MAX_PROJECT_BYTES)
-      fail("This version supports projects up to 512 MiB.");
-    const bytes = new Uint8Array(await source!.arrayBuffer());
-    const path = `assets/${asset.id}`;
-    entries[path] = bytes;
-    files[asset.id] = { path, sha256: await digest(bytes) };
+    if (!source || source.size !== asset.byteLength) fail(`Missing source file: ${asset.fileName}`);
+    const digest = await digestBlob(source!), path = `assets/${asset.id}`;
+    entries.push({ name: path, source: source!, crc32: digest.crc32 }); files[asset.id] = { path, sha256: digest.sha256 };
   }
-  const manifest: Manifest = {
-    format: "musubi-project",
-    version: 1,
-    scene,
-    editor,
-    files,
-  };
-  entries["scene.json"] = strToU8(JSON.stringify(manifest));
-  if (
-    entries["scene.json"].length > MAX_JSON_BYTES ||
-    total + entries["scene.json"].length > MAX_PROJECT_BYTES
-  )
-    fail("Project exceeds the supported size.");
-  // Splats are frequently already compressed. STORE avoids expensive recompression.
-  const output = await new Promise<Uint8Array>((resolve, reject) =>
-    zip(entries, { level: 0 }, (error, data) =>
-      error ? reject(error) : resolve(data),
-    ),
-  );
-  if (output.length > MAX_PROJECT_BYTES)
-    fail("This version supports projects up to 512 MiB.");
-  return output;
+  const manifest: Manifest = { format: "musubi-project", version: 1, scene, editor, files };
+  const json = new Blob([JSON.stringify(manifest)]);
+  if (json.size > MAX_JSON_BYTES) fail("Project metadata exceeds the supported size.");
+  entries.push({ name: "scene.json", source: json, crc32: (await digestBlob(json)).crc32 });
+  return storedArchive(entries);
 }
-export async function decodeProject(
-  bytes: Uint8Array,
-): Promise<{
-  scene: SceneDocument;
-  editor: EditorSnapshot;
-  files: Map<string, File>;
-}> {
-  if (bytes.length > MAX_PROJECT_BYTES)
-    fail("This version supports projects up to 512 MiB.");
-  const sizes = new Map<string, number>();
-  let total = 0;
-  // Inspect every ZIP entry before allocating asset outputs. Only extract metadata here.
-  const metadata = await new Promise<Record<string, Uint8Array>>(
-    (resolve, reject) => {
-      unzip(
-        bytes,
-        {
-          filter(entry) {
-            if (
-              sizes.has(entry.name) ||
-              (entry.name !== "scene.json" &&
-                !/^assets\/[a-zA-Z0-9_-]{1,100}$/.test(entry.name))
-            )
-              fail("Invalid or duplicate archive entry.");
-            sizes.set(entry.name, entry.originalSize);
-            total += entry.originalSize;
-            if (
-              total > MAX_PROJECT_BYTES ||
-              sizes.size > MAX_NODES + 1 ||
-              (entry.name === "scene.json" &&
-                entry.originalSize > MAX_JSON_BYTES)
-            )
-              fail("Project exceeds the supported size.");
-            return entry.name === "scene.json";
-          },
-        },
-        (error, data) => (error ? reject(error) : resolve(data)),
-      );
-    },
-  );
-  if (!metadata["scene.json"])
-    fail("This is not an MSB scene: scene.json is missing.");
-  const manifest = record(JSON.parse(strFromU8(metadata["scene.json"])));
-  if (manifest.format !== "musubi-project" || manifest.version !== 1)
-    fail("Unsupported MSB project version.");
-  const scene = validateScene(manifest.scene),
-    editor = validateEditor(manifest.editor),
-    refs = record(manifest.files);
-  const fileAssets = Object.values(scene.assets).filter(
-    (asset) => asset.kind === "file",
-  );
-  if (
-    Object.keys(refs).length !== fileAssets.length ||
-    sizes.size !== fileAssets.length + 1
-  )
-    fail("Asset inventory does not match the scene.");
-  for (const asset of fileAssets) {
-    const ref = record(refs[asset.id]);
-    if (
-      ref.path !== `assets/${asset.id}` ||
-      sizes.get(ref.path as string) !== asset.byteLength ||
-      typeof ref.sha256 !== "string" ||
-      !/^[a-f0-9]{64}$/.test(ref.sha256)
-    )
-      fail(`Missing or invalid asset: ${asset.fileName}`);
-  }
-  const entries = await new Promise<Record<string, Uint8Array>>(
-    (resolve, reject) =>
-      unzip(bytes, { filter: (e) => e.name !== "scene.json" }, (error, data) =>
-        error ? reject(error) : resolve(data),
-      ),
-  );
-  const files = new Map<string, File>();
-  for (const asset of fileAssets) {
-    const ref = record(refs[asset.id]),
-      data = entries[ref.path as string];
-    if (
-      !data ||
-      data.length !== asset.byteLength ||
-      (await digest(data)) !== ref.sha256
-    )
-      fail(`Asset integrity check failed: ${asset.fileName}`);
-    files.set(
-      asset.id,
-      new File([new Uint8Array(data).buffer], asset.fileName),
-    );
-  }
-  return { scene, editor, files };
+/** Compatibility wrapper for small callers that explicitly require contiguous bytes. */
+export async function encodeProject(scene: SceneDocument, sources: ReadonlyMap<string, Blob>, editor: EditorSnapshot): Promise<Uint8Array> {
+  return new Uint8Array(await (await encodeProjectBlob(scene, sources, editor)).arrayBuffer());
+}
+
+export async function decodeProjectBlob(blob: Blob): Promise<{ scene: SceneDocument; editor: EditorSnapshot; files: Map<string, File> }> {
+  const reader = new ZipReader(new BlobReader(blob), { useWebWorkers: false, strictness: "strict", checkOverlappingEntry: true });
+  try {
+    const entries = new Map<string, FileEntry>();
+    for await (const entry of reader.getEntriesGenerator()) {
+      if (entries.size >= MAX_NODES + 1 || entries.has(entry.filename) || entry.directory || entry.symlink || entry.encrypted
+        || (entry.filename !== "scene.json" && !/^assets\/[a-zA-Z0-9_-]{1,100}$/.test(entry.filename))
+        || !Number.isSafeInteger(entry.uncompressedSize) || entry.uncompressedSize < 0
+        || !Number.isSafeInteger(entry.compressedSize) || entry.compressedSize < 0
+        || !Number.isSafeInteger(entry.offset) || entry.offset < 0)
+        fail("Invalid or duplicate archive entry.");
+      if (entry.filename === "scene.json" && entry.uncompressedSize > MAX_JSON_BYTES) fail("Project metadata exceeds the supported size.");
+      entries.set(entry.filename, entry as FileEntry);
+    }
+    async function content(entry: FileEntry): Promise<Blob> {
+      if (entry.compressionMethod === 0) {
+        if (entry.compressedSize !== entry.uncompressedSize) fail("Invalid stored asset size.");
+        // zip.js validates local headers, descriptors, ranges and overlaps without inflating STORE data.
+        await entry.getData(new BlobWriter(), { checkOverlappingEntryOnly: true, checkOverlappingEntry: true });
+        const start = entry.localDirectory!.dataOffset;
+        return blob.slice(start, start + entry.uncompressedSize);
+      }
+      const writer = new BlobWriter(), output = writer.writable;
+      let produced = 0;
+      const bounded = new TransformStream<Uint8Array, Uint8Array>({ transform(chunk, controller) {
+        produced += chunk.length;
+        if (produced > entry.uncompressedSize) throw Error("Archive entry exceeds its declared size.");
+        controller.enqueue(chunk);
+      } });
+      const completion = bounded.readable.pipeTo(output);
+      completion.catch(() => {});
+      try { await entry.getData(bounded.writable, { checkSignature: true, checkOverlappingEntry: true }); await completion; }
+      catch (error) { await completion.catch(() => {}); throw error; }
+      return writer.getData();
+    }
+    const metadataEntry = entries.get("scene.json"); if (!metadataEntry) fail("This is not an MSB scene: scene.json is missing.");
+    const metadata = await content(metadataEntry!);
+    if (metadata.size !== metadataEntry!.uncompressedSize || (metadataEntry!.crc32 !== undefined && (await digestBlob(metadata)).crc32 !== metadataEntry!.crc32)) fail("Project metadata integrity check failed.");
+    const manifest = record(JSON.parse(await metadata.text()));
+    if (manifest.format !== "musubi-project" || manifest.version !== 1) fail("Unsupported MSB project version.");
+    const scene = validateScene(manifest.scene), editor = validateEditor(manifest.editor), refs = record(manifest.files);
+    const fileAssets = Object.values(scene.assets).filter(asset => asset.kind === "file");
+    if (Object.keys(refs).length !== fileAssets.length || entries.size !== fileAssets.length + 1) fail("Asset inventory does not match the scene.");
+    for (const asset of fileAssets) {
+      const ref = record(refs[asset.id]), entry = entries.get(ref.path as string);
+      if (ref.path !== `assets/${asset.id}` || entry?.uncompressedSize !== asset.byteLength
+        || typeof ref.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(ref.sha256)) fail(`Missing or invalid asset: ${asset.fileName}`);
+    }
+    const files = new Map<string, File>();
+    for (const asset of fileAssets) {
+      const ref = record(refs[asset.id]), entry = entries.get(ref.path as string)!, data = await content(entry);
+      const digest = await digestBlob(data);
+      if (data.size !== asset.byteLength || digest.sha256 !== ref.sha256 || (entry.crc32 !== undefined && digest.crc32 !== entry.crc32)) fail(`Asset integrity check failed: ${asset.fileName}`);
+      files.set(asset.id, new File([data], asset.fileName));
+    }
+    return { scene, editor, files };
+  } catch (error) {
+    if (error instanceof Error && error.message === "Unsafe filename") fail("Invalid archive entry.");
+    throw error;
+  } finally { await reader.close(); }
+}
+export async function decodeProject(bytes: Uint8Array): Promise<{ scene: SceneDocument; editor: EditorSnapshot; files: Map<string, File> }> {
+  return decodeProjectBlob(new Blob([new Uint8Array(bytes).buffer]));
 }

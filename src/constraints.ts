@@ -4,6 +4,7 @@ import type { SceneDocument, TransformChannels, Vec3 } from "./scene-document.ts
 import type { SceneStore } from "./scene-store.ts";
 import { validateIKControlDependencies } from "./ik-control-plan.ts";
 import { jointLocalQuaternion, jointRotationFromQuaternion } from "./joint-transform.ts";
+import { objectGeometryPosition, objectLocalMatrix, objectPivotPosition } from "./object-pivot.ts";
 
 export type ConstraintType = "point" | "orient" | "scale" | "parent" | "aim";
 export type SignedAxis = "+X" | "-X" | "+Y" | "-Y" | "+Z" | "-Z";
@@ -20,7 +21,7 @@ export type Constraint = {
   worldUpAxis?: SignedAxis;
   offset: { position: Vec3; rotation: [number, number, number, number]; scale: Vec3 };
 };
-type Node = { id: string; parentId: string | null; position: Vec3; rotation?: Vec3; scale?: Vec3; orientation?: Vec3 };
+type Node = { id: string; type?: string; parentId: string | null; position: Vec3; rotation?: Vec3; scale?: Vec3; orientation?: Vec3; pivot?: Vec3; pivotCompensation?: Vec3; affine?: number[] };
 type Plan = { nodes: Map<string, Node>; order: string[]; byTarget: Map<string, Constraint[]> };
 const planCache = new WeakMap<SceneDocument, Plan>();
 const constraintTypes: ConstraintType[] = ["point", "orient", "aim", "scale", "parent"];
@@ -73,6 +74,8 @@ export function validateConstraints(value: unknown, doc: SceneDocument): asserts
   if (!Array.isArray(value) || value.length > 10000) throw Error("Invalid constraints.");
   const ids = new Set<string>(), owners = new Set<string>(), nodes = nodesFor(doc);
   for (const constraint of value as Constraint[]) {
+    const target = doc.nodes[constraint?.targetId];
+    if (target?.type === "transform" && target.affine && constraint.type !== "point") throw Error("Orientation and scale constraints on objects with affine world scaling are not supported. Remove the constraint before world-axis scaling.");
     if (!constraint || typeof constraint !== "object" || !validId(constraint.id) || ids.has(constraint.id)
       || typeof constraint.name !== "string" || !constraint.name.trim() || constraint.name.length > 100
       || !constraintTypes.includes(constraint.type) || !validId(constraint.sourceId) || !validId(constraint.targetId)
@@ -104,6 +107,7 @@ function poseFor(node: Node, poses?: ReadonlyMap<string, AnimationPose>): Animat
   return pose ?? { position: [...node.position], rotation: [...node.rotation ?? [0, 0, 0]], scale: [...node.scale ?? [1, 1, 1]], visibility: 1 };
 }
 function localMatrix(node: Node, pose: AnimationPose): Matrix4 {
+  if (node.type === "transform") return objectLocalMatrix(node, pose);
   return new Matrix4().compose(new Vector3(...pose.position),
     jointLocalQuaternion(node, pose.rotation), new Vector3(...pose.scale));
 }
@@ -195,6 +199,7 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
     const constraints = selected(id) ? plan.byTarget.get(id)?.filter(constraint => constraint.enabled) ?? [] : [];
     if (constraints.length) {
       const parentInverse = parent.clone().invert(), parentComponents = decompose(parent);
+      let desiredGeometryPosition: Vector3 | undefined;
       for (const constraint of constraints) {
         const source = world.get(constraint.sourceId)!;
         checkConstraintPose(constraint, source, parent);
@@ -203,11 +208,13 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
         if (constraint.type === "point" || constraint.type === "parent") {
           const desired = constraint.type === "parent" ? new Vector3(...offset.position).applyMatrix4(source)
             : sourceComponents.position.add(new Vector3(...offset.position));
-          pose.position = desired.applyMatrix4(parentInverse).toArray() as Vec3;
+          desiredGeometryPosition = desired.applyMatrix4(parentInverse);
+          const shift = node.type === "transform" ? objectGeometryPosition(node, { ...pose, position: [0, 0, 0] }) : new Vector3();
+          pose.position = desiredGeometryPosition.clone().sub(shift).toArray() as Vec3;
         }
         if (constraint.type === "orient" || constraint.type === "parent" || constraint.type === "aim") {
           const desired = (constraint.type === "aim"
-            ? aimRotation(constraint, sourceComponents.position, new Vector3(...pose.position).applyMatrix4(parent))
+            ? aimRotation(constraint, sourceComponents.position, (desiredGeometryPosition?.clone() ?? objectPivotPosition(node, pose)).applyMatrix4(parent))
             : sourceComponents.rotation).multiply(new Quaternion(...offset.rotation));
           const local = parentComponents.rotation.clone().invert().multiply(desired).normalize();
           pose.rotation = jointRotationFromQuaternion(node, local);
@@ -216,6 +223,12 @@ export function evaluateConstraints(doc: SceneDocument, poses: Map<string, Anima
           const desired = sourceComponents.scale.multiply(new Vector3(...offset.scale)).divide(parentComponents.scale);
           pose.scale = desired.toArray().map(value => Math.max(0.001, value)) as Vec3;
         }
+      }
+      // Rotation/scale constraints alter the pivot shift after a point or parent
+      // constraint has established the driven geometry's desired origin.
+      if (desiredGeometryPosition && node.type === "transform") {
+        const shift = objectGeometryPosition(node, { ...pose, position: [0, 0, 0] });
+        pose.position = desiredGeometryPosition.sub(shift).toArray() as Vec3;
       }
       updates.set(id, pose);
     }
@@ -240,7 +253,9 @@ export function createConstraint(store: SceneStore, type: ConstraintType, source
   checkConstraintPose({ type, name: `${type} constraint` }, source, targetParentId ? matrices.get(targetParentId)! : new Matrix4());
   const sourceComponents = decompose(source), targetComponents = decompose(matrices.get(targetId)!);
   const aimSettings: AimOptions = type === "aim" ? { aimAxis: aimOptions.aimAxis ?? "+Z", worldUpAxis: aimOptions.worldUpAxis ?? "+Y" } : {};
-  const initialAim = type === "aim" ? aimRotation({ ...aimSettings, name: "aim constraint" }, sourceComponents.position, targetComponents.position) : undefined;
+  const targetNode = nodesFor(doc).get(targetId)!;
+  const targetPivot = new Vector3(...targetNode.pivot ?? [0, 0, 0]).applyMatrix4(matrices.get(targetId)!);
+  const initialAim = type === "aim" ? aimRotation({ ...aimSettings, name: "aim constraint" }, sourceComponents.position, targetPivot) : undefined;
   const offset: Constraint["offset"] = { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] };
   if (maintainOffset) {
     if (type === "point") offset.position = targetComponents.position.clone().sub(sourceComponents.position).toArray() as Vec3;

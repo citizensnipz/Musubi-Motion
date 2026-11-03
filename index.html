@@ -107,6 +107,7 @@
           <wa-dropdown id="modeling-menu" size="s" placement="bottom-start">
             <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Modeling</wa-button>
             <wa-dropdown-item id="view-modeling">Mesh Tools</wa-dropdown-item>
+            <wa-dropdown-item id="convert-to-splats">Convert to splats</wa-dropdown-item>
           </wa-dropdown>
           <wa-dropdown id="fx-menu" size="s" placement="bottom-start">
             <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">FX</wa-button>
@@ -184,12 +185,12 @@
             variant="neutral"
             aria-label="Fit view"
             ><span data-icon="fit"></span></wa-button
-          ><wa-tooltip for="reset">Fit the scene or selection</wa-tooltip>
+          ><wa-tooltip for="reset">Fit the scene or selection · F</wa-tooltip>
         </div>
         <div id="notice" hidden></div>
         <div class="viewport-footer">
           <span
-            >Alt + left: orbit / middle: pan / right: dolly · Scroll: zoom</span
+            >Alt + left: orbit / middle: pan / right: dolly · Scroll: zoom · F: frame · Hold D: edit pivot</span
           >
         </div>
       </main>

@@ -1,9 +1,12 @@
+import { cubeToSplatBytes, cubeSplatFaces } from "./cube-to-splats";
+import { createCubeSplatDialog } from "./cube-splat-dialog";
+import { findMeshShape as conversionMeshShape } from "./mesh-modeling";
 import type { WaSelectEvent } from "@awesome.me/webawesome/dist/events/select.js";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
-import { addSplat, emptyScene, transformNodes, deleteSceneItems, normalizedChannels } from "./scene-document.ts";
+import { addSplat, emptyScene, transformNodes, deleteSceneItems, normalizedChannels, uniqueName } from "./scene-document.ts";
 import type {
   SceneDocument,
   AssetRecord,
@@ -19,13 +22,16 @@ import {
   renameObject,
 } from "./scene-store.ts";
 import { mountViewportFileDrop } from "./viewport-file-drop.ts";
+import { importFBX } from "./fbx-import.ts";
+import { transformSpace, type TransformOrientation } from "./transform-space.ts";
+import { objectGeometryPosition, relocateObjectPivot, objectLocalMatrix, globalObjectTransform } from "./object-pivot.ts";
+import type { TransformNode } from "./scene-document.ts";
 import { createMorphPanel } from "./morph-panel.ts";
 import { createPropertiesPanel } from "./properties-panel.ts";
 import { makeDemo, prepareSplat } from "./splat-assets.ts";
 import {
-  encodeProject,
-  decodeProject,
-  MAX_PROJECT_BYTES,
+  encodeProjectBlob,
+  decodeProjectBlob,
 } from "./project-archive.ts";
 import type { EditorSnapshot } from "./project-archive.ts";
 import { pickScene, saveDestination, writeScene } from "./scene-files.ts";
@@ -254,7 +260,7 @@ async function start() {
     time = 0,
     previous = 0;
   let dragId: string | undefined;
-  let dragControlPose: { id: string; pose: AnimationPose } | undefined;
+  let dragControlPose: { id: string; pose: AnimationPose; node?: TransformNode } | undefined;
   const poseOverrides = new Map<string, AnimationPose>();
   const poseDrafts = new PoseDrafts();
   let evaluated = new Map<string, AnimationPose>();
@@ -323,12 +329,16 @@ async function start() {
     return result.document;
   }
   const skeleton = mountSkeleton(store, world, riggingPanel, () => !loading && !dragId, prepareJointEdit);
-  function editPose(id: string, channels: TransformChannels, label: string) {
+  function editPose(id: string, channels: TransformChannels, label: string, transformedNode?: TransformNode) {
     setPlaying(false);
     let doc = store.getState().document;
     const node = doc.nodes[id];
     if (node?.type !== "transform") return;
     const pose = { ...normalizedChannels(channels), visibility: currentPose(id).visibility, morphWeights: currentPose(id).morphWeights };
+    if (transformedNode) {
+      const patched = { ...node }; if (transformedNode.affine) patched.affine = [...transformedNode.affine]; else delete patched.affine;
+      doc = { ...doc, nodes: { ...doc.nodes, [id]: patched } };
+    }
     try {
       doc = prepareTransformAnimationEdit(doc, id, pose, getFrame(), timelinePanel?.autoKey ?? false);
       if (doc.constraints) validateConstraints(doc.constraints, doc);
@@ -507,18 +517,60 @@ async function start() {
     child.renderOrder = 1000000;
   });
   world.add(transform.getHelper());
+  const objectPivotProxy = new THREE.Group(); world.add(objectPivotProxy);
+  let pivotHeld = false;
+  let objectOrientation: TransformOrientation = "world";
+  let objectDrag: { id: string; document: SceneDocument; node: TransformNode; pose: AnimationPose; editingPivot: boolean; inverseWorld: THREE.Matrix4; beforeWorld: THREE.Matrix4; parentWorld: THREE.Matrix4; initialOrientation: THREE.Quaternion } | undefined;
+  const pivotCanvas = document.createElement("canvas"); pivotCanvas.width = pivotCanvas.height = 128;
+  const pivotContext = pivotCanvas.getContext("2d")!;
+  pivotContext.strokeStyle = "#ffffff"; pivotContext.lineWidth = 10; pivotContext.beginPath(); pivotContext.arc(64, 64, 48, 0, Math.PI * 2); pivotContext.stroke();
+  const pivotCircle = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(pivotCanvas), depthTest: false, depthWrite: false }));
+  pivotCircle.scale.set(.27, .27, 1); pivotCircle.renderOrder = 1000001; pivotCircle.visible = false;
+  // Keep Three's screen-plane center picker; replace only its visible center while editing.
+  const translateCenter = (transform as unknown as { _gizmo: { gizmo: { translate: THREE.Group } } })._gizmo.gizmo.translate.children.find(child => child.name === "XYZ") as THREE.Mesh;
+  translateCenter.add(pivotCircle);
+  function updatePivotMarker() {
+    const editing = (objectDrag?.editingPivot ?? pivotHeld) && transform.object === objectPivotProxy && currentMode === "translate";
+    pivotCircle.visible = editing;
+    (translateCenter.material as THREE.Material).visible = !editing;
+  }
+  function applyObjectPose(object: RuntimeObject, node: TransformNode, pose: TransformChannels) {
+    object.root.position.copy(objectGeometryPosition(node, pose));
+    object.root.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as Vec3);
+    object.root.scale.fromArray(pose.scale);
+    object.root.matrixAutoUpdate = !node.affine;
+    if (node.affine) { object.root.matrix.copy(objectLocalMatrix(node, pose)); object.root.matrixWorldNeedsUpdate = true; }
+    else object.root.updateMatrix();
+  }
+  function dragTransform(session: NonNullable<typeof objectDrag>) {
+    return globalObjectTransform(session.node, session.pose, session.beforeWorld, session.parentWorld, objectPivotProxy, currentMode, session.initialOrientation);
+  }
+
   const toolbar = element<HTMLDivElement>("transform-tools");
   toolbar.className = "transform-tools";
   toolbar.setAttribute("role", "toolbar");
   toolbar.setAttribute("aria-label", "Transform tools");
+  const orientationControl = document.createElement("select");
+  orientationControl.id = "transform-orientation";
+  orientationControl.setAttribute("aria-label", "Object gizmo axis orientation");
+  orientationControl.title = "World: global axes · Object: selected object's axes";
+  orientationControl.add(new Option("World", "world")); orientationControl.add(new Option("Object", "object"));
+  orientationControl.value = objectOrientation;
+  orientationControl.addEventListener("change", () => {
+    if (dragId || loading || playing) { orientationControl.value = objectOrientation; return; }
+    objectOrientation = orientationControl.value === "object" ? "object" : "world";
+    refreshGizmo();
+  });
 
   function singleId() {
     return selected.size === 1 ? selected.values().next().value : undefined;
   }
   function refreshGizmo() {
-    if (meshDrag) return;
+    orientationControl.disabled = !!dragId || loading || playing || !!meshComponentRequest || !!skeleton.selectedIds.size || !!selectedIKId || !singleId();
+    if (meshDrag || objectDrag) return;
     if (componentPickShape || paintSettings) { transform.detach(); transform.enabled = false; return; }
     if(!gizmosVisible || (skeleton.selectedId&&!jointsVisible)) {transform.detach();transform.enabled=false;return;}
+    transform.setSpace("world");
     if (meshComponentRequest) {
       const shape = store.getState().document.nodes[meshComponentRequest.shapeId];
       const object = shape?.type === "meshShape" ? runtime.get(shape.parentId) : undefined;
@@ -555,7 +607,17 @@ async function start() {
     const id = singleId(),
       object = id ? runtime.get(id) : undefined;
     if (object && currentMode !== "select" && !loading) {
-      if (transform.object !== object.root) transform.attach(object.root);
+      transform.setSpace(transformSpace(currentMode, false, objectOrientation));
+      const node = store.getState().document.nodes[id!] as TransformNode;
+      const pose = currentPose(id!);
+      object.root.updateWorldMatrix(true, false);
+      if (objectPivotProxy.parent !== world) world.add(objectPivotProxy);
+      objectPivotProxy.position.set(...node.pivot ?? [0, 0, 0]).applyMatrix4(object.root.matrixWorld);
+      if (objectOrientation === "object") object.root.getWorldQuaternion(objectPivotProxy.quaternion).normalize();
+      else objectPivotProxy.quaternion.identity();
+      objectPivotProxy.scale.setScalar(1); objectPivotProxy.updateMatrixWorld(true);
+      if (transform.object !== objectPivotProxy) transform.attach(objectPivotProxy);
+      updatePivotMarker();
       transform.setMode(currentMode);
       transform.enabled = true;
       transform.getHelper().visible = true;
@@ -590,15 +652,16 @@ async function start() {
     button.dataset.mode = mode;
     button.title =
       mode === "scale"
-        ? "Scale axes, planes, or uniformly with the center handle"
-        : mode;
+        ? "Scale along the selected World/Object axes, or uniformly with the center handle"
+        : mode === "rotate" ? "Rotate around the selected World/Object axes" : mode;
     button.addEventListener("click", () => choose(mode));
     toolbar.append(button);
     const tooltip = document.createElement("wa-tooltip");
     tooltip.setAttribute("for", button.id);
-    tooltip.textContent = `${mode[0].toUpperCase() + mode.slice(1)} · ${key.toUpperCase()}`;
+    tooltip.textContent = `${mode[0].toUpperCase() + mode.slice(1)} · ${key.toUpperCase()}${mode === "translate" ? " · Hold D to edit pivot" : ""}`;
     toolbar.append(tooltip);
   }
+  toolbar.append(orientationControl);
   const selectionLabel = document.createElement("span");
   selectionLabel.className = "selection-label";
   selectionLabel.setAttribute("role", "status");
@@ -1133,6 +1196,7 @@ async function start() {
   transform.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value;
     if (event.value) {
+      orientationControl.disabled = true;
       if (meshComponentRequest && transform.object === meshComponentProxy) {
         try {
           const document = store.getState().document, shape = document.nodes[meshComponentRequest.shapeId];
@@ -1145,11 +1209,37 @@ async function start() {
           dragId = `mesh:${shape.id}`;
         } catch (error) { notice.textContent = (error as Error).message; transform.pointerUp(null); refreshGizmo(); return; }
       } else dragId = selectedIKId ? `ik:${selectedIKId}` : skeleton.selectedId || singleId();
+      if (dragId && transform.object === objectPivotProxy) {
+        const node = store.getState().document.nodes[dragId]; const object = runtime.get(dragId);
+        if (node?.type === "transform" && object) {
+          object.root.updateWorldMatrix(true, false);
+          objectDrag = { id: dragId, document: store.getState().document, node, pose: currentPose(dragId), editingPivot: pivotHeld && currentMode === "translate", inverseWorld: object.root.matrixWorld.clone().invert(), beforeWorld: object.root.matrixWorld.clone(), parentWorld: object.root.parent?.matrixWorld.clone() ?? new THREE.Matrix4(), initialOrientation: objectPivotProxy.quaternion.clone() };
+        }
+      }
       if(skeleton.selectedId&&currentMode==="rotate")skeleton.beginRotation();
       cancelDrag = false;
       setPlaying(false);
     } else if (dragId) {
       const id = dragId;
+      if (objectDrag) {
+        const session = objectDrag; objectDrag = undefined; dragId = undefined; dragControlPose = undefined;
+        try {
+          if (!cancelDrag) {
+            if (store.getState().document !== session.document) throw Error("The scene changed during the drag. Try again.");
+            if (session.editingPivot) {
+              objectPivotProxy.updateWorldMatrix(true, false);
+              const pivot = objectPivotProxy.getWorldPosition(new THREE.Vector3()).applyMatrix4(session.inverseWorld).toArray() as Vec3;
+              const next = relocateObjectPivot(session.node, session.pose, pivot);
+              preserveUnconsumedDrafts([], () => store.setState({ document: { ...session.document, nodes: { ...session.document.nodes, [id]: next } }, editLabel: "Move object pivot" }));
+            } else {
+              const result = dragTransform(session), channels = result.channels;
+              channels.rotation = currentMode === "rotate" ? unwrapEuler(channels.rotation, session.pose.rotation) : session.pose.rotation;
+              editPose(id, channels, `${currentMode[0].toUpperCase() + currentMode.slice(1)} object`, result.node);
+            }
+          }
+        } catch (error) { notice.textContent = error instanceof Error ? error.message : String(error); }
+        syncScene(); updatePivotMarker(); refreshGizmo(); updateHistoryButtons(); return;
+      }
       if (meshDrag) {
         const session = meshDrag;
         meshComponentProxy.updateMatrixWorld(true);
@@ -1200,6 +1290,19 @@ async function start() {
     updateHistoryButtons();
   });
   transform.addEventListener("objectChange", () => {
+    if (objectDrag) {
+      if (!cancelDrag && !objectDrag.editingPivot) {
+        for (let i = 0; i < 3; i++) objectPivotProxy.scale.setComponent(i, Math.max(.001 / objectDrag.pose.scale[i], objectPivotProxy.scale.getComponent(i)));
+        const object = runtime.get(objectDrag.id)!, result = dragTransform(objectDrag), channels = result.channels;
+        applyObjectPose(object, result.node, channels);
+        if (ikInputConstraintTargets(store.getState().document).has(objectDrag.id)) {
+          dragControlPose = { id: objectDrag.id, pose: { ...objectDrag.pose, ...channels }, node: result.node };
+          applyAnimationPose();
+        }
+        updateBindings(); updatePanel(channels);
+      }
+      return;
+    }
     if (meshDrag) {
       if (cancelDrag) return;
       try {
@@ -1268,6 +1371,7 @@ async function start() {
     controls.dispose();controls=new OrbitControls(camera,webgl.domElement);
     controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.PAN,RIGHT:THREE.MOUSE.DOLLY};
     controls.enableDamping=true;controls.enableRotate=camera===perspective;
+    controls.maxDistance=Infinity; controls.minZoom=1e-12; controls.maxZoom=1e12;
     controls.target.copy(target);controls.update();transform.camera=camera;
   }
   function resizeProjection() {
@@ -1302,9 +1406,13 @@ async function start() {
   function fitView() {
     world.updateMatrixWorld(true);
     const bounds = new THREE.Box3();
-    const ids = selected.size
-      ? [...selected]
-      : store.getState().document.rootIds;
+    const document = store.getState().document;
+    const ids = new Set(selected.size ? selected : skeleton.selectedIds.size ? [] : document.rootIds);
+    let expanded = true;
+    while (expanded) { expanded = false; for (const node of transformNodes(document)) if (node.parentId && ids.has(node.parentId) && !ids.has(node.id)) { ids.add(node.id); expanded = true; } }
+    for (const id of skeleton.selectedIds) {
+      const matrix = skeleton.boneMatrix(id); if (matrix) bounds.expandByPoint(new THREE.Vector3().setFromMatrixPosition(matrix));
+    }
     for (const id of ids) {
       const object = runtime.get(id);
       if (object)
@@ -1321,8 +1429,11 @@ async function start() {
       Math.atan(Math.tan(halfFov) * perspective.aspect),
     );
     const distance = (radius / Math.sin(limitingFov)) * 1.15;
+    const direction = camera.position.clone().sub(controls.target);
+    if (direction.lengthSq() < 1e-20) direction.copy(viewDirections[activeView]);
+    const damping = controls.enableDamping; controls.enableDamping = false; controls.update();
     camera.position
-      .copy(viewDirections[activeView])
+      .copy(direction)
       .normalize()
       .multiplyScalar(distance)
       .add(sphere.center);
@@ -1332,8 +1443,8 @@ async function start() {
     camera.updateProjectionMatrix();
     controls.target.copy(sphere.center);
     controls.minDistance = radius * 0.15;
-    controls.maxDistance = distance * 10;
-    controls.update();
+    controls.maxDistance = Infinity;
+    controls.update(); controls.enableDamping = damping;
   }
   new ResizeObserver(() => {
     const { width, height } = viewport.getBoundingClientRect();
@@ -1552,12 +1663,14 @@ async function start() {
   });
   webgl.domElement.addEventListener("lostpointercapture", () => { if (gesture?.component) cancelComponentScan(); cancelSelection(); });
   window.addEventListener("blur", () => {
+    pivotHeld = false;
     ikPanel?.cancelPreview();
     cancelComponentScan();
     abortDrag();
     cancelSelection();
   });
   window.addEventListener("keyup", (event) => {
+    if (event.key.toLowerCase() === "d") { pivotHeld = false; if (!dragId) { refreshGizmo(); updatePivotMarker(); } }
     if (event.key === "Alt" && !dragId) refreshGizmo();
   });
   // A long scan must remain cancellable even if focus moves into an editor field.
@@ -1591,6 +1704,7 @@ async function start() {
     if (key === "escape" && (componentPickShape || pendingComponentPick !== undefined || gesture?.component)) {
       event.preventDefault(); cancelComponentScan(); cancelSelection(); skinWeightsPanel?.stopPicking(); return;
     }
+    if (key === "escape" && objectDrag) { event.preventDefault(); abortDrag(); return; }
     const editing = isEditing(event);
     if (editing) return; // Preserve native text editing undo inside fields.
     if (meshComponentRequest && ["delete", "backspace"].includes(key)) {
@@ -1613,6 +1727,8 @@ async function start() {
       return;
     }
     if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+    if (key === "d" && currentMode === "translate" && singleId() && !skeleton.selectedIds.size && !loading && !playing && !dragId && !meshComponentRequest && !componentPickShape && !paintSettings) { event.preventDefault(); pivotHeld = true; refreshGizmo(); updatePivotMarker(); return; }
+    if (key === "f" && !loading && !dragId) { event.preventDefault(); fitView(); return; }
     if (key === "s") { event.preventDefault(); keySelection(); return; }
     if (key === " ") { event.preventDefault(); if (!loading && !dragId) setPlaying(!playing); return; }
     if (key === "," || key === ".") { event.preventDefault(); setFrame(getFrame() + (key === "," ? -1 : 1)); return; }
@@ -1680,6 +1796,7 @@ async function start() {
     const draggingTarget = !!selectedIKId && dragId === `ik:${selectedIKId}`;
     if (dragId && !draggingTarget && !dragControlPose) return;
     let doc = store.getState().document;
+    if (dragControlPose?.node) doc = { ...doc, nodes: { ...doc.nodes, [dragControlPose.id]: dragControlPose.node } };
     if (blendPreview && doc.ikHandles?.some(handle => handle.id === blendPreview!.id))
       doc = keyChannels(doc, blendPreview.id, blendPreview.value, getFrame(), false);
     if (draggingTarget) {
@@ -1707,15 +1824,15 @@ async function start() {
     for (const [id, object] of runtime) {
       const pose = evaluated.get(id);
       if (!pose) continue;
-      object.root.position.fromArray(pose.position);
-      object.root.rotation.set(...pose.rotation.map(THREE.MathUtils.degToRad) as Vec3);
-      object.root.scale.fromArray(pose.scale);
+      const node = doc.nodes[id];
+      if (node?.type === "transform") applyObjectPose(object, node, pose);
       object.root.visible = pose.visibility >= .5;
       object.preview.rotation.y = timelinePanel?.turntable ? (time / duration) * Math.PI * 2 : 0;
     }
     skeleton.applyPose(evaluated);
     for (const object of runtime.values()) if (object.kind === "mesh") object.polygon.applySkin(id => skeleton.boneMatrix(id), evaluated.get(object.shape.parentId)?.morphWeights);
     ikTargets.sync(doc, evaluated, getFrame());
+    if (!objectDrag && !meshDrag) refreshGizmo();
   }
   function updateTime(apply = true) {
     if (apply) { applyAnimationPose(); updateBindings(); }
@@ -1867,7 +1984,7 @@ async function start() {
       if (!destination) return;
       notice.textContent = "Saving scene…";
       const doc = store.getState().document;
-      const bytes = await encodeProject(doc, assetFiles, editorSnapshot());
+      const bytes = await encodeProjectBlob(doc, assetFiles, editorSnapshot());
       await writeScene(bytes, destination);
       sceneName = destination.name;
       sceneHandle = destination.handle;
@@ -1890,11 +2007,7 @@ async function start() {
     const staged = new Map<string, RuntimeObject>();
     let committed = false;
     try {
-      if (file.size > MAX_PROJECT_BYTES)
-        throw new Error("This version supports projects up to 512 MiB.");
-      const project = await decodeProject(
-        new Uint8Array(await file.arrayBuffer()),
-      );
+      const project = await decodeProjectBlob(file);
       for (const node of transformNodes(project.scene)) {
         const emitter = Object.values(project.scene.nodes).find((shape): shape is ParticleShapeNode => shape.type === "particleShape" && shape.parentId === node.id);
         if (emitter) { staged.set(node.id, particleObjectRuntime(emitter)); continue; }
@@ -2077,6 +2190,42 @@ async function start() {
       updateHistoryButtons();
     }
   }
+  const cubeSplatDialog = createCubeSplatDialog(async (settings, moveAside) => {
+    if (loading || dragId || playing) throw Error("Stop playback and finish the current edit before converting.");
+    if (selected.size !== 1) throw Error("Select one cube mesh in the viewport or Outliner.");
+    const doc = store.getState().document, source = conversionMeshShape(doc, [...selected][0]);
+    if (!source) throw Error("Select one cube mesh in the viewport or Outliner.");
+    const sourceNode = doc.nodes[source.parentId];
+    if (sourceNode.type !== "transform") throw Error("Cube transform is missing.");
+    const pose = currentPose(sourceNode.id);
+    const faces = cubeSplatFaces(source), bytes = cubeToSplatBytes(source, settings);
+    const file = new File([bytes], "cube.splat"), asset: AssetRecord = { id: crypto.randomUUID(), kind: "file", fileName: file.name, byteLength: file.size };
+    let candidate: SplatMesh | undefined;
+    busy(true, "Converting cube to splats...");
+    try {
+      candidate = new SplatMesh({ extSplats: true, covSplats: true, fileBytes: bytes, fileName: file.name });
+      const data = await prepareSplat(candidate);
+      const added = addSplat(doc, asset, `${sourceNode.name}_splats`, [0, 0, 0]);
+      const node = added.document.nodes[added.id] as TransformNode;
+      Object.assign(node, { ...sourceNode, ...normalizedChannels(pose), id: added.id, name: uniqueName(doc, `${sourceNode.name}_splats`, sourceNode.parentId) });
+      if (moveAside) {
+        const displacement = new THREE.Vector3(faces[0].side * 1.5, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(objectLocalMatrix(sourceNode, pose)));
+        node.position = pose.position.map((v, axis) => v + displacement.getComponent(axis)) as Vec3;
+      }
+      if (node.parentId) added.document.rootIds = added.document.rootIds.filter(id => id !== node.id);
+      const root = new THREE.Group(), preview = new THREE.Group(), box = new THREE.Box3Helper(new THREE.Box3(), 0x999999);
+      preview.add(candidate); root.add(preview); box.visible = false;
+      runtime.set(node.id, { kind: "splat", root, preview, mesh: candidate, box, assetId: asset.id, ...data });
+      world.add(box); assetFiles.set(asset.id, file);
+      store.setState({ document: added.document, editLabel: "Convert cube to splats" });
+      selectObjects([node.id]); fitView();
+      return `Created ${data.count.toLocaleString()} splats. Select the original cube to try other settings. Undo removes the copy.`;
+    } catch (error) { candidate?.dispose(); throw error; }
+    finally { busy(false); }
+  });
+  element("modeling-menu").addEventListener("wa-select", (event) => {
+    if ((event as WaSelectEvent).detail.item.id === "convert-to-splats") cubeSplatDialog.open();
+  });
   async function importFBXFile(file: File, sidecars: File[] = []) {
     if (loading || dragId) return;
     busy(true, "Importing FBX meshes, skeletons, and animation…");
@@ -2084,7 +2233,6 @@ async function start() {
     try {
       // Let the loading message paint before parsing and sampling animation.
       await new Promise(resolve => setTimeout(resolve, 0));
-      const { importFBX } = await import("./fbx-import.ts");
       const result = await importFBX(file, store.getState().document, sidecars);
       clearPoseDraft();
       store.setState({ document: result.document, editLabel: "Import FBX" });
@@ -2209,6 +2357,10 @@ async function start() {
       updateTime();
     }
     controls.update();
+    updatePivotMarker();
+    const cameraDistance = camera.position.distanceTo(controls.target);
+    const far = Math.max(1000, cameraDistance * 100);
+    if (Math.abs(camera.far - far) > far * .1) { camera.far = far; camera.updateProjectionMatrix(); }
     const drawingHeight = webgl.domElement.height;
     for (const object of runtime.values()) if (object.kind === "particle" && object.root.parent) {
       object.root.updateWorldMatrix(true, false);

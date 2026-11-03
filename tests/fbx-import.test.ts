@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AnimationClip, AnimationMixer, NumberKeyframeTrack, Texture, Bone, BufferGeometry, Float32BufferAttribute, Group, LoopOnce, Mesh, MeshStandardMaterial, Quaternion, QuaternionKeyframeTrack, Skeleton, SkinnedMesh, Uint16BufferAttribute, Vector3, VectorKeyframeTrack } from "three";
 import { convertFBX, importFBX, hasCompletePNG } from "../src/fbx-import.ts";
-import { deleteSceneItems, emptyScene, type MeshShapeNode } from "../src/scene-document.ts";
+import { addSplat, deleteSceneItems, emptyScene, type MeshShapeNode } from "../src/scene-document.ts";
 import { evaluateSceneAnimation } from "../src/animation.ts";
 import { jointWorldMatrices } from "../src/ik.ts";
 import { deformMeshPositions } from "../src/mesh-skin.ts";
@@ -31,6 +31,23 @@ function character() {
 function shapeOf(doc: ReturnType<typeof emptyScene>) { return Object.values(doc.nodes).find(n => n.type === "meshShape") as MeshShapeNode; }
 
 describe("FBX scene import", () => {
+  it("adds an FBX to a scene containing a PLY larger than the former archive limit without allocating the PLY", async () => {
+    const asset = { id: "large-ply", kind: "file" as const, fileName: "large.ply", byteLength: 512 * 1024 * 1024 + 1 };
+    const existing = addSplat(emptyScene(), asset, "Capture", [0, 0, 0]);
+    const result = convertFBX(character().group, existing.document, "Character");
+    expect(result.document.assets[asset.id]).toBe(asset);
+    expect(result.document.nodes[existing.id]).toBe(existing.document.nodes[existing.id]);
+    expect(result.document.rootIds).toContain(existing.id);
+    expect(result.objectIds).toHaveLength(1);
+    expect(() => validateScene(result.document)).not.toThrow();
+    const store = createSceneStore(existing.document);
+    store.setState({ document: result.document, editLabel: "Import FBX" });
+    store.temporal.getState().undo(); expect(store.getState().document).toBe(existing.document);
+    store.temporal.getState().redo(); expect(store.getState().document).toBe(result.document);
+    const invalid = structuredClone(result.document);
+    (invalid.assets[asset.id] as typeof asset).byteLength = NaN;
+    expect(() => validateScene(invalid)).toThrow(/large.ply/);
+  });
   it("detects truncated embedded PNGs before browsers render partially decoded transparent images", () => {
     const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
     expect(hasCompletePNG(png)).toBe(true);

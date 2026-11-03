@@ -73,6 +73,8 @@ Open the URL printed by Vite.
 | --- | --- |
 | Select / hide gizmo | Q |
 | Translate | W |
+| Move object pivot | Hold D with Translate active, then drag the circular center or an axis |
+| Frame selection (or scene when nothing is selected) | F |
 | Rotate | E |
 | Scale | R |
 | Orbit | Alt + left drag |
@@ -139,7 +141,7 @@ An `.msb` file includes object names and IDs, hierarchy, transforms, shape offse
 
 Supported browsers can save back to a selected file through native file pickers. Other browsers download an `.msb` copy. New/Open asks before discarding unsaved edits; opening stages the scene before replacing the current one. Undo history starts fresh after opening.
 
-Packages are built in memory and currently capped at **512 MiB**. Autosave and recovery snapshots are not implemented. See [MSB-FORMAT.md](MSB-FORMAT.md) for the format and validation rules.
+MSB saves and opens no longer have a fixed 512 MiB cap. Assets are hashed in chunks and stored as Blob-backed ZIP/ZIP64 entries, avoiding full-size JavaScript asset/archive copies in the app path. Available browser memory and storage still determine practical capacity. Autosave and recovery snapshots are not implemented. See [MSB-FORMAT.md](MSB-FORMAT.md) for the format and validation rules.
 
 ## Technology
 
@@ -194,3 +196,11 @@ Capture reconstruction, model training, and recorded 4D splat playback are outsi
 The adapted two-bone solver retains [ozz-animation's MIT notice](public/licenses/ozz-animation.txt), also included in production builds.
 Polygon validation and triangulation retain [Earcut's ISC notice](public/licenses/earcut.txt), also included in production builds.
 Particle simulation retains [Nebula's MIT notice](public/licenses/three-nebula.txt) and notices for its bundled [Lodash](public/licenses/nebula-lodash.txt), [potpack](public/licenses/nebula-potpack.txt), and [uuid](public/licenses/nebula-uuid.txt) utilities in production builds.
+
+Object pivots are saved and undoable. Moving a pivot keeps the object and its descendants in place at the current evaluated frame; existing animation keys stay unchanged, and subsequent rotation/scale evaluates around the new pivot. Camera dolly has no scene-relative maximum distance, and F frames the selection without changing the viewing direction.
+
+The transform toolbar offers **World / Object** axis orientation for object translation, rotation, and scaling. World is the default and keeps handles aligned to global axes; Object follows the selected object's orientation. Switching modes changes only the gizmo, preserving the scene and pivot. Global scaling acts on world-space dimensions around the chosen pivot; affine compensation retains shear when needed. Joint and component controls retain their previous behavior. The FBX importer loads with the editor rather than on first use to avoid first-import module-fetch failures during development.
+
+Global-axis transforms may author static affine compensation in addition to transform channels. Like pivot relocation, that metadata affects evaluation at other animation frames; it is not a separately animated shear channel. Non-point constraints on affine-driven objects are currently rejected explicitly.
+
+The World/Object orientation selector is independent of freezing transforms and is disabled during active drags. Object-axis scaling of an ordinary rotated object changes its local scale channels without adding affine compensation.

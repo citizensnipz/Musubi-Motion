@@ -830,3 +830,7 @@ wa-dialog::part(footer) {
 .about-details dd { margin: 0; }
 
 #viewport.file-drop-active::after { content: "Drop FBX or MSB here"; position: absolute; inset: 8px; display: grid; place-items: center; border: 2px dashed var(--text); border-radius: 8px; background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); font-size: 18px; z-index: 100; pointer-events: none; }
+
+#transform-orientation { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 3px; font: inherit; font-size: 11px; padding: 4px; max-width: 76px; cursor: pointer; }
+#transform-orientation:disabled { opacity: .45; cursor: default; }
+.cube-splat-settings{display:grid;gap:8px;font-size:13px}.cube-splat-settings p{margin:0 0 8px;line-height:1.5}.cube-splat-settings label{display:grid;gap:5px}.cube-splat-settings input,.cube-splat-settings select{font:inherit;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px}.cube-splat-settings small{color:var(--muted)}.cube-splat-settings .cube-splat-check{display:flex;align-items:center;gap:8px;margin-top:6px}
