@@ -10,6 +10,7 @@ export function createPropertiesPanel(
     reparent: (id: string, parentId: string | null) => void;
     select: (id: string, additive: boolean) => void;
     rename: (id: string, name: string) => void;
+    visibility?: (id: string, visible: boolean) => void;
     previewChannel: (id: string, channel: keyof TransformChannels, axis: number) => { update: (value: number) => void; end: () => void } | undefined;
     channel: (
       id: string,
@@ -113,7 +114,7 @@ export function createPropertiesPanel(
         selected.size === 1 ? nodes.find((n) => selected.has(n.id)) : undefined;
       activeId = single?.id;
       const listKey = JSON.stringify(
-        [nodes.map((n) => [n.id, n.name, n.parentId, n.joint, n.curve, n.mesh, n.particle]), [...collapsed]],
+        [nodes.map((n) => [n.id, n.name, n.parentId, n.joint, n.curve, n.mesh, n.particle, n.hidden]), [...collapsed]],
       );
       if (lastList !== listKey) {
         lastList = listKey;
@@ -202,7 +203,18 @@ export function createPropertiesPanel(
               event.shiftKey || event.ctrlKey || event.metaKey,
             ),
           );
-          row.append(toggle, button); outliner.append(row);
+          row.append(toggle, button);
+          if (!node.joint && handlers.visibility) {
+            const eye = document.createElement("button");
+            eye.type = "button"; eye.className = "outliner-visibility";
+            eye.setAttribute("aria-label", `${node.hidden ? "Show" : "Hide"} ${node.name}`);
+            eye.setAttribute("aria-pressed", String(!node.hidden));
+            eye.title = node.hidden ? "Hidden in viewport (overrides animation)" : "Hide in viewport (keeps animation keys)";
+            eye.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>${node.hidden ? '<path d="M3 3 21 21"/>' : ''}</svg>`;
+            eye.onclick = event => { event.stopPropagation(); handlers.visibility!(node.id, !!node.hidden); };
+            row.append(eye);
+          }
+          outliner.append(row);
           if (!collapsed.has(node.id)) for (const child of children) appendNode(child, depth + 1);
         };
         for (const node of nodes.filter(n => !n.parentId)) appendNode(node, 0);

@@ -1,3 +1,5 @@
+import { meshToSplatData } from "./mesh-to-splats";
+import { createMeshSplatColors } from "./mesh-splat-colors";
 import { cubeToSplatBytes, cubeSplatFaces } from "./cube-to-splats";
 import { createCubeSplatDialog } from "./cube-splat-dialog";
 import { findMeshShape as conversionMeshShape } from "./mesh-modeling";
@@ -19,6 +21,7 @@ import type {
 } from "./scene-document.ts";
 import {
   createSceneStore,
+  setObjectVisibility,
   renameObject,
 } from "./scene-store.ts";
 import { mountViewportFileDrop } from "./viewport-file-drop.ts";
@@ -700,6 +703,7 @@ async function start() {
   let morphPanel: ReturnType<typeof createMorphPanel> | undefined;
   const panelHost = element<HTMLElement>("properties");
   const panel = createPropertiesPanel(panelHost, element("outliner-panel"), {
+    visibility(id, visible) { if (!loading && !dragId) setObjectVisibility(store, id, visible); },
     previewChannel(id, channel, axis) {
       if (loading || dragId) return;
       const doc = store.getState().document;
@@ -1826,7 +1830,7 @@ async function start() {
       if (!pose) continue;
       const node = doc.nodes[id];
       if (node?.type === "transform") applyObjectPose(object, node, pose);
-      object.root.visible = pose.visibility >= .5;
+      object.root.visible = !(node?.type === "transform" && node.hidden) && pose.visibility >= .5;
       object.preview.rotation.y = timelinePanel?.turntable ? (time / duration) * Math.PI * 2 : 0;
     }
     skeleton.applyPose(evaluated);
@@ -2190,36 +2194,53 @@ async function start() {
       updateHistoryButtons();
     }
   }
-  const cubeSplatDialog = createCubeSplatDialog(async (settings, moveAside) => {
+  const cubeSplatDialog = createCubeSplatDialog(async (settings, moveAside, budget) => {
     if (loading || dragId || playing) throw Error("Stop playback and finish the current edit before converting.");
-    if (selected.size !== 1) throw Error("Select one cube mesh in the viewport or Outliner.");
+    if (selected.size !== 1) throw Error("Select one mesh part in the viewport or Outliner.");
     const doc = store.getState().document, source = conversionMeshShape(doc, [...selected][0]);
-    if (!source) throw Error("Select one cube mesh in the viewport or Outliner.");
+    if (!source) throw Error("Select one mesh part in the viewport or Outliner.");
     const sourceNode = doc.nodes[source.parentId];
     if (sourceNode.type !== "transform") throw Error("Cube transform is missing.");
     const pose = currentPose(sourceNode.id);
-    const faces = cubeSplatFaces(source), bytes = cubeToSplatBytes(source, settings);
-    const file = new File([bytes], "cube.splat"), asset: AssetRecord = { id: crypto.randomUUID(), kind: "file", fileName: file.name, byteLength: file.size };
+    let cubeFaces: ReturnType<typeof cubeSplatFaces> | undefined;
+    try { cubeFaces = cubeSplatFaces(source); } catch { /* General meshes use triangle sampling. */ }
+    busy(true, "Converting mesh to splats...");
+    let generated: ReturnType<typeof meshToSplatData>;
+    let warnings: string[] = [];
+    try {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (cubeFaces) generated = { bytes: cubeToSplatBytes(source, settings), binding: undefined };
+      else {
+        const colors = await createMeshSplatColors(source); warnings = colors.warnings;
+        generated = meshToSplatData(source, settings, budget, sample => colors.sample(sample.vertices, sample.bary, sample.materialIndex));
+      }
+    } catch (error) { busy(false); throw error; }
+    const { bytes, binding } = generated;
+    const file = new File([bytes], "mesh.splat"), asset: AssetRecord = { id: crypto.randomUUID(), kind: "file", fileName: file.name, byteLength: file.size };
     let candidate: SplatMesh | undefined;
-    busy(true, "Converting cube to splats...");
+
     try {
       candidate = new SplatMesh({ extSplats: true, covSplats: true, fileBytes: bytes, fileName: file.name });
       const data = await prepareSplat(candidate);
       const added = addSplat(doc, asset, `${sourceNode.name}_splats`, [0, 0, 0]);
       const node = added.document.nodes[added.id] as TransformNode;
-      Object.assign(node, { ...sourceNode, ...normalizedChannels(pose), id: added.id, name: uniqueName(doc, `${sourceNode.name}_splats`, sourceNode.parentId) });
-      if (moveAside) {
-        const displacement = new THREE.Vector3(faces[0].side * 1.5, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(objectLocalMatrix(sourceNode, pose)));
+      Object.assign(node, { ...sourceNode, ...normalizedChannels(pose), id: added.id, hidden: false, name: uniqueName(doc, `${sourceNode.name}_splats`, sourceNode.parentId) });
+      if (moveAside && !binding) {
+        const width = new THREE.Box3().setFromPoints(source.vertices.map(v => new THREE.Vector3(...v.position))).getSize(new THREE.Vector3()).x;
+        const displacement = new THREE.Vector3(width * 1.5, 0, 0).applyMatrix3(new THREE.Matrix3().setFromMatrix4(objectLocalMatrix(sourceNode, pose)));
         node.position = pose.position.map((v, axis) => v + displacement.getComponent(axis)) as Vec3;
       }
+      const shape = Object.values(added.document.nodes).find((n): n is SplatShapeNode => n.type === "splatShape" && n.parentId === node.id)!;
+      shape.binding = binding;
+      if (doc.animation) added.document.animation = { ...doc.animation, tracks: [...doc.animation.tracks, ...doc.animation.tracks.filter(t => t.targetId === sourceNode.id && t.channel !== "visibility" && !t.channel.startsWith("morph.")).map(t => ({ ...t, id: crypto.randomUUID(), targetId: node.id, keys: t.keys.map(k => ({ ...k, id: crypto.randomUUID() })) }))] };
       if (node.parentId) added.document.rootIds = added.document.rootIds.filter(id => id !== node.id);
       const root = new THREE.Group(), preview = new THREE.Group(), box = new THREE.Box3Helper(new THREE.Box3(), 0x999999);
       preview.add(candidate); root.add(preview); box.visible = false;
       runtime.set(node.id, { kind: "splat", root, preview, mesh: candidate, box, assetId: asset.id, ...data });
       world.add(box); assetFiles.set(asset.id, file);
-      store.setState({ document: added.document, editLabel: "Convert cube to splats" });
+      store.setState({ document: added.document, editLabel: "Convert mesh to splats" });
       selectObjects([node.id]); fitView();
-      return `Created ${data.count.toLocaleString()} splats. Select the original cube to try other settings. Undo removes the copy.`;
+      return `Created ${data.count.toLocaleString()} splats. Hide the source in the Outliner to compare. Undo removes the copy. ${binding ? "Skin weights transferred; shares the original skeleton." : ""} ${warnings.join(" ")}`;
     } catch (error) { candidate?.dispose(); throw error; }
     finally { busy(false); }
   });

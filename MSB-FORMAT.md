@@ -313,3 +313,7 @@ Mesh materials store Standard material settings and raster texture data URIs (ne
 Transform nodes optionally store `pivot` and `pivotCompensation` as finite local XYZ vectors, defaulting to zero. Their evaluated matrix is `T(position + pivotCompensation + pivot) * A * R * S * T(-pivot)`. Relocating a pivot balances compensation at the current evaluated pose, preserving geometry and descendants while leaving existing keys intact. Subsequent rotation and scale evaluate around the newly authored pivot.
 
 Transform nodes may also store `affine`: a finite nonsingular orientation-preserving column-major 3×3 matrix A, defaulting to identity. This retains the full geometric effect of world-axis scaling on rotated objects. Pivot relocation compensation uses `(A*R*S - I) * deltaPivot`. Rendering, hierarchy/world matrices, and saving retain A; older builds without this extension may not reproduce affine objects.
+
+### Converted mesh parts and viewport visibility
+
+Transform nodes may store `hidden: boolean` (default false), an undoable viewport visibility override applied alongside animated visibility without changing keys. Splat bindings may store `meshSpace: boolean` (default false). In meshSpace mode, the local deformation is the weighted sum of `jointWorld * inverse(restMatrix)`; the owning object transform is applied afterwards, matching imported polygon mesh skinning. Converted bind matrices are the inverses of the source mesh inverse binds, and sampled weights persist by splat index. Legacy bindings retain world-relative deformation.

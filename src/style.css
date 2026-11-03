@@ -834,3 +834,8 @@ wa-dialog::part(footer) {
 #transform-orientation { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 3px; font: inherit; font-size: 11px; padding: 4px; max-width: 76px; cursor: pointer; }
 #transform-orientation:disabled { opacity: .45; cursor: default; }
 .cube-splat-settings{display:grid;gap:8px;font-size:13px}.cube-splat-settings p{margin:0 0 8px;line-height:1.5}.cube-splat-settings label{display:grid;gap:5px}.cube-splat-settings input,.cube-splat-settings select{font:inherit;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px}.cube-splat-settings small{color:var(--muted)}.cube-splat-settings .cube-splat-check{display:flex;align-items:center;gap:8px;margin-top:6px}
+
+.outliner-visibility { flex: 0 0 28px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 3px; padding: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.outliner-visibility:hover { color: var(--text); background: var(--hover); }
+.outliner-visibility:focus-visible { outline: 1px solid var(--text); outline-offset: -2px; }
+.outliner-visibility[aria-pressed="false"] { opacity: .5; }

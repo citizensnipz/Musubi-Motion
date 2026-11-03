@@ -57,7 +57,7 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
  }, update(boneMatrix:(id:string)=>THREE.Matrix4|undefined) {
   mesh.updateWorldMatrix(true,false);
   const inverse = mesh.matrixWorld.clone().invert();
-  const currentMatrices = binding.jointIds.map((id,i)=>{ const matrix=boneMatrix(id); return matrix ? inverse.clone().multiply(matrix) : rests[i].clone(); });
+  const currentMatrices = binding.jointIds.map((id,i)=>{ const matrix=boneMatrix(id); return matrix ? (binding.meshSpace ? matrix.clone() : inverse.clone().multiply(matrix)) : rests[i].clone(); });
   elastic?.update(currentMatrices);
   transforms=currentMatrices.map((m,i)=>m.clone().multiply(inverseRests[i]));
   const next=transforms.map(m=>m.elements.join(",")).join(";")+":"+mesh.extSplats?.numSplats;

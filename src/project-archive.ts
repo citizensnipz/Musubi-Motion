@@ -127,6 +127,7 @@ export function validateScene(value: unknown): SceneDocument {
     if (siblingNames.has(sibling)) fail("Duplicate sibling names.");
     siblingNames.add(sibling);
     if (node.type === "transform") {
+      if (node.hidden !== undefined && typeof node.hidden !== "boolean") fail("Invalid object visibility override.");
       vector(node.position);
       vector(node.rotation);
       vector(node.scale);

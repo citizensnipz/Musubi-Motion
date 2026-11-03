@@ -55,3 +55,13 @@ export function renameObject(store: SceneStore, id: string, requested: string) {
     editLabel: "Rename object",
   });
 }
+
+/** Static Outliner visibility is separate from animated visibility, and never changes animation keys. */
+export function setObjectVisibility(store: SceneStore, id: string, visible: boolean) {
+  const doc = store.getState().document, node = doc.nodes[id];
+  if (node?.type !== "transform" || (node.hidden !== true) === visible) return;
+  store.setState({
+    document: { ...doc, nodes: { ...doc.nodes, [id]: { ...node, hidden: !visible } } },
+    editLabel: visible ? "Show object" : "Hide object",
+  });
+}

@@ -6,6 +6,7 @@ export type TransformChannels = {
   scale: Vec3;
 };
 export type TransformNode = TransformChannels & {
+  hidden?: boolean; // Outliner visibility override, independent of animation keys.
   affine?: number[]; // Optional column-major 3×3 linear compensation for world-axis transforms.
   pivot?: Vec3;
   pivotCompensation?: Vec3;
@@ -17,7 +18,7 @@ export type TransformNode = TransformChannels & {
 };
 export type SkinInfluence = { jointId: string; weight: number };
 export type SkinWeights = { count: number; overrides: Record<string, SkinInfluence[]> };
-export type SkinBinding = { jointIds: string[]; restMatrices: number[][]; weights?: SkinWeights };
+export type SkinBinding = { meshSpace?: boolean; jointIds: string[]; restMatrices: number[][]; weights?: SkinWeights };
 export type SplatShapeNode = {
   elasticity?: import("./elasticity").Elasticity;
   binding?: SkinBinding;

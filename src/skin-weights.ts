@@ -27,6 +27,7 @@ export function validateSkinWeights(value: unknown): asserts value is SkinBindin
     || new Set(value.jointIds).size !== value.jointIds.length || value.jointIds.some(id => typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(id) || ["__proto__", "constructor", "prototype"].includes(id))
     || !Array.isArray(value.restMatrices) || value.restMatrices.length !== value.jointIds.length
     || value.restMatrices.some(matrix => !Array.isArray(matrix) || matrix.length !== 16 || !matrix.every(n => typeof n === "number" && Number.isFinite(n)))) throw Error("Invalid skin binding joints or rest matrices.");
+  if (value.meshSpace !== undefined && typeof value.meshSpace !== "boolean") throw Error("Invalid skin binding coordinate space.");
   if (value.weights === undefined) return;
   const weights = value.weights;
   if (!isRecord(weights) || !validCount(weights.count) || !isRecord(weights.overrides)) throw Error("Invalid skin weight component count or overrides.");

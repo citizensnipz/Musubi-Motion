@@ -204,3 +204,9 @@ The transform toolbar offers **World / Object** axis orientation for object tran
 Global-axis transforms may author static affine compensation in addition to transform channels. Like pivot relocation, that metadata affects evaluation at other animation frames; it is not a separately animated shear channel. Non-point constraints on affine-driven objects are currently rejected explicitly.
 
 The World/Object orientation selector is independent of freezing transforms and is disabled during active drags. Object-axis scaling of an ordinary rotated object changes its local scale channels without adding affine compensation.
+
+### Mesh parts to splats
+
+Select one mesh part and choose **Modeling > Convert to splats**. Simple cubes retain the face-grid settings; imported and other meshes use the total splat budget (256 to 100,000 per part). Rigged parts keep their placement and share the existing skeleton with interpolated, normalized four-bone weights. Convert parts separately, then use the Outliner eye buttons to hide their source meshes. These undoable visibility overrides preserve animation keys and save with the project.
+
+Conversion supports opaque base colors and embedded diffuse textures with UV transforms. Transparent materials, alpha textures, and blend shapes are rejected for now; advanced material effects are reported as approximations. Mixed-weight bends can differ slightly from the mesh surface; Gaussian silhouettes remain soft.
