@@ -61,3 +61,17 @@ describe("native mesh materials", () => {
     disposeMaterials(materials);
   });
 });
+
+it("renders blending-flagged fully opaque FBX parts in the depth-writing opaque pass", () => {
+  const data = captureMaterials([new MeshStandardMaterial({ transparent:true, opacity:1 })]);
+  const [material] = createMaterials(data,false,false);
+  expect(material.transparent).toBe(false); expect(material.depthTest).toBe(true); expect(material.depthWrite).toBe(true);
+  expect(data[0].transparent).toBe(true); // Authored material is unchanged.
+  material.dispose();
+});
+it("keeps real scalar transparency in the transparent pass", () => {
+  const data = captureMaterials([new MeshStandardMaterial({ transparent:true, opacity:.5 })]);
+  const [material] = createMaterials(data,false,false);
+  expect(material.transparent).toBe(true); expect(material.opacity).toBe(.5);
+  material.dispose();
+});

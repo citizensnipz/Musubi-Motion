@@ -1,0 +1,25 @@
+<!doctype html><body><script type="module">
+import * as THREE from 'three';
+import {SparkRenderer,SplatMesh} from '@sparkjsdev/spark';
+import {createMaterials,captureMaterials} from '/src/mesh-materials.ts';
+import {prepareSplat} from '/src/splat-assets.ts';
+const renderer=new THREE.WebGLRenderer({antialias:false,preserveDrawingBuffer:true});renderer.setSize(128,128);document.body.append(renderer.domElement);
+const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(50,1,.01,100);camera.position.z=5;
+scene.add(new SparkRenderer({renderer,accumExtSplats:true,covSplats:true}));
+const splats=new SplatMesh({extSplats:true,covSplats:true,constructSplats(s){for(let y=-1.5;y<=1.5;y+=.1)for(let x=-1.5;x<=1.5;x+=.1)s.pushSplat(new THREE.Vector3(x,y,0),new THREE.Vector3(.08,.08,.002),new THREE.Quaternion(),1,new THREE.Color(0,1,0));}});await prepareSplat(splats);scene.add(splats);
+const data=captureMaterials([new THREE.MeshStandardMaterial({color:0xff0000,emissive:0xff0000,side:THREE.DoubleSide,transparent:true,opacity:1})]);
+const material=createMaterials(data,false,false)[0];
+const normalizedTransparent=material.transparent;
+const mesh=new THREE.Mesh(new THREE.PlaneGeometry(4,4),material);mesh.rotation.y=Math.PI/4;scene.add(mesh);
+const frame=async()=>{for(let n=0;n<15;n++){renderer.render(scene,camera);await new Promise(requestAnimationFrame);}};
+const pixels=()=>{renderer.render(scene,camera);const gl=renderer.getContext();return [48,80].map(x=>{const p=new Uint8Array(4);gl.readPixels(x,64,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return Array.from(p);});};
+material.transparent=true;material.needsUpdate=true;await frame();const broken=pixels();
+material.transparent=normalizedTransparent;material.needsUpdate=true;await frame();const fixed=pixels();
+// Exercise real browser texture decode and classification after asynchronous loads.
+const png=(alpha)=>{const c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d');ctx.fillStyle=`rgba(255,255,255,${alpha})`;ctx.fillRect(0,0,1,1);return c.toDataURL();};
+const texture={wrapS:1001,wrapT:1001,repeat:[1,1],offset:[0,0],center:[0,0],rotation:0,flipY:true,channel:0};
+const materials=createMaterials([1,.5].map(alpha=>({...data[0],map:{...texture,dataURI:png(alpha)}})),false,false);
+for(let n=0;n<30;n++)await new Promise(requestAnimationFrame);
+window.depthResult={broken,fixed,textureBlending:materials.map(m=>m.transparent),pass:!normalizedTransparent&&fixed[0][0]>fixed[0][1]&&fixed[1][1]>fixed[1][0]&&!materials[0].transparent&&materials[1].transparent};
+document.body.append(JSON.stringify(window.depthResult));
+</script>

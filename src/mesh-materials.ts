@@ -71,6 +71,24 @@ export function captureMaterials(materials: Material[]): MeshMaterialData[] {
   validateMeshMaterials(captured); return captured;
 }
 
+/** Conservative image check: unknown/unreadable textures retain their authored blending. */
+function opaqueTextureChannel(texture: Texture | null, channel: number): boolean {
+  if (!texture) return true;
+  const image = texture.image;
+  const width = image?.naturalWidth ?? image?.width, height = image?.naturalHeight ?? image?.height;
+  if (!width || !height || width * height > 16_777_216 || typeof document === "undefined") return false;
+  const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+  try {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return false;
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    for (let i = channel; i < pixels.length; i += 4) if (pixels[i] !== 255) return false;
+    return true;
+  } catch { return false; }
+  finally { canvas.width = canvas.height = 0; }
+}
+
 /** The only loadable sources are validated data URIs; never resolve file or web URLs. */
 export function createMaterials(data: MeshMaterialData[], flat: boolean, wire: boolean): MeshStandardMaterial[] {
   validateMeshMaterials(data);
@@ -81,10 +99,20 @@ export function createMaterials(data: MeshMaterialData[], flat: boolean, wire: b
       bumpScale: d.bumpScale ?? 1,
       flatShading: flat, polygonOffset: wire, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
     material.name = d.name;
+    let disposed = false;
+    material.addEventListener("dispose", () => { disposed = true; });
+    const updateBlending = () => {
+      if (disposed || !d.transparent) return;
+      // Opaque FBX parts sometimes carry transparent=true. Put those parts in
+      // Three's opaque pass so their depth is available when Spark blends splats.
+      const opaque = d.opacity === 1 && opaqueTextureChannel(material.map, 3) && opaqueTextureChannel(material.alphaMap, 1);
+      const transparent = d.transparent && !opaque;
+      if (material.transparent !== transparent) { material.transparent = transparent; material.needsUpdate = true; }
+    };
     for (const slot of MESH_TEXTURE_SLOTS) {
       const source = d[slot]; if (!source) continue;
       // Headless conversion/tests retain the serializable source without decoding.
-      const texture = typeof document === "undefined" ? new Texture() : new TextureLoader().load(source.dataURI);
+      const texture = typeof document === "undefined" ? new Texture() : new TextureLoader().load(source.dataURI, () => { if (slot === "map" || slot === "alphaMap") updateBlending(); });
       texture.userData.musubiDataURI = source.dataURI;
       texture.wrapS = source.wrapS as Wrapping; texture.wrapT = source.wrapT as Wrapping;
       texture.repeat.fromArray(source.repeat); texture.offset.fromArray(source.offset); texture.center.fromArray(source.center);
@@ -92,6 +120,7 @@ export function createMaterials(data: MeshMaterialData[], flat: boolean, wire: b
       texture.colorSpace = slot === "map" || slot === "emissiveMap" ? SRGBColorSpace : NoColorSpace;
       material[slot] = texture;
     }
+    updateBlending();
     return material;
   });
 }

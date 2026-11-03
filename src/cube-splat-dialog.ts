@@ -6,7 +6,7 @@ export function createCubeSplatDialog(convert: (settings: CubeSplatSettings, mov
   dialog.innerHTML = `<div class="cube-splat-settings">
     <p>Select one cube or mesh part. Creates a separate splat object. Rigged parts share the original skeleton and stay in place. Hide the source in the Outliner to compare.</p>
     <label>Samples per face<select aria-label="Samples per face"><option value="16">16 × 16</option><option value="32" selected>32 × 32</option><option value="64">64 × 64</option></select></label>
-    <p class="cube-splat-count"></p><label>Splats per mesh part<input aria-label="Splats per mesh part" type="number" min="256" max="100000" step="1" value="24576"></label><small>Face grid density applies to simple cubes; the total budget applies to imported or other meshes.</small>
+    <p class="cube-splat-count"></p><label>Splats per mesh part<input aria-label="Splats per mesh part" type="number" min="256" max="100000" step="1" value="24576"></label><small>Face grid density applies to simple cubes. The mesh budget counts surface samples; invisible and cutout samples are skipped.</small>
     <label>Overlap<input aria-label="Splat overlap" type="number" min="0.3" max="1.2" step="0.05" value="0.65"></label>
     <small>Higher values fill gaps but soften edges.</small>
     <label>Thickness<input aria-label="Splat thickness" type="number" min="0.01" max="0.5" step="0.01" value="0.05"></label>

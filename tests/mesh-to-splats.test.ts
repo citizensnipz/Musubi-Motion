@@ -100,3 +100,59 @@ it("reopens generated mesh-space binding, weights, source part, and shared skele
   }
   runtime.dispose();source.dispose();
 });
+
+function filteredFixture() {
+  const shape=fixture(true), settings={...defaultCubeSplatSettings,opacity:.5};
+  const original=meshToSplatData(shape,settings,256);
+  let index=0;
+  const filtered=meshToSplatData(shape,settings,256,()=>({color:new Color(shape.color),opacity:[0,.001,.5,1][index++%4]}));
+  const retained=Array.from({length:256},(_,i)=>i).filter(i=>i%4>=2);
+  return {shape,original,filtered,retained};
+}
+it("omits invisible and zero-byte-alpha samples while packing survivors and weights contiguously", () => {
+  const {original,filtered,retained}=filteredFixture();
+  expect(filtered.bytes.length).toBe(128*32);
+  expect(filtered.binding!.weights!.count).toBe(128);
+  expect(Object.keys(filtered.binding!.weights!.overrides)).toEqual(Array.from({length:128},(_,i)=>String(i)));
+  for(const [output,input] of retained.entries()) {
+    // The original sample positions and ellipsoid axes survive filtering unchanged.
+    expect(filtered.bytes.slice(output*32,output*32+24)).toEqual(original.bytes.slice(input*32,input*32+24));
+    expect(filtered.bytes[output*32+27]).toBe(input%4===2?64:128);
+    expect(filtered.binding!.weights!.overrides[String(output)]).toEqual(original.binding!.weights!.overrides[String(input)]);
+  }
+});
+it("reports fully invisible surfaces instead of returning an empty splat asset", () => {
+  for(const opacity of [0,.0001]) expect(()=>meshToSplatData(fixture(),defaultCubeSplatSettings,256,()=>({color:new Color(1,1,1),opacity}))).toThrow(/visible|transparent/i);
+});
+it("preserves filtered weight indices and animated alignment through archive reopen", async () => {
+  const {shape,original,filtered,retained}=filteredFixture();
+  const scene:SceneDocument={...emptyScene(),rootIds:["object"],nodes:{object:{id:"object",name:"Legs",type:"transform",parentId:null,rotationOrder:"XYZ",position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]},shape},joints:[
+    {id:"hip",name:"Hip",parentId:null,position:[0,0,0]},{id:"knee",name:"Knee",parentId:"hip",position:[0,2,0]},
+  ]};
+  const asset={id:"filtered_asset",kind:"file" as const,fileName:"filtered.splat",byteLength:filtered.bytes.length};
+  const added=addSplat(scene,asset,"FilteredLegs",[0,0,0],"filtered","filtered_shape");
+  (added.document.nodes.filtered_shape as SplatShapeNode).binding=filtered.binding;
+  const archive=await encodeProjectBlob(added.document,new Map([[asset.id,new Blob([filtered.bytes])]]),{camera:{position:[0,0,5],target:[0,0,0],fov:45,near:.01,far:1000},time:0});
+  const reopened=await decodeProjectBlob(archive), restored=(reopened.scene.nodes.filtered_shape as SplatShapeNode).binding!;
+  expect(restored).toEqual(filtered.binding);
+  const reopenedBytes=new Uint8Array(await reopened.files.get(asset.id)!.arrayBuffer());
+  expect(reopenedBytes).toEqual(filtered.bytes);
+  const originalSource=sourceFromBytes(original.bytes), filteredSource=sourceFromBytes(reopenedBytes);
+  const makeMesh=(source:ExtSplats)=>{
+    const mesh=new Object3D() as unknown as SplatMesh;mesh.position.set(1,2,3);mesh.rotation.set(.2,.3,.4);mesh.scale.set(1.5,.8,1);
+    Object.assign(mesh,{extSplats:source,numSplats:source.numSplats,minRaycastOpacity:.01,updateGenerator:vi.fn()});return mesh;
+  };
+  const originalMesh=makeMesh(originalSource),filteredMesh=makeMesh(filteredSource),originalRuntime=createBinding(originalMesh,original.binding!),filteredRuntime=createBinding(filteredMesh,restored);
+  for(const angle of [0,.4,-.8]) {
+    const bones=[new Matrix4().makeRotationZ(angle).setPosition(1,0,0),new Matrix4().makeRotationX(-angle).setPosition(0,3,0)],world=(id:string)=>bones[id==="hip"?0:1];
+    originalRuntime.update(world);filteredRuntime.update(world);
+    for(const output of [0,41,127]) {
+      expect(filteredRuntime.getWeights(output)).toEqual(originalRuntime.getWeights(retained[output]));
+      expect([...filteredRuntime.getComponentPositions([output])]).toEqual([...originalRuntime.getComponentPositions([retained[output]])]);
+    }
+  }
+  originalRuntime.dispose();filteredRuntime.dispose();originalSource.dispose();filteredSource.dispose();
+});
+it("rejects malformed sampled opacity before serializing it into the asset", () => {
+  for(const opacity of [NaN,Infinity,-.1,1.1]) expect(()=>meshToSplatData(fixture(),defaultCubeSplatSettings,256,()=>({color:new Color(1,1,1),opacity}))).toThrow(/opacity/);
+});

@@ -2212,7 +2212,7 @@ async function start() {
       if (cubeFaces) generated = { bytes: cubeToSplatBytes(source, settings), binding: undefined };
       else {
         const colors = await createMeshSplatColors(source); warnings = colors.warnings;
-        generated = meshToSplatData(source, settings, budget, sample => colors.sample(sample.vertices, sample.bary, sample.materialIndex));
+        generated = meshToSplatData(source, settings, budget, sample => colors.sampleSurface(sample.vertices, sample.bary, sample.materialIndex));
       }
     } catch (error) { busy(false); throw error; }
     const { bytes, binding } = generated;

@@ -1,0 +1,23 @@
+<!doctype html><body><script type="module">
+import * as THREE from 'three';
+import {SplatMesh,SparkRenderer} from '@sparkjsdev/spark';
+import {createMeshSplatColors} from '/src/mesh-splat-colors.ts';
+import {meshToSplatData} from '/src/mesh-to-splats.ts';
+import {defaultCubeSplatSettings} from '/src/cube-to-splats.ts';
+import {prepareSplat} from '/src/splat-assets.ts';
+import {createBinding} from '/src/splat-binding.ts';
+const canvas=document.createElement('canvas');canvas.width=2;canvas.height=1;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,1,1);ctx.fillStyle='black';ctx.fillRect(1,0,1,1);
+const texture={dataURI:canvas.toDataURL(),wrapS:1001,wrapT:1001,repeat:[1,1],offset:[0,0],center:[0,0],rotation:0,flipY:false,channel:0};
+const shape={id:'shape',parentId:'object',name:'Test',type:'meshShape',color:'#ffffff',shading:'flat',wireframe:false,vertices:[{id:'a',position:[-1,-1,0]},{id:'b',position:[1,-1,0]},{id:'c',position:[-1,1,0]}],faces:[{id:'face',vertices:['a','b','c']}],uvs:{a:[.25,.5],b:[.75,.5],c:[.25,.5]},skin:{jointIds:['bone'],inverseBindMatrices:[new THREE.Matrix4().toArray()],weights:{a:[{joint:0,weight:1}],b:[{joint:0,weight:1}],c:[{joint:0,weight:1}]}},materials:[{name:'Bodymat',color:'#ffffff',emissive:'#000000',emissiveIntensity:1,roughness:.8,metalness:0,opacity:.8,transparent:true,alphaTest:.5,side:2,depthWrite:true,normalScale:[1,1],alphaMap:texture}]};
+async function convert(s){const colors=await createMeshSplatColors(s);return meshToSplatData(s,defaultCubeSplatSettings,512,sample=>colors.sampleSurface(sample.vertices,sample.bary,sample.materialIndex));}
+const result=await convert(shape),count=result.bytes.length/32;
+const allWhite=await convert({...shape,uvs:{a:[.25,.5],b:[.25,.5],c:[.25,.5]}});
+let empty=false;try{await convert({...shape,uvs:{a:[.75,.5],b:[.75,.5],c:[.75,.5]}});}catch(e){empty=e.message.includes('No visible');}
+const renderer=new THREE.WebGLRenderer({antialias:false});renderer.setSize(256,256);document.body.append(renderer.domElement);
+const scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(50,1,.01,100);camera.position.z=4;scene.add(new SparkRenderer({renderer,accumExtSplats:true,covSplats:true}));
+const mesh=new SplatMesh({fileBytes:result.bytes,fileName:'sample.splat',extSplats:true,covSplats:true});await prepareSplat(mesh);scene.add(mesh);
+const skin=createBinding(mesh,result.binding);skin.update(()=>new THREE.Matrix4().makeRotationZ(.3));
+for(let n=0;n<15;n++){renderer.render(scene,camera);await new Promise(requestAnimationFrame);}
+window.opacityResult={sampleBudget:512,retained:count,loaded:mesh.numSplats,weights:result.binding.weights.count,unusedDarkPixelsIgnored:allWhite.bytes.length/32===512,allInvisibleRejected:empty,posedCentersFinite:Array.from(skin.getComponentPositions([0,count-1])).every(Number.isFinite),pass:count>0&&count<512&&mesh.numSplats===count&&Object.keys(result.binding.weights.overrides).length===count&&allWhite.bytes.length/32===512&&empty};
+document.body.append(JSON.stringify(window.opacityResult));
+</script>
