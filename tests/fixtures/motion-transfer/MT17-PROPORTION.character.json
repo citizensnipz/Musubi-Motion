@@ -1,0 +1,529 @@
+{
+  "reference": [
+    {
+      "id": "MT17-PROPORTION_hips",
+      "name": "MT17-PROPORTION_hips",
+      "parentId": null,
+      "position": [
+        0,
+        0.72,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_spine",
+      "name": "MT17-PROPORTION_spine",
+      "parentId": "MT17-PROPORTION_hips",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_chest",
+      "name": "MT17-PROPORTION_chest",
+      "parentId": "MT17-PROPORTION_spine",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_neck",
+      "name": "MT17-PROPORTION_neck",
+      "parentId": "MT17-PROPORTION_chest",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_head",
+      "name": "MT17-PROPORTION_head",
+      "parentId": "MT17-PROPORTION_neck",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_leftUpperArm",
+      "name": "MT17-PROPORTION_leftUpperArm",
+      "parentId": "MT17-PROPORTION_chest",
+      "position": [
+        0.15,
+        0.1,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_leftLowerArm",
+      "name": "MT17-PROPORTION_leftLowerArm",
+      "parentId": "MT17-PROPORTION_leftUpperArm",
+      "position": [
+        0.36,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_leftHand",
+      "name": "MT17-PROPORTION_leftHand",
+      "parentId": "MT17-PROPORTION_leftLowerArm",
+      "position": [
+        0.22,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_rightUpperArm",
+      "name": "MT17-PROPORTION_rightUpperArm",
+      "parentId": "MT17-PROPORTION_chest",
+      "position": [
+        -0.15,
+        0.1,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_rightLowerArm",
+      "name": "MT17-PROPORTION_rightLowerArm",
+      "parentId": "MT17-PROPORTION_rightUpperArm",
+      "position": [
+        -0.36,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_rightHand",
+      "name": "MT17-PROPORTION_rightHand",
+      "parentId": "MT17-PROPORTION_rightLowerArm",
+      "position": [
+        -0.22,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_leftUpperLeg",
+      "name": "MT17-PROPORTION_leftUpperLeg",
+      "parentId": "MT17-PROPORTION_hips",
+      "position": [
+        0.1,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_leftLowerLeg",
+      "name": "MT17-PROPORTION_leftLowerLeg",
+      "parentId": "MT17-PROPORTION_leftUpperLeg",
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_leftFoot",
+      "name": "MT17-PROPORTION_leftFoot",
+      "parentId": "MT17-PROPORTION_leftLowerLeg",
+      "position": [
+        0,
+        -0.32,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_rightUpperLeg",
+      "name": "MT17-PROPORTION_rightUpperLeg",
+      "parentId": "MT17-PROPORTION_hips",
+      "position": [
+        -0.1,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_rightLowerLeg",
+      "name": "MT17-PROPORTION_rightLowerLeg",
+      "parentId": "MT17-PROPORTION_rightUpperLeg",
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-PROPORTION_rightFoot",
+      "name": "MT17-PROPORTION_rightFoot",
+      "parentId": "MT17-PROPORTION_rightLowerLeg",
+      "position": [
+        0,
+        -0.32,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "roles": {
+    "hips": "MT17-PROPORTION_hips",
+    "spine": "MT17-PROPORTION_spine",
+    "chest": "MT17-PROPORTION_chest",
+    "neck": "MT17-PROPORTION_neck",
+    "head": "MT17-PROPORTION_head",
+    "leftUpperArm": "MT17-PROPORTION_leftUpperArm",
+    "leftLowerArm": "MT17-PROPORTION_leftLowerArm",
+    "leftHand": "MT17-PROPORTION_leftHand",
+    "rightUpperArm": "MT17-PROPORTION_rightUpperArm",
+    "rightLowerArm": "MT17-PROPORTION_rightLowerArm",
+    "rightHand": "MT17-PROPORTION_rightHand",
+    "leftUpperLeg": "MT17-PROPORTION_leftUpperLeg",
+    "leftLowerLeg": "MT17-PROPORTION_leftLowerLeg",
+    "leftFoot": "MT17-PROPORTION_leftFoot",
+    "rightUpperLeg": "MT17-PROPORTION_rightUpperLeg",
+    "rightLowerLeg": "MT17-PROPORTION_rightLowerLeg",
+    "rightFoot": "MT17-PROPORTION_rightFoot"
+  },
+  "coordinates": {
+    "metersPerUnit": 1,
+    "up": "Y",
+    "forward": "+Z",
+    "basis": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "nodes": {
+    "mt_mesh": {
+      "id": "mt_mesh",
+      "name": "OwnedDiagnosticSkin",
+      "type": "transform",
+      "parentId": null,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "rotationOrder": "XYZ"
+    },
+    "mt_shape": {
+      "id": "mt_shape",
+      "type": "meshShape",
+      "name": "OwnedDiagnosticSkin",
+      "parentId": "mt_mesh",
+      "vertices": [
+        {
+          "id": "v0",
+          "position": [
+            0,
+            0.72,
+            0
+          ]
+        },
+        {
+          "id": "v1",
+          "position": [
+            0.73,
+            1.22,
+            0
+          ]
+        },
+        {
+          "id": "v2",
+          "position": [
+            0.1,
+            -5.551115123125783e-17,
+            0
+          ]
+        }
+      ],
+      "faces": [
+        {
+          "id": "f0",
+          "vertices": [
+            "v0",
+            "v1",
+            "v2"
+          ]
+        }
+      ],
+      "color": "#b8bdc5",
+      "shading": "flat",
+      "wireframe": false,
+      "skin": {
+        "jointIds": [
+          "MT17-PROPORTION_hips",
+          "MT17-PROPORTION_leftHand",
+          "MT17-PROPORTION_leftFoot"
+        ],
+        "inverseBindMatrices": [
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            -0.72,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -0.73,
+            -1.22,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -0.1,
+            5.551115123125783e-17,
+            0,
+            1
+          ]
+        ],
+        "weights": {
+          "v0": [
+            {
+              "joint": 0,
+              "weight": 1
+            }
+          ],
+          "v1": [
+            {
+              "joint": 1,
+              "weight": 1
+            }
+          ],
+          "v2": [
+            {
+              "joint": 2,
+              "weight": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "rootIds": [
+    "mt_mesh"
+  ]
+}

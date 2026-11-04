@@ -71,7 +71,7 @@ export type SceneDocument = {
   constraints?: import("./constraints.ts").Constraint[];
   joints?: import("./skeleton.ts").Joint[];
   format: "musubi-scene";
-  version: 1;
+  version: 2;
   upAxis: "Y";
   units: "unitless";
   rootIds: string[];
@@ -82,7 +82,7 @@ export type SceneDocument = {
 export function emptyScene(): SceneDocument {
   return {
     format: "musubi-scene",
-    version: 1,
+    version: 2,
     upAxis: "Y",
     units: "unitless",
     rootIds: [],

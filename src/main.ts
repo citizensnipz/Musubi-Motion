@@ -116,8 +116,8 @@ const viewport = element<HTMLDivElement>("viewport");
 const notice = element<HTMLDivElement>("notice");
 terminal.watchNotices(notice);
 terminal.watchNotices(element("file-status"));
-const play = element<WaButton>("play");
-const rewind = element<WaButton>("rewind");
+const play = element<HTMLButtonElement>("play");
+const rewind = element<HTMLButtonElement>("rewind");
 const timeline = element<WaSlider>("timeline");
 const theme = element<WaButton>("theme");
 const fileInput = element<HTMLInputElement>("file");
@@ -635,7 +635,7 @@ async function start() {
     currentMode = mode;
     refreshGizmo();
     toolbar
-      .querySelectorAll("wa-button")
+      .querySelectorAll<HTMLButtonElement>("button[data-mode]")
       .forEach((button) =>
         button.setAttribute(
           "aria-pressed",
@@ -644,10 +644,9 @@ async function start() {
       );
   }
   for (const [key, mode] of Object.entries(modes)) {
-    const button = document.createElement("wa-button");
-    button.size = "s";
-    button.variant = "neutral";
-    button.appearance = "plain";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-control transform-tool";
     buttonContent(button, mode);
     button.setAttribute("aria-label", mode[0].toUpperCase() + mode.slice(1));
     button.setAttribute("aria-keyshortcuts", key.toUpperCase());
@@ -658,11 +657,9 @@ async function start() {
         ? "Scale along the selected World/Object axes, or uniformly with the center handle"
         : mode === "rotate" ? "Rotate around the selected World/Object axes" : mode;
     button.addEventListener("click", () => choose(mode));
+    // Native titles retain tool hints without replacing the button's accessible name.
+    button.title += ` · ${key.toUpperCase()}${mode === "translate" ? " · Hold D to edit pivot" : ""}`;
     toolbar.append(button);
-    const tooltip = document.createElement("wa-tooltip");
-    tooltip.setAttribute("for", button.id);
-    tooltip.textContent = `${mode[0].toUpperCase() + mode.slice(1)} · ${key.toUpperCase()}${mode === "translate" ? " · Hold D to edit pivot" : ""}`;
-    toolbar.append(tooltip);
   }
   toolbar.append(orientationControl);
   const selectionLabel = document.createElement("span");
@@ -1009,6 +1006,7 @@ async function start() {
   });
   workspace.registerPanel("rotation-curves", "Rotation Curves", rotationPanel.element);
   animationLayersPanel = createAnimationLayersPanel(store, {
+    getFrame,
     available: () => !loading && !dragId && !playing,
     onActiveChange: () => { clearPoseDraft(); updateTime(); },
     onStatus: message => { notice.textContent = message; },
@@ -1734,6 +1732,8 @@ async function start() {
     if (key === "d" && currentMode === "translate" && singleId() && !skeleton.selectedIds.size && !loading && !playing && !dragId && !meshComponentRequest && !componentPickShape && !paintSettings) { event.preventDefault(); pivotHeld = true; refreshGizmo(); updatePivotMarker(); return; }
     if (key === "f" && !loading && !dragId) { event.preventDefault(); fitView(); return; }
     if (key === "s") { event.preventDefault(); keySelection(); return; }
+    // Let focused buttons receive their native Space activation.
+    if (key === " " && event.composedPath().some(target => target instanceof HTMLButtonElement)) return;
     if (key === " ") { event.preventDefault(); if (!loading && !dragId) setPlaying(!playing); return; }
     if (key === "," || key === ".") { event.preventDefault(); setFrame(getFrame() + (key === "," ? -1 : 1)); return; }
     if (key === "delete") {
@@ -1775,10 +1775,9 @@ async function start() {
     }
     playing = value;
     buttonContent(play, value ? "pause" : "play");
-    play.setAttribute(
-      "aria-label",
-      value ? "Pause animation" : "Play animation",
-    );
+    const label = value ? "Pause animation" : "Play animation";
+    play.setAttribute("aria-label", label);
+    play.title = label;
     animationEditors?.refresh();
     drivenPanel?.refresh();
     ikPanel?.refresh();

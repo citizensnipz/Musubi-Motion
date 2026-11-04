@@ -24,7 +24,8 @@ export type CurveKey = {
   broken?: boolean;
 };
 export type AnimationTrack = { id: string; targetId: string; channel: AnimationChannel; keys: CurveKey[]; layerId?: string };
-export type AnimationLayer = { id: string; name: string; mode: "additive" | "override"; weight: number; mute: boolean; solo: boolean; locked: boolean };
+export type LayerWeightTrack = { id: string; keys: CurveKey[] };
+export type AnimationLayer = { weightTrack?: LayerWeightTrack; id: string; name: string; mode: "additive" | "override"; weight: number; mute: boolean; solo: boolean; locked: boolean };
 export type AnimationData = { fps: number; start: number; end: number; loop: boolean; tracks: AnimationTrack[]; layers?: AnimationLayer[]; activeLayerId?: string };
 export type AnimationPose = TransformChannels & { visibility: number; morphWeights?: number[] };
 export const isAnimationChannel = (channel: string): channel is AnimationChannel => (ANIMATION_CHANNELS as readonly string[]).includes(channel) || /^morph\.(0|[1-9][0-9]{0,2})$/.test(channel);
@@ -85,8 +86,23 @@ export function validateAnimation(value: unknown, doc: SceneDocument): asserts v
   }
   if (value.activeLayerId !== undefined && (!validId(value.activeLayerId) || !layerIds.has(value.activeLayerId))) throw Error("Active animation layer is missing.");
   const trackIds = new Set<string>(), keyIds = new Set<string>(), channels = new Set<string>();
-  const driven = new Set((doc.drivenKeys ?? []).map(relation => `${relation.driven.targetId}:${relation.driven.channel}`));
   let totalKeys = 0;
+  for (const layer of value.layers as AnimationLayer[] ?? []) {
+    const track = layer.weightTrack;
+    if (track === undefined) continue;
+    if (!record(track) || !validId(track.id) || trackIds.has(track.id)
+      || Object.keys(track).some(name => !["id", "keys"].includes(name))) throw Error("Invalid layer weight track.");
+    validateCurveKeys(track.keys);
+    for (const key of track.keys) {
+      if (key.value < 0 || key.value > 1) throw Error("Layer weight keys must be between zero and one.");
+      if (keyIds.has(key.id)) throw Error("Duplicate animation key ID.");
+      keyIds.add(key.id);
+    }
+    totalKeys += track.keys.length; trackIds.add(track.id);
+  }
+  if (trackIds.size + value.tracks.length > 100000) throw Error("Too many animation tracks.");
+  if (totalKeys > 100000) throw Error("Too many animation keys.");
+  const driven = new Set((doc.drivenKeys ?? []).map(relation => `${relation.driven.targetId}:${relation.driven.channel}`));
   for (const track of value.tracks) {
     if (!record(track) || !validId(track.id) || trackIds.has(track.id) || !validId(track.targetId)
       || !isAnimationChannel(track.channel as string)) throw Error("Invalid animation track.");
@@ -235,9 +251,9 @@ export function baseChannels(doc: SceneDocument, id: string): AnimationPose {
 type LayerContribution = { layer: AnimationLayer; track?: AnimationTrack };
 type CompiledChannel = { base?: AnimationTrack; layers: LayerContribution[] };
 type CompiledTarget = { channels: Map<AnimationChannel, CompiledChannel> };
-type CompiledAnimation = { targets: Map<string, CompiledTarget>; enabled: Map<string, AnimationLayer>; order: Map<string, number> };
+type CompiledAnimation = { dynamic: AnimationLayer[]; targets: Map<string, CompiledTarget>; enabled: Map<string, AnimationLayer>; order: Map<string, number> };
 const animationIndexes = new WeakMap<AnimationData, CompiledAnimation>();
-const emptyAnimationIndex: CompiledAnimation = { targets: new Map(), enabled: new Map(), order: new Map() };
+const emptyAnimationIndex: CompiledAnimation = { dynamic: [], targets: new Map(), enabled: new Map(), order: new Map() };
 function animationIndex(animation?: AnimationData): CompiledAnimation {
   if (!animation) return emptyAnimationIndex;
   const cached = animationIndexes.get(animation); if (cached) return cached;
@@ -254,7 +270,7 @@ function animationIndex(animation?: AnimationData): CompiledAnimation {
   }
   for (const target of targets.values()) for (const channel of target.channels.values())
     channel.layers.sort((a, b) => order.get(a.layer.id)! - order.get(b.layer.id)!);
-  const compiled = { targets, enabled, order }; animationIndexes.set(animation, compiled); return compiled;
+  const compiled = { targets, enabled, order, dynamic: [...enabled.values()].filter(layer => !!layer.weightTrack?.keys.length) }; animationIndexes.set(animation, compiled); return compiled;
 }
 /** Base has no layerId. All editors use this view; ownership validation scans
  * the complete flat track list, including muted and locked layers. */
@@ -281,8 +297,20 @@ function activeLayers(animation?: AnimationData): AnimationLayer[] {
   if (!animation) return [];
   const cached = enabledLayerCache.get(animation); if (cached) return cached;
   const layers = animation?.layers ?? [], solo = layers.some(layer => layer.solo && !layer.mute);
-  const result = layers.filter(layer => !layer.mute && (!solo || layer.solo) && layer.weight > 0);
+  const result = layers.filter(layer => !layer.mute && (!solo || layer.solo) && (layer.weight > 0 || !!layer.weightTrack?.keys.length));
   enabledLayerCache.set(animation, result); return result;
+}
+/** Independent layer-owned curve; this never reads SDK channels or mutates a layer. */
+export function evaluateLayerWeight(layer: AnimationLayer, frame: number): number {
+  if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
+  return Math.max(0, Math.min(1, (layer.weightTrack ? evaluateCurve(layer.weightTrack.keys, frame) : undefined) ?? layer.weight));
+}
+type SampledWeights = ReadonlyMap<AnimationLayer, number> | undefined;
+function sampleLayerWeights(index: CompiledAnimation, frame: number): SampledWeights {
+  if (!index.dynamic.length) return undefined;
+  const weights = new Map<AnimationLayer, number>();
+  for (const layer of index.dynamic) weights.set(layer, evaluateLayerWeight(layer, frame));
+  return weights;
 }
 function trackValue(track: AnimationTrack, frame: number): number | undefined {
   // Time visibility is held at key boundaries. Layer values stay scalar until
@@ -298,7 +326,7 @@ function evaluateHeld(keys: CurveKey[], frame: number): number | undefined {
 }
 /** Affine stack in one prospective active-layer value. This powers both
  * evaluation and exact inverse keying without temporary document mutations. */
-function channelStack(doc: SceneDocument, id: string, channel: AnimationChannel, frame: number, fallback: number, variable = false): { offset: number; gain: number } {
+function channelStack(doc: SceneDocument, id: string, channel: AnimationChannel, frame: number, fallback: number, variable = false, weights?: SampledWeights): { offset: number; gain: number } {
   const index = animationIndex(doc.animation), compiled = index.targets.get(id)?.channels.get(channel), active = doc.animation?.activeLayerId;
   const base = compiled?.base, baseValue = base ? trackValue(base, frame) : undefined;
   let contributions = compiled?.layers ?? [];
@@ -312,7 +340,7 @@ function channelStack(doc: SceneDocument, id: string, channel: AnimationChannel,
     const isVariable = variable && active === layer.id;
     const value = track ? trackValue(track, frame) : undefined;
     if (value === undefined && !isVariable) continue;
-    const w = layer.weight, override = layer.mode === "override" || channel === "visibility";
+    const w = weights?.get(layer) ?? layer.weight, override = layer.mode === "override" || channel === "visibility";
     if (isVariable) {
       if (override) { offset *= 1 - w; gain = w; }
       else if (channel.startsWith("scale.")) { gain = offset * w; offset *= 1 - w; }
@@ -329,12 +357,12 @@ function effectiveValue(channel: AnimationChannel, value: number): number {
   if (channel === "visibility" || channel === "ik.blend") return Math.max(0, Math.min(1, value));
   return value;
 }
-function keyedLayerValue(doc: SceneDocument, id: string, channel: AnimationChannel, frame: number, requested: number): number {
+function keyedLayerValue(doc: SceneDocument, id: string, channel: AnimationChannel, frame: number, requested: number, weights?: SampledWeights): number {
   assertAnimationLayerEditable(doc);
   if (!finite(requested)) throw Error("Animation values must be finite.");
   if (!doc.animation?.layers?.length) return requested;
   const fallback = channel === "ik.blend" ? doc.ikHandles!.find(handle => handle.id === id)!.blend : readChannel(baseChannels(doc, id), channel);
-  const { offset, gain } = channelStack(doc, id, channel, frame, fallback, true);
+  const { offset, gain } = channelStack(doc, id, channel, frame, fallback, true, weights);
   if (!Number.isFinite(gain) || Math.abs(gain) < 1e-12) throw Error("The active layer has no influence on this channel: it is muted, has zero weight, is excluded by solo, or is masked by another layer.");
   const value = (requested - offset) / gain;
   if (!finite(value)) throw Error("The requested pose requires an unsupported layer value. Increase the layer weight.");
@@ -347,15 +375,21 @@ function keyedLayerValue(doc: SceneDocument, id: string, channel: AnimationChann
  * the handle's enabled state. Empty tracks retain the literal fallback. */
 export function evaluateIKBlend(doc: SceneDocument, id: string, frame: number): number {
   if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
+  return sampledIKBlend(doc, id, frame, sampleLayerWeights(animationIndex(doc.animation), frame));
+}
+function sampledIKBlend(doc: SceneDocument, id: string, frame: number, weights: SampledWeights): number {
   const handle = doc.ikHandles?.find(handle => handle.id === id);
   if (!handle) throw Error("IK animation target is missing.");
-  return effectiveValue("ik.blend", channelStack(doc, id, "ik.blend", frame, handle.blend).offset);
+  return effectiveValue("ik.blend", channelStack(doc, id, "ik.blend", frame, handle.blend, false, weights).offset);
 }
 export function evaluateChannels(doc: SceneDocument, id: string, frame: number): AnimationPose {
   if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
+  return sampledChannels(doc, id, frame, sampleLayerWeights(animationIndex(doc.animation), frame));
+}
+function sampledChannels(doc: SceneDocument, id: string, frame: number, weights: SampledWeights): AnimationPose {
   const pose = baseChannels(doc, id);
   for (const channel of animationIndex(doc.animation).targets.get(id)?.channels.keys() ?? []) {
-    const value = channelStack(doc, id, channel, frame, readChannel(pose, channel)).offset;
+    const value = channelStack(doc, id, channel, frame, readChannel(pose, channel), false, weights).offset;
     applyChannel(pose, channel, effectiveValue(channel, value));
   }
   return pose;
@@ -364,7 +398,7 @@ export function evaluateChannels(doc: SceneDocument, id: string, frame: number):
 /** One fresh pose map per frame, linear in scene size and track count. */
 export function evaluateSceneAnimation(doc: SceneDocument, frame: number): Map<string, AnimationPose> {
   if (!Number.isFinite(frame)) throw Error("Animation frame must be finite.");
-  const poses = new Map<string, AnimationPose>();
+  const poses = new Map<string, AnimationPose>(), weights = sampleLayerWeights(animationIndex(doc.animation), frame);
   for (const node of Object.values(doc.nodes)) if (node.type === "transform") {
     poses.set(node.id, baseChannels(doc, node.id));
   }
@@ -373,7 +407,7 @@ export function evaluateSceneAnimation(doc: SceneDocument, frame: number): Map<s
   }
   for (const [id, pose] of poses) {
     for (const channel of animationIndex(doc.animation).targets.get(id)?.channels.keys() ?? []) {
-      const value = channelStack(doc, id, channel, frame, readChannel(pose, channel)).offset;
+      const value = channelStack(doc, id, channel, frame, readChannel(pose, channel), false, weights).offset;
       applyChannel(pose, channel, effectiveValue(channel, value));
     }
   }
@@ -425,16 +459,17 @@ export function keyChannels(doc: SceneDocument, id: string, channels: (Transform
   if (isHandle !== (typeof channels === "number")) throw Error("IK handles require a numeric blend; objects and joints require transform channels.");
   if (isHandle && (!finite(channels) || channels < 0 || channels > 1)) throw Error("IK blend key values must be between zero and one.");
   const animation = doc.animation ?? defaultAnimation();
+  const weights = sampleLayerWeights(animationIndex(animation), frame);
   let tracks = [...animation.tracks];
+  const evaluated = onlyExisting ? (isHandle ? sampledIKBlend(doc, id, frame, weights) : sampledChannels(doc, id, frame, weights)) : undefined;
   for (const channel of targetChannels(doc, id)) {
     const index = tracks.findIndex(track => track.targetId === id && track.channel === channel && track.layerId === animation.activeLayerId);
     if (index < 0 && onlyExisting) continue;
     const track = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel, keys: [], ...activeLayerFields(doc) } : tracks[index];
     if (onlyExisting && !track.keys.length) continue;
     const value = typeof channels === "number" ? channels : readChannel(channels, channel);
-    const evaluated = isHandle ? evaluateIKBlend(doc, id, frame) : readChannel(evaluateChannels(doc, id, frame), channel);
-    if (onlyExisting && Math.abs(evaluated - value) < 1e-10) continue;
-    const next = withKey(track, frame, keyedLayerValue(doc, id, channel, frame, value));
+    if (evaluated !== undefined && Math.abs((typeof evaluated === "number" ? evaluated : readChannel(evaluated, channel)) - value) < 1e-10) continue;
+    const next = withKey(track, frame, keyedLayerValue(doc, id, channel, frame, value, weights));
     if (index < 0) tracks.push(next); else tracks[index] = next;
   }
   if (JSON.stringify(animation.tracks) === JSON.stringify(tracks)) return doc;
@@ -447,17 +482,18 @@ export function setKeys(store: SceneStore, targetIds: Iterable<string>, frame: n
   poses?: ReadonlyMap<string, TransformChannels & { visibility?: number; morphWeights?: number[] }>, channels?: AnimationChannel[]) {
   const doc = store.getState().document, animation = doc.animation ?? defaultAnimation();
   if (!finite(frame, 1e6)) throw Error("Invalid key frame.");
+  const weights = sampleLayerWeights(animationIndex(animation), frame);
   let tracks = [...animation.tracks];
   for (const targetId of new Set(targetIds)) {
     const supported = channelsForTarget(doc, targetId), isHandle = supported[0] === "ik.blend";
-    const pose = isHandle ? undefined : poses?.get(targetId) ?? evaluateChannels(doc, targetId, frame);
+    const pose = isHandle ? undefined : poses?.get(targetId) ?? sampledChannels(doc, targetId, frame, weights);
     for (const channel of channels ?? targetChannels(doc, targetId)) {
       if (channel.startsWith("scale.") && doc.joints?.some(joint => joint.id === targetId)) throw Error("Joint scale animation is not supported.");
       if (!supported.includes(channel)) throw Error("The selected animation channel is not supported by this target.");
       const index = tracks.findIndex(track => track.targetId === targetId && track.channel === channel && track.layerId === animation.activeLayerId);
       const track = index < 0 ? { id: crypto.randomUUID(), targetId, channel, keys: [], ...activeLayerFields(doc) } : tracks[index];
-      const requested = channel === "ik.blend" ? evaluateIKBlend(doc, targetId, frame) : readChannel(pose!, channel);
-      const next = withKey(track, frame, keyedLayerValue(doc, targetId, channel, frame, requested));
+      const requested = channel === "ik.blend" ? sampledIKBlend(doc, targetId, frame, weights) : readChannel(pose!, channel);
+      const next = withKey(track, frame, keyedLayerValue(doc, targetId, channel, frame, requested, weights));
       if (index < 0) tracks.push(next); else tracks[index] = next;
     }
   }
@@ -473,7 +509,7 @@ export function setIKBlendKey(store: SceneStore, id: string, frame: number, valu
   const animation = doc.animation ?? defaultAnimation(), tracks = [...animation.tracks];
   const index = tracks.findIndex(track => track.targetId === id && track.channel === "ik.blend" && track.layerId === animation.activeLayerId);
   const track: AnimationTrack = index < 0 ? { id: crypto.randomUUID(), targetId: id, channel: "ik.blend", keys: [], ...activeLayerFields(doc) } : tracks[index];
-  const next = withKey(track, frame, keyedLayerValue(doc, id, "ik.blend", frame, value));
+  const next = withKey(track, frame, keyedLayerValue(doc, id, "ik.blend", frame, value, sampleLayerWeights(animationIndex(animation), frame)));
   if (index < 0) tracks.push(next); else tracks[index] = next;
   saveAnimation(store, { ...animation, tracks }, "Key IK blend");
 }

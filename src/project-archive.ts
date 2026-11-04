@@ -68,8 +68,8 @@ function finite(value: unknown): asserts value is number {
 export function validateScene(value: unknown): SceneDocument {
   const doc = record(value);
   if (doc.joints !== undefined) validateJoints(doc.joints as import("./skeleton.ts").Joint[]);
-  if (doc.format !== "musubi-scene" || doc.version !== 1)
-    fail("Unsupported scene format or version.");
+  if (doc.format !== "musubi-scene" || doc.version !== 2)
+    fail("Unsupported scene format or version. This build opens musubi-scene version 2; recreate or re-export older projects with a compatible build.");
   if (doc.upAxis !== "Y" || doc.units !== "unitless")
     fail("Unsupported scene units or axis.");
   const nodes = record(doc.nodes),

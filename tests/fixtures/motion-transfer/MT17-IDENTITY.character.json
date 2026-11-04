@@ -1,0 +1,529 @@
+{
+  "reference": [
+    {
+      "id": "MT17-IDENTITY_hips",
+      "name": "MT17-IDENTITY_hips",
+      "parentId": null,
+      "position": [
+        0,
+        0.9,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_spine",
+      "name": "MT17-IDENTITY_spine",
+      "parentId": "MT17-IDENTITY_hips",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_chest",
+      "name": "MT17-IDENTITY_chest",
+      "parentId": "MT17-IDENTITY_spine",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_neck",
+      "name": "MT17-IDENTITY_neck",
+      "parentId": "MT17-IDENTITY_chest",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_head",
+      "name": "MT17-IDENTITY_head",
+      "parentId": "MT17-IDENTITY_neck",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_leftUpperArm",
+      "name": "MT17-IDENTITY_leftUpperArm",
+      "parentId": "MT17-IDENTITY_chest",
+      "position": [
+        0.15,
+        0.1,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_leftLowerArm",
+      "name": "MT17-IDENTITY_leftLowerArm",
+      "parentId": "MT17-IDENTITY_leftUpperArm",
+      "position": [
+        0.3,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_leftHand",
+      "name": "MT17-IDENTITY_leftHand",
+      "parentId": "MT17-IDENTITY_leftLowerArm",
+      "position": [
+        0.25,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_rightUpperArm",
+      "name": "MT17-IDENTITY_rightUpperArm",
+      "parentId": "MT17-IDENTITY_chest",
+      "position": [
+        -0.15,
+        0.1,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_rightLowerArm",
+      "name": "MT17-IDENTITY_rightLowerArm",
+      "parentId": "MT17-IDENTITY_rightUpperArm",
+      "position": [
+        -0.3,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_rightHand",
+      "name": "MT17-IDENTITY_rightHand",
+      "parentId": "MT17-IDENTITY_rightLowerArm",
+      "position": [
+        -0.25,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_leftUpperLeg",
+      "name": "MT17-IDENTITY_leftUpperLeg",
+      "parentId": "MT17-IDENTITY_hips",
+      "position": [
+        0.1,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_leftLowerLeg",
+      "name": "MT17-IDENTITY_leftLowerLeg",
+      "parentId": "MT17-IDENTITY_leftUpperLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_leftFoot",
+      "name": "MT17-IDENTITY_leftFoot",
+      "parentId": "MT17-IDENTITY_leftLowerLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_rightUpperLeg",
+      "name": "MT17-IDENTITY_rightUpperLeg",
+      "parentId": "MT17-IDENTITY_hips",
+      "position": [
+        -0.1,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_rightLowerLeg",
+      "name": "MT17-IDENTITY_rightLowerLeg",
+      "parentId": "MT17-IDENTITY_rightUpperLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-IDENTITY_rightFoot",
+      "name": "MT17-IDENTITY_rightFoot",
+      "parentId": "MT17-IDENTITY_rightLowerLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "roles": {
+    "hips": "MT17-IDENTITY_hips",
+    "spine": "MT17-IDENTITY_spine",
+    "chest": "MT17-IDENTITY_chest",
+    "neck": "MT17-IDENTITY_neck",
+    "head": "MT17-IDENTITY_head",
+    "leftUpperArm": "MT17-IDENTITY_leftUpperArm",
+    "leftLowerArm": "MT17-IDENTITY_leftLowerArm",
+    "leftHand": "MT17-IDENTITY_leftHand",
+    "rightUpperArm": "MT17-IDENTITY_rightUpperArm",
+    "rightLowerArm": "MT17-IDENTITY_rightLowerArm",
+    "rightHand": "MT17-IDENTITY_rightHand",
+    "leftUpperLeg": "MT17-IDENTITY_leftUpperLeg",
+    "leftLowerLeg": "MT17-IDENTITY_leftLowerLeg",
+    "leftFoot": "MT17-IDENTITY_leftFoot",
+    "rightUpperLeg": "MT17-IDENTITY_rightUpperLeg",
+    "rightLowerLeg": "MT17-IDENTITY_rightLowerLeg",
+    "rightFoot": "MT17-IDENTITY_rightFoot"
+  },
+  "coordinates": {
+    "metersPerUnit": 1,
+    "up": "Y",
+    "forward": "+Z",
+    "basis": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "nodes": {
+    "mt_mesh": {
+      "id": "mt_mesh",
+      "name": "OwnedDiagnosticSkin",
+      "type": "transform",
+      "parentId": null,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "rotationOrder": "XYZ"
+    },
+    "mt_shape": {
+      "id": "mt_shape",
+      "type": "meshShape",
+      "name": "OwnedDiagnosticSkin",
+      "parentId": "mt_mesh",
+      "vertices": [
+        {
+          "id": "v0",
+          "position": [
+            0,
+            0.9,
+            0
+          ]
+        },
+        {
+          "id": "v1",
+          "position": [
+            0.7,
+            1.4000000000000001,
+            0
+          ]
+        },
+        {
+          "id": "v2",
+          "position": [
+            0.1,
+            0,
+            0
+          ]
+        }
+      ],
+      "faces": [
+        {
+          "id": "f0",
+          "vertices": [
+            "v0",
+            "v1",
+            "v2"
+          ]
+        }
+      ],
+      "color": "#b8bdc5",
+      "shading": "flat",
+      "wireframe": false,
+      "skin": {
+        "jointIds": [
+          "MT17-IDENTITY_hips",
+          "MT17-IDENTITY_leftHand",
+          "MT17-IDENTITY_leftFoot"
+        ],
+        "inverseBindMatrices": [
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            -0.9,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -0.7,
+            -1.4000000000000001,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -0.1,
+            0,
+            0,
+            1
+          ]
+        ],
+        "weights": {
+          "v0": [
+            {
+              "joint": 0,
+              "weight": 1
+            }
+          ],
+          "v1": [
+            {
+              "joint": 1,
+              "weight": 1
+            }
+          ],
+          "v2": [
+            {
+              "joint": 2,
+              "weight": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "rootIds": [
+    "mt_mesh"
+  ]
+}

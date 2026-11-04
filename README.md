@@ -110,8 +110,8 @@ Time keying and curve editors use the active animation layer. Driven curves use
 fractional driver values and a separate cursor that leaves scene time unchanged.
 Euler filtering is explicit because it can remove intentional spins. Mirroring
 reflects joint frames across a world-origin plane and pairs existing joints by
-name; it does not duplicate a complete control rig. Layer weights are static;
-animated weights and layer flattening remain future work.
+name; it does not duplicate a complete control rig. Layer weights support independent key curves in Animation Layers;
+layer flattening remains future work.
 
 Open [examples/animation-study.msb](examples/animation-study.msb) for a procedural bounce/spin animation, a driven rotation, and a keyed three-joint FK chain. Rebuild it with `node scripts/create-animation-example.mjs`.
 

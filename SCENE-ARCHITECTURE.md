@@ -373,8 +373,9 @@ respect opaque geometry depth; transparent cross-object sorting is approximate.
 
 Portable `.msb` ZIP packages store the scene and original asset bytes. Camera
 and current time in seconds are stored separately from scene animation settings.
-The optional animation, driven-key, IK, and constraint fields extend scene version 1 without
-requiring them in older archives. Loading validates references and limits before
+The current scene format is version 2, including independent layer-owned weight
+curves. The MSB container remains version 1. Older scene versions are rejected
+explicitly; optional animation, driven-key, IK and constraint fields may be absent. Loading validates references and limits before
 staging splat resources and replacing the active scene. Successful Open/New
 starts a fresh history. See [MSB-FORMAT.md](MSB-FORMAT.md).
 

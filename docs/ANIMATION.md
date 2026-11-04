@@ -134,9 +134,34 @@ SDK channel ownership applies across every layer, including muted layers. Layere
 IK range baking creates a top override layer and retains the original tracks;
 the same sampled whole-scene verification runs before committing. As before,
 disabling the IK handle affects the entire timeline and outside-range motion may
-change. Layer weights/settings are static; animated weights, merge/flatten and
-per-object layer membership tools remain future extensions. Limits: 1,000 layers,
-100,000 total tracks and 100,000 total keys.
+change. Layer settings remain static. Layer weights support an independent saved curve.
+Merge/flatten and per-object layer membership tools remain future extensions. Limits: 1,000 layers,
+100,000 total tracks and 100,000 total keys. Weight curves share both budgets with pose tracks.
+
+In **Animation Layers**, **Fallback weight** is the saved static value used when
+there is no weight curve. **Sampled weight** reports the curve at the current
+fractional frame. Set **Weight key value** and press **Set weight key** to key the
+rounded current frame. **Delete weight key** removes that frame; deleting the last
+key removes the curve. **Clear weight curve** restores the fallback without
+changing it. New weight keys use linear interpolation; replacing an existing key
+preserves its ID and tangent metadata. Weight curves hold their endpoints and
+clamp sampled Bezier overshoot to 0-1. A zero-weight solo layer still excludes
+non-solo layers; Base always passes through.
+
+Weight commands target their owning layer directly, so zero influence does not
+prevent weight keying. Locking the owner prevents edits to its weight/curve.
+The right-aligned numeric fields support Enter/blur, Escape restoration,
+middle-mouse scrubbing and contextual field Lock/Unlock. Scrubbing these fields
+only changes the local field until release; **Weight key value** remains a draft
+until **Set weight key**. Each fallback edit or curve command is one undo step;
+no-op commands add no history. Playback changes neither document nor history.
+Weight tracks are separate from pose tracks and are deliberately excluded from
+generic Graph Editor, Dope Sheet, SDK drivers and SDK outputs in this slice.
+
+This follows Maya 2026's [layer-weight keying workflow](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Animation/files/GUID-59E7CD71-66EC-4200-8467-7B785B85A7A6.htm)
+in the dedicated layer panel. Separate fallback/sample displays make the stored
+fallback explicit; generic weight-curve editors are a later extension.
+
 
 Open [examples/layered-rig-study.msb](../examples/layered-rig-study.msb) for joint
 orientation, additive arm adjustment and keyed mirrored poses on an override
@@ -866,7 +891,7 @@ small-scene playback results.
 2. Aim object-up/roll controls, multi-source constraint weighting, constraint
    animation, and richer controller/component editing.
 3. Weight smoothing/locks, mirrored weight transfer and conventional deformers.
-4. Animated layer weights/flattening, camera/custom-property animation, richer
+4. Layer flattening, camera/custom-property animation, richer
    clipboard/retargeting.
 5. Additional polygon tools, materials/UVs, mesh skinning, and mesh import/export;
    see the [modeling guide](MODELING.md) for the implemented subset.
@@ -909,3 +934,22 @@ configurations. Its copyright and MIT notice are retained in
 in the built distribution. No new package dependencies or paid services were
 introduced for these animation/rigging additions. Other dependencies retain
 their existing licenses.
+
+
+### Edit layer weight keys
+
+In **Animation > Animation Layers**, expand **Weight curve keys** for the active
+layer. Select a key in the native list, then edit its exact fractional **Frame**,
+0-1 **Value**, or outgoing **Interpolation** (Step, Linear, Bezier). Moving a key
+past its neighbors keeps that key selected and preserves its identity and tangent
+metadata. Conflicting key times and invalid values are rejected atomically.
+**Remove selected weight key** removes the selected key at its exact time; removing
+the last key restores the unchanged fallback weight.
+
+Tab and native list arrow keys navigate these controls. Enter commits a numeric
+edit; Escape restores the saved value. Middle-drag previews the numeric field and
+commits one undoable edit on release; Escape or pointer cancellation restores the
+field. Right-click either numeric field for Lock/Unlock. A locked animation layer
+allows viewing the list and prevents all curve edits. Undo/redo and current MSB
+save/reopen preserve the complete curve. Weight keys remain independent of the
+pose Graph Editor and Dope Sheet.

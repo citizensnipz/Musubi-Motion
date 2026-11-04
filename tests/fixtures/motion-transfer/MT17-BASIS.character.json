@@ -1,0 +1,529 @@
+{
+  "reference": [
+    {
+      "id": "MT17-BASIS_hips",
+      "name": "MT17-BASIS_hips",
+      "parentId": null,
+      "position": [
+        0,
+        0.9,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_spine",
+      "name": "MT17-BASIS_spine",
+      "parentId": "MT17-BASIS_hips",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_chest",
+      "name": "MT17-BASIS_chest",
+      "parentId": "MT17-BASIS_spine",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_neck",
+      "name": "MT17-BASIS_neck",
+      "parentId": "MT17-BASIS_chest",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_head",
+      "name": "MT17-BASIS_head",
+      "parentId": "MT17-BASIS_neck",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_leftUpperArm",
+      "name": "MT17-BASIS_leftUpperArm",
+      "parentId": "MT17-BASIS_chest",
+      "position": [
+        0.15,
+        0.1,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        25,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_leftLowerArm",
+      "name": "MT17-BASIS_leftLowerArm",
+      "parentId": "MT17-BASIS_leftUpperArm",
+      "position": [
+        0.271892336110995,
+        0,
+        0.12678547852220984
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        -25,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_leftHand",
+      "name": "MT17-BASIS_leftHand",
+      "parentId": "MT17-BASIS_leftLowerArm",
+      "position": [
+        0.25,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_rightUpperArm",
+      "name": "MT17-BASIS_rightUpperArm",
+      "parentId": "MT17-BASIS_chest",
+      "position": [
+        -0.15,
+        0.1,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        25,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_rightLowerArm",
+      "name": "MT17-BASIS_rightLowerArm",
+      "parentId": "MT17-BASIS_rightUpperArm",
+      "position": [
+        -0.271892336110995,
+        0,
+        -0.12678547852220984
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        -25,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_rightHand",
+      "name": "MT17-BASIS_rightHand",
+      "parentId": "MT17-BASIS_rightLowerArm",
+      "position": [
+        -0.25,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_leftUpperLeg",
+      "name": "MT17-BASIS_leftUpperLeg",
+      "parentId": "MT17-BASIS_hips",
+      "position": [
+        0.1,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_leftLowerLeg",
+      "name": "MT17-BASIS_leftLowerLeg",
+      "parentId": "MT17-BASIS_leftUpperLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_leftFoot",
+      "name": "MT17-BASIS_leftFoot",
+      "parentId": "MT17-BASIS_leftLowerLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_rightUpperLeg",
+      "name": "MT17-BASIS_rightUpperLeg",
+      "parentId": "MT17-BASIS_hips",
+      "position": [
+        -0.1,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_rightLowerLeg",
+      "name": "MT17-BASIS_rightLowerLeg",
+      "parentId": "MT17-BASIS_rightUpperLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "MT17-BASIS_rightFoot",
+      "name": "MT17-BASIS_rightFoot",
+      "parentId": "MT17-BASIS_rightLowerLeg",
+      "position": [
+        0,
+        -0.45,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "orientation": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "roles": {
+    "hips": "MT17-BASIS_hips",
+    "spine": "MT17-BASIS_spine",
+    "chest": "MT17-BASIS_chest",
+    "neck": "MT17-BASIS_neck",
+    "head": "MT17-BASIS_head",
+    "leftUpperArm": "MT17-BASIS_leftUpperArm",
+    "leftLowerArm": "MT17-BASIS_leftLowerArm",
+    "leftHand": "MT17-BASIS_leftHand",
+    "rightUpperArm": "MT17-BASIS_rightUpperArm",
+    "rightLowerArm": "MT17-BASIS_rightLowerArm",
+    "rightHand": "MT17-BASIS_rightHand",
+    "leftUpperLeg": "MT17-BASIS_leftUpperLeg",
+    "leftLowerLeg": "MT17-BASIS_leftLowerLeg",
+    "leftFoot": "MT17-BASIS_leftFoot",
+    "rightUpperLeg": "MT17-BASIS_rightUpperLeg",
+    "rightLowerLeg": "MT17-BASIS_rightLowerLeg",
+    "rightFoot": "MT17-BASIS_rightFoot"
+  },
+  "coordinates": {
+    "metersPerUnit": 1,
+    "up": "Y",
+    "forward": "+Z",
+    "basis": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "nodes": {
+    "mt_mesh": {
+      "id": "mt_mesh",
+      "name": "OwnedDiagnosticSkin",
+      "type": "transform",
+      "parentId": null,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "rotationOrder": "XYZ"
+    },
+    "mt_shape": {
+      "id": "mt_shape",
+      "type": "meshShape",
+      "name": "OwnedDiagnosticSkin",
+      "parentId": "mt_mesh",
+      "vertices": [
+        {
+          "id": "v0",
+          "position": [
+            0,
+            0.9,
+            0
+          ]
+        },
+        {
+          "id": "v1",
+          "position": [
+            0.7000000000000001,
+            1.4000000000000001,
+            0
+          ]
+        },
+        {
+          "id": "v2",
+          "position": [
+            0.1,
+            0,
+            0
+          ]
+        }
+      ],
+      "faces": [
+        {
+          "id": "f0",
+          "vertices": [
+            "v0",
+            "v1",
+            "v2"
+          ]
+        }
+      ],
+      "color": "#b8bdc5",
+      "shading": "flat",
+      "wireframe": false,
+      "skin": {
+        "jointIds": [
+          "MT17-BASIS_hips",
+          "MT17-BASIS_leftHand",
+          "MT17-BASIS_leftFoot"
+        ],
+        "inverseBindMatrices": [
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            -0.9,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -0.7000000000000001,
+            -1.4000000000000001,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -0.1,
+            0,
+            0,
+            1
+          ]
+        ],
+        "weights": {
+          "v0": [
+            {
+              "joint": 0,
+              "weight": 1
+            }
+          ],
+          "v1": [
+            {
+              "joint": 1,
+              "weight": 1
+            }
+          ],
+          "v2": [
+            {
+              "joint": 2,
+              "weight": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "rootIds": [
+    "mt_mesh"
+  ]
+}

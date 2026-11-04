@@ -159,18 +159,16 @@
             aria-label="Transform tools"
             aria-orientation="vertical"
           ></div>
-          <wa-button
+          <button
             id="palette-lock"
-            size="s"
-            appearance="plain"
-            variant="neutral"
+            type="button"
+            class="icon-control"
             aria-label="Unlock tool panel"
+            title="Unlock tool panel"
             aria-pressed="true"
             ><span data-icon="lock"></span
-          ></wa-button>
-          <wa-tooltip for="palette-lock"
-            >Lock / unlock panel position</wa-tooltip
-          >
+          ></button>
+
         </div>
         <div class="scene-label">
           <h2 id="asset-name">Untitled.msb</h2>
@@ -206,26 +204,25 @@
       ></section>
       <section id="timeline-panel" aria-label="Animation timeline">
         <div class="transport">
-          <wa-button
+          <button
             id="rewind"
-            size="s"
-            appearance="plain"
-            variant="neutral"
+            type="button"
+            class="icon-control"
             aria-label="Go to beginning"
+            title="Go to beginning"
             disabled
-            ><span data-icon="timelineStart"></span></wa-button
-          ><wa-button
+            ><span data-icon="timelineStart"></span></button
+          ><button
             id="play"
-            size="s"
-            appearance="plain"
-            variant="neutral"
+            type="button"
+            class="icon-control"
             aria-label="Play animation"
+            title="Play animation"
             disabled
-            ><span data-icon="play"></span></wa-button
+            ><span data-icon="play"></span></button
           ><span class="animation-label">Turntable</span>
         </div>
-        <wa-tooltip for="rewind">Go to beginning</wa-tooltip
-        ><wa-tooltip for="play">Play / pause animation</wa-tooltip>
+
         <div class="timeline">
           <wa-slider
             id="timeline"

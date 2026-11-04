@@ -1,4 +1,4 @@
-# Musubi scene files (.msb), version 1
+# Musubi scene files (.msb), scene version 2 / container version 1
 
 An `.msb` file is a standard ZIP or ZIP64 archive. New saves use STORE entries assembled as Blob references; legacy compressed ZIPs also remain readable. File > Save uses
 the current file handle where supported. Save As requests a new destination.
@@ -25,7 +25,7 @@ assets/<another-asset-id>
 {
   "format": "musubi-project",
   "version": 1,
-  "scene": { "format": "musubi-scene", "version": 1 },
+  "scene": { "format": "musubi-scene", "version": 2 },
   "editor": {
     "camera": { "position": [3, 2, 8], "target": [0, 0, 0], "fov": 42, "near": 0.01, "far": 1000 },
     "time": 0
@@ -49,10 +49,14 @@ mode, and unkeyed pose overrides are not saved. Opening pauses playback.
 
 ## Animation and rigging extensions
 
-These optional fields are additive to `musubi-scene` version 1. Older archives
-without them retain their authored transforms and have no animation or IK.
-The current loader accepts both old scenes and these extended scenes. Older
-application builds are not guaranteed to preserve extensions when resaving.
+The current scene format is `musubi-scene` version 2. The ZIP container remains
+`musubi-project` version 1. This prototype intentionally drops scene version 1;
+there is no dual reader or migration layer. All repository examples were
+regenerated with scene version 2 while preserving their authored data. Unsupported
+scenes fail before replacing the active document with: "Unsupported scene format
+or version. This build opens musubi-scene version 2; recreate or re-export older
+projects with a compatible build." Malformed current-format files also fail
+atomically. Optional absent animation/rig fields retain authored fallbacks.
 
 | Field | Stored data |
 | --- | --- |
@@ -152,9 +156,18 @@ Optional `animation.layers` contains at most 1,000 records with unique `id`,
 (0–1), and boolean `mute`, `solo`, `locked`. Array order defines composition.
 Optional `animation.activeLayerId` references an existing layer; absence means
 Base. A track's optional `layerId` assigns it to that layer, otherwise Base.
+A layer may own one optional `weightTrack: { id, keys: CurveKey[] }`. Its IDs
+share the global pose-track/key namespaces and the 100,000-track/100,000-key
+budgets. Values must be finite and within 0-1; key times are unique, sorted and
+in ordinary fractional frame units. Unknown weight-track ownership fields are
+rejected. Curves use the ordinary interpolation/tangent metadata. Their sampled
+value is `clamp01(evaluateCurve(keys, frame) ?? layer.weight)`, holding endpoints;
+missing/empty curves use the static fallback. Commands remove empty curves,
+retain the fallback on clear, and honor the owner layer lock. These independent
+tracks cannot target a pose, an SDK channel, or another weight.
 Track/key IDs and total budgets remain global. Raw layer values use the ordinary
 finite curve bounds; effective scale/visibility/IK blend clamp after composition.
-Old archives without these optional fields retain their original behavior.
+Current-format scenes without these optional fields use authored fallbacks.
 
 Joints optionally store `orientation: [x,y,z]` in finite XYZ degrees and boolean
 `showLocalAxes`. Missing orientation is identity; local quaternion is orientation
@@ -210,7 +223,7 @@ requested frame; missing or empty blend tracks use the handle's saved `blend`.
 Interpolated overshoot is clamped to 0–1 without rewriting the curve. The Graph
 Editor still displays the raw curve; shape-preserving insertion at an out-of-range
 sample rejects rather than authoring an invalid key. Existing files with literal
-blend only keep their behavior, and the format version remains 1.
+blend only keep their behavior, and the MSB container version remains 1 (current scene version 2).
 
 FK matching adds a zero key to an existing blend track at the captured frame;
 without that track it changes the literal fallback to zero. The joint rotation
@@ -252,7 +265,7 @@ The loader validates format versions, IDs, references, unique sibling names,
 hierarchy cycles, roots, transform values, shape counts, camera values, asset
 inventory, byte lengths, SHA-256 digests, and the optional animation/rigging
 records above. Unsupported generators and node
-types are rejected. Version 1 matches the current editor's one renderable shape per
+types are rejected. Scene version 2 matches the current editor's one renderable shape per
 transform; group-only nodes and instancing of DAG nodes are not implemented.
 
 All meshes are prepared in a staging collection. The old scene and history stay

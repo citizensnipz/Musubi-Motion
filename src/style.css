@@ -106,6 +106,44 @@ nav {
 .nav-spacer {
   flex: 1;
 }
+/* Native icon controls expose names and toggle state on the focusable button. */
+.icon-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.icon-control:not(:disabled):hover {
+  background: var(--hover);
+}
+.icon-control:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 2px;
+}
+.icon-control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+#tool-palette .icon-control {
+  width: 32px;
+  height: 36px;
+  padding-top: 3px;
+}
+.icon-control svg {
+  display: block;
+  flex-shrink: 0;
+}
 wa-button {
   vertical-align: middle;
 }
@@ -244,7 +282,12 @@ kbd {
   flex-direction: column;
   gap: 2px;
 }
-.transform-tools wa-button[aria-pressed="true"]::part(base) {
+#tool-palette .transform-tool {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.transform-tool[aria-pressed="true"] {
   background: var(--hover);
   border: 1px solid var(--line);
 }
@@ -658,12 +701,6 @@ wa-dialog::part(footer) {
     gap: 2px;
   }
   .action-label {
-    display: none;
-  }
-  .transform-tools wa-button::part(base) {
-    padding-inline: 7px;
-  }
-  .transform-tools wa-button span {
     display: none;
   }
   .statusbar span:last-child {
