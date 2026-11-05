@@ -1,5 +1,5 @@
 import { addAnimationLayer, setActiveAnimationLayer, updateAnimationLayer, reorderAnimationLayer, removeAnimationLayer, setLayerWeightKey, deleteLayerWeightKey, clearLayerWeightCurve, replaceLayerWeightTrack } from "./animation-layers.ts";
-import { evaluateLayerWeight, type CurveKey, type LayerWeightTrack } from "./animation.ts";
+import { evaluateLayerWeight, tangentSlope, withTangent, type CurveKey, type LayerWeightTrack } from "./animation.ts";
 import { propertyInteraction } from "./property-interaction.ts";
 import type { SceneStore } from "./scene-store.ts";
 
@@ -34,11 +34,49 @@ export function createAnimationLayersPanel(store: SceneStore, options: { availab
   let observedTrack:LayerWeightTrack|undefined,listedTrack:LayerWeightTrack|undefined,listedOwner="";
   let keyById=new Map<string,CurveKey>();
   const selectedKey=()=>store.getState().document.animation?.layers?.find(layer=>layer.id===active.value)?.weightTrack?.keys.find(key=>key.id===selectedKeyId);
-  function editSelectedKey(patch:Partial<Pick<CurveKey,"time"|"value"|"interpolation">>){
+  function editSelectedKey(patch:Partial<CurveKey>){
     const layer=store.getState().document.animation?.layers?.find(layer=>layer.id===active.value),track=layer?.weightTrack;
     if(!track||!selectedKey())return;
     replaceLayerWeightTrack(store,active.value,{...track,keys:track.keys.map(key=>key.id===selectedKeyId?{...key,...patch}:key).sort((a,b)=>a.time-b.time)});
   }
+  const tangentDetails=document.createElement("details"),tangentHeading=document.createElement("summary");
+  tangentHeading.textContent="Tangents";
+  tangentHeading.addEventListener("keydown",event=>{if(event.key===" "||event.key==="Enter")event.stopPropagation();});
+  const tangentPreset=select("Selected weight key tangent preset",[["Auto","auto"],["Clamped","clamped"],["Flat","flat"],["Spline","spline"],["Fixed","fixed"]]);
+  const tangentLink=select("Selected weight key tangent linking",[["Linked","linked"],["Broken","broken"]]);
+  const tangentNumbers=(["inSlope","outSlope","inWeight","outWeight"] as const).map(field=>{
+    const side=field.startsWith("in")?"In":"Out",kind=field.endsWith("Slope")?"slope":"weight",node=input(`Selected weight key ${side.toLowerCase()} tangent ${kind}`,"number");
+    node.step="0.01";node.min=kind==="weight"?"0":"-1000000000000";node.max=kind==="weight"?"1":"1000000000000";
+    return {field,node,text:`${side} ${kind}`};
+  });
+  function selectedTrack(){return store.getState().document.animation?.layers?.find(layer=>layer.id===active.value)?.weightTrack;}
+  function editHandle(side:"in"|"out",slope:number,handleWeight?:number){
+    const track=selectedTrack();if(!track)return;
+    editSelectedKey(withTangent(track.keys,track.keys.findIndex(key=>key.id===selectedKeyId),side,slope,handleWeight));
+  }
+  tangentPreset.onchange=()=>run(()=>{
+    const track=selectedTrack(),key=selectedKey();if(!track||!key)return;
+    const index=track.keys.findIndex(item=>item.id===key.id),tangentMode=tangentPreset.value as CurveKey["tangentMode"];
+    editSelectedKey({interpolation:"bezier",tangentMode,...(tangentMode==="fixed"?{inSlope:tangentSlope(track.keys,index,"in"),outSlope:tangentSlope(track.keys,index,"out")}: {})});
+  });
+  tangentLink.onchange=()=>run(()=>{
+    const track=selectedTrack(),key=selectedKey();if(!track||!key)return;
+    if(tangentLink.value==="broken")editSelectedKey({broken:true});
+    else if(key.broken){
+      const index=track.keys.findIndex(item=>item.id===key.id),keys=track.keys.map(item=>item.id===key.id?{...item,broken:false}:item);
+      editSelectedKey(withTangent(keys,index,"in",tangentSlope(track.keys,index,"in")));
+    }
+  });
+  tangentNumbers.forEach(({field,node})=>node.onchange=()=>{
+    if(cancelField||node.readOnly)return;
+    run(()=>{const track=selectedTrack();if(!track)return;const index=track.keys.findIndex(key=>key.id===selectedKeyId),side=field.startsWith("in")?"in":"out";
+      editHandle(side,field.endsWith("Slope")?node.valueAsNumber:tangentSlope(track.keys,index,side),field.endsWith("Weight")?node.valueAsNumber:undefined);
+    });
+  });
+  const tangentFields=document.createElement("div");tangentFields.className="weight-key-fields";
+  tangentNumbers.forEach(({node,text})=>tangentFields.append(label(text,node)));
+  const tangentHelp=document.createElement("p");tangentHelp.textContent="Tangent edits use Bezier interpolation. Slopes use weight per frame; handle weights use 0-1 of the adjoining segment. Linked slopes move together; handle weights remain independent. Fixed preserves the current slopes. Break tangents to edit slopes independently.";
+  tangentDetails.append(tangentHeading,label("Preset",tangentPreset),label("Tangents",tangentLink),tangentFields,tangentHelp);
   const removeSelected=button("Remove selected weight key",()=>{const key=selectedKey();if(key)deleteLayerWeightKey(store,active.value,key.time);});
   keyDetails.ontoggle=()=>refresh();
   keyList.onchange=()=>{selectedKeyId=keyList.value;refresh();};
@@ -46,7 +84,7 @@ export function createAnimationLayersPanel(store: SceneStore, options: { availab
   selectedValue.onchange=()=>{if(!cancelField&&!selectedValue.readOnly)run(()=>editSelectedKey({value:selectedValue.valueAsNumber}));};
   selectedInterpolation.onchange=()=>run(()=>editSelectedKey({interpolation:selectedInterpolation.value as CurveKey["interpolation"]}));
   const keyHelp=document.createElement("p");keyHelp.textContent="Select a weight key to edit its exact frame, value and outgoing interpolation. Middle-drag previews the numeric field; release commits once. Escape cancels. Right-click a numeric field to Lock or Unlock it.";
-  keyDetails.append(keyHeading,label("Keys",keyList),keyFields,label("Interpolation",selectedInterpolation),removeSelected,keyHelp);
+  keyDetails.append(keyHeading,label("Keys",keyList),keyFields,label("Interpolation",selectedInterpolation),tangentDetails,removeSelected,keyHelp);
   const checks = (["Mute", "Solo", "Locked"] as const).map(text => {const node=input(`Animation layer ${text.toLowerCase()}`,"checkbox");const row=label(text,node);row.className="layer-check";return {text,node,row};});
   const status=document.createElement("p");status.setAttribute("role","status");
   const summary=document.createElement("p");
@@ -63,13 +101,14 @@ export function createAnimationLayersPanel(store: SceneStore, options: { availab
   mode.onchange=()=>run(()=>updateAnimationLayer(store,active.value,{mode:mode.value as "additive"|"override"}));
   weight.onchange=()=>{if(!cancelField)run(()=>updateAnimationLayer(store,active.value,{weight:weight.valueAsNumber}));};
   checks.forEach(({text,node})=>node.onchange=()=>run(()=>updateAnimationLayer(store,active.value,{[text.toLowerCase()]:node.checked})));
-  [name,weight,keyValue,selectedFrame,selectedValue].forEach(node=>node.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();node.blur();}else if(event.key==="Escape"){event.preventDefault();cancelField=true;node.blur();cancelField=false;sampleSignature="";refresh();}}));
+  [name,weight,keyValue,selectedFrame,selectedValue,...tangentNumbers.map(item=>item.node)].forEach(node=>node.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();node.blur();}else if(event.key==="Escape"){event.preventDefault();cancelField=true;node.blur();cancelField=false;sampleSignature="";refresh();}}));
   element.append(style,intro,label("Active layer",active),summary,add,up,down,remove,label("Name",name),label("Blend mode",mode),label("Fallback weight",weight),sampled,label("Weight key value",keyValue),actions,keyDetails,...checks.map(check=>check.row),help,status);
   const refreshWeightLock=propertyInteraction(weight,()=>`layer:${active.value}:weight`);
   const refreshKeyLock=propertyInteraction(keyValue,()=>`layer:${active.value}:key-value`);
-  [selectedFrame,selectedValue].forEach(node=>node.addEventListener("pointerdown",event=>{if(event.button===1&&!node.disabled&&!node.readOnly)node.focus();}));
+  [selectedFrame,selectedValue,...tangentNumbers.map(item=>item.node)].forEach(node=>node.addEventListener("pointerdown",event=>{if(event.button===1&&!node.disabled&&!node.readOnly)node.focus();}));
   const refreshSelectedFrameLock=propertyInteraction(selectedFrame,()=>`layer:${active.value}:weight-key:${selectedKeyId}:frame`);
   const refreshSelectedValueLock=propertyInteraction(selectedValue,()=>`layer:${active.value}:weight-key:${selectedKeyId}:value`);
+  const refreshTangentLocks=tangentNumbers.map(({field,node})=>propertyInteraction(node,()=>`layer:${active.value}:weight-key:${selectedKeyId}:${field}`));
   let signature="",sampleSignature="";
   function refresh(){
     const animation=store.getState().document.animation,layers=animation?.layers??[],id=animation?.activeLayerId??"",layer=layers.find(layer=>layer.id===id),next=JSON.stringify(layers.map(layer=>[layer.id,layer.name]));
@@ -109,6 +148,14 @@ export function createAnimationLayersPanel(store: SceneStore, options: { availab
     keyList.disabled=!available||!keys.length;
     selectedFrame.disabled=selectedValue.disabled=selectedInterpolation.disabled=removeSelected.disabled=!available||!key||layer?.locked===true;
     refreshSelectedFrameLock();refreshSelectedValueLock();
+    tangentPreset.value=key?.tangentMode??"auto";tangentLink.value=key?.broken?"broken":"linked";
+    tangentPreset.disabled=tangentLink.disabled=selectedInterpolation.disabled;
+    const selectedIndex=keys.findIndex(item=>item.id===selectedKeyId);
+    tangentNumbers.forEach(({field,node})=>{
+      if(document.activeElement!==node)node.value=key?String(field.endsWith("Slope")?tangentSlope(keys,selectedIndex,field.startsWith("in")?"in":"out"):key[field]??1/3):"";
+      node.disabled=selectedInterpolation.disabled;
+    });
+    refreshTangentLocks.forEach(refreshLock=>refreshLock());
     const index=layers.findIndex(layer=>layer.id===id);up.disabled=!available||index<=0;down.disabled=!available||index<0||index===layers.length-1;remove.disabled=!available||!layer||layer.locked;
     const tracks=(animation?.tracks??[]).filter(track=>track.layerId===(id||undefined));summary.textContent=`${tracks.length} curves · ${tracks.reduce((count,track)=>count+track.keys.length,0)} keys on active layer`;
   }

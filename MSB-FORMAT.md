@@ -330,3 +330,19 @@ Transform nodes may also store `affine`: a finite nonsingular orientation-preser
 ### Converted mesh parts and viewport visibility
 
 Transform nodes may store `hidden: boolean` (default false), an undoable viewport visibility override applied alongside animated visibility without changing keys. Splat bindings may store `meshSpace: boolean` (default false). In meshSpace mode, the local deformation is the weighted sum of `jointWorld * inverse(restMatrix)`; the owning object transform is applied afterwards, matching imported polygon mesh skinning. Converted bind matrices are the inverses of the source mesh inverse binds, and sampled weights persist by splat index. Legacy bindings retain world-relative deformation.
+
+## Reusable texture assets (additive scene version 2 extension)
+
+`scene.textureAssets` optionally maps `tex_<SHA256 of original image bytes>` to a
+record containing `id`, `name`, `mime`, `byteLength`, `width`, `height`, `alpha`,
+`role` (`color` or `data`), `dataURI` (immutable original raster bytes), and
+`thumbnail` (embedded PNG, at most128px). Each original appears once in this
+shared registry. A mesh material texture stores exactly one source: an existing
+embedded `dataURI`, or an `assetId` referencing this registry. Sampler fields are
+unchanged. The current validator verifies content IDs, image bounds and all
+material references. The browser stages image decoding before committing an open.
+Standalone library entries survive deletion of their former scene users. Undo
+history, library selection and pending import/replace previews remain transient.
+The scene/container version identifiers remain2/1; no legacy migration is added.
+See [Texture Assets](docs/TEXTURE-ASSETS.md) for bounds, color/data semantics,
+replacement/relink behavior, provenance and the original portable example.

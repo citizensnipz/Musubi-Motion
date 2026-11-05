@@ -1,3 +1,4 @@
+import { validateTextureAssets } from "./texture-assets.ts";
 import { Matrix3 } from "three";
 import { BlobReader, BlobWriter, ZipReader, type FileEntry } from "@zip.js/zip.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -72,6 +73,7 @@ export function validateScene(value: unknown): SceneDocument {
     fail("Unsupported scene format or version. This build opens musubi-scene version 2; recreate or re-export older projects with a compatible build.");
   if (doc.upAxis !== "Y" || doc.units !== "unitless")
     fail("Unsupported scene units or axis.");
+  if (doc.textureAssets !== undefined) validateTextureAssets(doc.textureAssets);
   const nodes = record(doc.nodes),
     assets = record(doc.assets);
   for (const joint of (doc.joints ?? []) as import("./skeleton.ts").Joint[]) {
@@ -173,6 +175,10 @@ export function validateScene(value: unknown): SceneDocument {
     } else if (node.type === "meshShape") {
       if (parent === null) fail("Mesh shape has no transform.");
       validateMeshShape(node);
+      for (const material of (node.materials ?? []) as import("./mesh-materials.ts").MeshMaterialData[]) for (const slot of ["map","emissiveMap","normalMap","roughnessMap","metalnessMap","alphaMap","bumpMap"] as const) {
+        const assetId=material[slot]?.assetId;
+        if (assetId && !Object.hasOwn((doc.textureAssets ?? {}) as object, assetId)) fail("Missing material texture asset. Relink the texture before opening.");
+      }
       validateMeshSkin(node, new Set(((doc.joints ?? []) as import("./skeleton.ts").Joint[]).map(j => j.id)));
       shapeCounts.set(parent as string, (shapeCounts.get(parent as string) ?? 0) + 1);
     } else if (node.type === "particleShape") {

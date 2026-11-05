@@ -16,6 +16,8 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   contents.set("rigging", riggingContent);
   contents.set("terminal", terminalContent);
   const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", "ik-bake": "Bake IK to FK", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools", particles: "Particle Emitters" };
+  animationPanels["splat-components"] = "Splat Components";
+  animationPanels["texture-assets"] = "Texture Assets";
   animationPanels["joint-settings"] = "Joint Settings";
   animationPanels["rotation-curves"] = "Rotation Curves";
   animationPanels["animation-layers"] = "Animation Layers";
@@ -177,6 +179,8 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
     const existing = api.getPanel(id);
     if (existing) { existing.api.setActive(); return; }
     const attributeIds = ["driven-keys", "ik-handles", "ik-bake", "constraints", "controllers", "skin-weights", "paint-skin-weights", "modeling", "particles"];
+    attributeIds.push("splat-components");
+    attributeIds.push("texture-assets");
     attributeIds.push("joint-settings");
     attributeIds.push("rotation-curves");
     attributeIds.push("animation-layers");

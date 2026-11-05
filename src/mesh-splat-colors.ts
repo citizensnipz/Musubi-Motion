@@ -1,6 +1,6 @@
 import { Color, Texture, Vector2, type Wrapping } from "three";
 import type { MeshShapeNode } from "./scene-document";
-import { validateMeshMaterials, type MeshTextureData } from "./mesh-materials";
+import { validateMeshMaterials, meshTextureURI, type MeshTextureData } from "./mesh-materials";
 
 export type SplatColorRaster = { width: number; height: number; data: Uint8ClampedArray };
 type TriangleIds = [string, string, string];
@@ -68,7 +68,7 @@ function rasterChannel(raster: SplatColorRaster, uv: Vector2, source: MeshTextur
 export type SplatSurfaceAppearance = { color: Color; opacity: number };
 
 /** Sample material appearance only where the mesh surface uses each texture. */
-export async function createMeshSplatColors(shape: MeshShapeNode) {
+export async function createMeshSplatColors(shape: MeshShapeNode, assets?: Readonly<Record<string, import("./texture-assets.ts").TextureAsset>>) {
   if (shape.materials) validateMeshMaterials(shape.materials);
   const warnings = new Set<string>(), rasters = new Map<string, Promise<SplatColorRaster>>();
   const usedMaterials = shape.faces ? new Set(shape.faces.map(face => face.materialIndex ?? 0)) : undefined;
@@ -77,8 +77,9 @@ export async function createMeshSplatColors(shape: MeshShapeNode) {
     const coordinates = source.channel === 0 ? shape.uvs : shape.uvSets?.[String(source.channel)];
     if (!coordinates) throw Error(`Texture uses a missing UV set (${source.channel}).`);
     for (const vertex of shape.vertices) if (!coordinates[vertex.id]) throw Error("Texture is missing mesh UV coordinates.");
-    if (!rasters.has(source.dataURI)) rasters.set(source.dataURI, decodeRaster(source.dataURI));
-    const raster = await rasters.get(source.dataURI)!;
+    const uri = meshTextureURI(source, assets);
+    if (!rasters.has(uri)) rasters.set(uri, decodeRaster(uri));
+    const raster = await rasters.get(uri)!;
     const texture = new Texture();
     texture.wrapS = source.wrapS as Wrapping; texture.wrapT = source.wrapT as Wrapping;
     texture.repeat.fromArray(source.repeat); texture.offset.fromArray(source.offset); texture.center.fromArray(source.center);

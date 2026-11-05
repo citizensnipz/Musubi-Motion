@@ -1,13 +1,16 @@
-import { createController, findControllerShape, rebuildControllerCurve, updateControllerShape,
+import { createController, findControllerShape, patchedControllerShape, rebuildControllerCurve, updateControllerShape,
   type ControllerPlane, type ControllerPreset, type CurveControlPoint } from "./controller-curves.ts";
 import type { CurveShapeNode, TransformChannels } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
+import { propertyInteraction } from "./property-interaction.ts";
 
 type Options = {
   available: () => boolean;
   getSelection: () => string[];
   getPlacement: () => TransformChannels | undefined;
   onSelect: (transformId: string) => void;
+  onUseDriver?: (transformId: string) => void;
+  onPreviewShape?: (shape?: CurveShapeNode) => void;
 };
 
 export function createControllerPanel(store: SceneStore, options: Options) {
@@ -23,7 +26,7 @@ export function createControllerPanel(store: SceneStore, options: Options) {
     .controller-panel .controller-grid label{min-width:0}.controller-panel .controller-status{min-height:18px;overflow-wrap:anywhere}.controller-panel .controller-status[data-error=true]{color:#ce756a}
     .controller-panel .controller-cvs{overflow:auto;max-height:340px;border:1px solid var(--line)}.controller-panel table{border-collapse:collapse;width:100%;min-width:340px}.controller-panel th,.controller-panel td{padding:4px;text-align:left;border-bottom:1px solid var(--line)}
     .controller-panel th{position:sticky;top:0;background:var(--header);font-size:10px;color:var(--muted)}.controller-panel td input[type=number]{min-width:58px;padding:4px;font-size:11px}.controller-panel tr[data-selected=true]{background:var(--hover)}
-    .controller-panel td label{display:flex;gap:3px;align-items:center;margin:0;font-size:10px}.controller-panel td input[type=radio]{margin:0}.controller-panel details{margin:12px 0}.controller-panel summary{cursor:pointer;color:var(--muted)}.controller-panel textarea{font-family:monospace;font-size:11px;resize:vertical}`;
+    .controller-panel input[type=number]{text-align:right}.controller-panel td label{display:flex;gap:3px;align-items:center;margin:0;font-size:10px}.controller-panel td input[type=radio]{margin:0}.controller-panel details{margin:12px 0}.controller-panel summary{cursor:pointer;color:var(--muted)}.controller-panel textarea{font-family:monospace;font-size:11px;resize:vertical}`;
   element.append(style);
   const intro = document.createElement("p"); intro.textContent = "Create editable NURBS curve controls. Animate their transforms or use them as drivers for constraints and Set Driven Key."; element.append(intro);
   function label(text: string, control: HTMLElement) { const node=document.createElement("label");node.append(document.createTextNode(text),control);return node; }
@@ -72,6 +75,9 @@ export function createControllerPanel(store: SceneStore, options: Options) {
   const empty=document.createElement("p");empty.textContent="Select a curve control in the viewport, Outliner or list above to edit its shape.";element.append(empty);
   const shapeFields=group("Curve shape");
   const summary=document.createElement("p");shapeFields.append(summary);
+  shapeFields.append(button("Use as Set Driven Key driver",()=>run(()=>{
+    const shape=current();options.onSelect(shape.parentId);options.onUseDriver?.(shape.parentId);
+  })));
   const color=document.createElement("input");color.type="color";color.setAttribute("aria-label","Controller curve color");
   const closed=document.createElement("input");closed.type="checkbox";
   const closedLabel=label("Close endpoint seam",closed);closedLabel.className="controller-check";
@@ -100,7 +106,7 @@ export function createControllerPanel(store: SceneStore, options: Options) {
   },"Control vertex removed and knots rebuilt. Undo restores the previous shape."));
   remove.title="Remove the selected CV and rebuild clamped uniform knots. At least degree + 1 vertices must remain.";
   const cvActions=document.createElement("div");cvActions.className="controller-actions";cvActions.append(add,remove);shapeFields.append(cvActions);
-  const cvNote=document.createElement("p");cvNote.textContent="Select a CV with its radio button. Coordinate and weight edits commit on Enter or leaving the field; Escape cancels. Weights must be positive. Inserting or removing a CV rebuilds knots and changes the shape.";shapeFields.append(cvNote);
+  const cvNote=document.createElement("p");cvNote.textContent="Select a CV with its radio button. Coordinates and weights preview as you type or middle-drag; Enter, leaving the field or releasing commits one undo step. Escape cancels. Right-click a number to Lock/Unlock. Inserting or removing a CV rebuilds knots and changes the shape.";shapeFields.append(cvNote);
   const advanced=document.createElement("details"),advancedLabel=document.createElement("summary");advancedLabel.textContent="Advanced knot vector";
   const knots=document.createElement("textarea");knots.rows=3;knots.setAttribute("aria-label","Controller knot vector");
   const applyKnots=button("Apply knot vector",()=>run(()=>{
@@ -131,11 +137,22 @@ export function createControllerPanel(store: SceneStore, options: Options) {
         if(axis===3){input.min="0.000001";input.max="1000000";}else{input.min="-1000000";input.max="1000000";}
         input.step=axis===3?"0.01":"0.1";
         const shapeId=shape.id;
-        onCommit(input,()=>{
+        const patch=()=>{
           const latest=store.getState().document.nodes[shapeId];if(latest?.type!=="curveShape"||!latest.points[index])return;
           const points=latest.points.map(point=>[...point] as CurveControlPoint);points[index][axis]=finite(input);
-          updateControllerShape(store,shapeId,{points});
-        });
+          return {latest,points};
+        };
+        const preview=()=>{try{const value=patch();if(value)options.onPreviewShape?.(patchedControllerShape(value.latest,{points:value.points}));status.textContent="";}catch(error){options.onPreviewShape?.();status.textContent=error instanceof Error?error.message:String(error);}};
+        const commit=()=>{options.onPreviewShape?.();const value=patch();if(value)updateControllerShape(store,shapeId,{points:value.points});};
+        onCommit(input,commit);
+        input.addEventListener("input",preview);
+        input.addEventListener("blur",()=>options.onPreviewShape?.());
+        input.addEventListener("keydown",event=>{if(event.key==="Escape")options.onPreviewShape?.();});
+        // Native typing commits on blur above; the scrub helper emits its own
+        // change on release. A native change during Escape's blur must not commit.
+        input.addEventListener("change",event=>{if(!event.isTrusted)run(commit);});
+        input.addEventListener("pointerdown",event=>{if(event.button===1)input.focus();});
+        propertyInteraction(input,()=>`${shapeId}/cv/${index}/${axis}`,undefined,()=>({update:preview,end:()=>options.onPreviewShape?.()}));
         cvInputs.push({input,index,axis});cell.append(input);row.append(cell);
       }
       rows.append(row);
@@ -143,7 +160,7 @@ export function createControllerPanel(store: SceneStore, options: Options) {
   }
   function refresh(){
     const doc=store.getState().document,available=options.available(),selection=options.getSelection(),selectionKey=selection.join("|");
-    if(selectionSignature!==selectionKey){selectionSignature=selectionKey;const selected=findControllerShape(doc,selection.at(-1)??"");activeId=selected?.parentId??"";selectedCV=0;}
+    if(selectionSignature!==selectionKey){options.onPreviewShape?.();selectionSignature=selectionKey;const selected=findControllerShape(doc,selection.at(-1)??"");activeId=selected?.parentId??"";selectedCV=0;}
     const shapes=Object.values(doc.nodes).filter((node):node is CurveShapeNode=>node.type==="curveShape");
     const signature=JSON.stringify(shapes.map(shape=>[shape.parentId,doc.nodes[shape.parentId]?.name]));
     if(signature!==controllerSignature){
@@ -173,5 +190,5 @@ export function createControllerPanel(store: SceneStore, options: Options) {
     lastShape=shape;
   }
   store.subscribe(refresh);refresh();
-  return {element,refresh};
+  return {element,refresh,createPreset(value:ControllerPreset){preset.value=value;placement.checked=options.getSelection().length===1;create.click();}};
 }

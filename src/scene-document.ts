@@ -65,6 +65,7 @@ export type AssetRecord = { id: string } & (
   | { kind: "file"; fileName: string; byteLength: number }
 );
 export type SceneDocument = {
+  textureAssets?: Record<string, import("./texture-assets.ts").TextureAsset>;
   animation?: import("./animation.ts").AnimationData;
   drivenKeys?: import("./driven-keys.ts").DrivenKeyRelationship[];
   ikHandles?: import("./ik.ts").IKHandle[];

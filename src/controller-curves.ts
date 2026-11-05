@@ -86,13 +86,19 @@ export function createController(store: SceneStore, preset: ControllerPreset, op
 export function updateControllerShape(store: SceneStore, shapeId: string, patch: ControllerShapePatch): void {
   const doc = store.getState().document, shape = doc.nodes[shapeId];
   if (shape?.type !== "curveShape") throw Error("Controller curve does not exist.");
+  const next = patchedControllerShape(shape, patch);
+  if (JSON.stringify(next) === JSON.stringify(shape)) return;
+  store.setState({ document: { ...doc, nodes: { ...doc.nodes, [shapeId]: next } }, editLabel: "Edit controller curve" });
+}
+
+/** Validate a display-only draft without changing the authored document or undo history. */
+export function patchedControllerShape(shape: CurveShapeNode, patch: ControllerShapePatch): CurveShapeNode {
   const next: CurveShapeNode = { ...shape,
     ...(patch.degree !== undefined ? { degree: patch.degree } : {}), ...(patch.closed !== undefined ? { closed: patch.closed } : {}),
     ...(patch.color !== undefined ? { color: patch.color } : {}), ...(patch.points !== undefined ? { points: patch.points.map(point => [...point] as CurveControlPoint) } : {}),
     ...(patch.knots !== undefined ? { knots: [...patch.knots] } : {}) };
   validateCurveShape(next); sampleControllerCurve(next, 32);
-  if (JSON.stringify(next) === JSON.stringify(shape)) return;
-  store.setState({ document: { ...doc, nodes: { ...doc.nodes, [shapeId]: next } }, editLabel: "Edit controller curve" });
+  return next;
 }
 
 /** Rebuild changes the shape: CVs and weights remain, while custom knots are replaced. */

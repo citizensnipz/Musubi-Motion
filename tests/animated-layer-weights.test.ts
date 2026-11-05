@@ -4,7 +4,7 @@ import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import { addSplat, emptyScene } from "../src/scene-document.ts";
 import { createSceneStore } from "../src/scene-store.ts";
 import { addAnimationLayer, updateAnimationLayer, removeAnimationLayer, replaceLayerWeightTrack, setLayerWeightKey, deleteLayerWeightKey, clearLayerWeightCurve } from "../src/animation-layers.ts";
-import { defaultAnimation, evaluateLayerWeight, evaluateChannels, evaluateSceneAnimation, evaluateIKBlend, editingTracks, copyKeys, moveKeys, setKeys, setIKBlendKey, validateAnimation, type CurveKey, type AnimationTrack, type AnimationChannel } from "../src/animation.ts";
+import { defaultAnimation, tangentSlope, withTangent, evaluateLayerWeight, evaluateChannels, evaluateSceneAnimation, evaluateIKBlend, editingTracks, copyKeys, moveKeys, setKeys, setIKBlendKey, validateAnimation, type CurveKey, type AnimationTrack, type AnimationChannel } from "../src/animation.ts";
 import { encodeProject, decodeProject } from "../src/project-archive.ts";
 import { setDrivenKey } from "../src/driven-keys.ts";
 import { evaluateRigStages, jointWorldMatrices } from "../src/ik.ts";
@@ -168,5 +168,69 @@ describe("dedicated layer weight key-list edits",()=>{
    expect(layer.weightTrack!.keys).toEqual([{...first,interpolation},last]);
   }
   const layer=store.getState().document.animation!.layers![0];expect(evaluateLayerWeight(layer,2.75)).not.toBeCloseTo(.35);
+ });
+});
+
+
+describe("layer weight tangent authoring",()=>{
+ function tangentFixture(){
+  const store=fixture(),id=addAnimationLayer(store);
+  const keys:CurveKey[]=[{...key(.25,.2),id:"left",interpolation:"bezier"},{...key(5.5,.8),id:"middle",interpolation:"bezier",inWeight:1/3,outWeight:1/3,broken:true},{...key(10.75,.4),id:"right",interpolation:"bezier"}];
+  replaceLayerWeightTrack(store,id,{id:"tangent-track",keys});store.temporal.getState().clear();return {store,id,keys};
+ }
+ it("samples all presets at fractional endpoints/interiors and freezes fixed effective slopes",()=>{
+  const {store,id,keys}=tangentFixture(),original=store.getState().document;
+  // Equal one-third handles reduce to cubic Hermite; compare independent analytic values.
+  const hermite=(a:number,b:number,m0:number,m1:number,d:number,u:number)=>(2*u**3-3*u**2+1)*a+(u**3-2*u**2+u)*d*m0+(-2*u**3+3*u**2)*b+(u**3-u**2)*d*m1;
+  for(const mode of ["auto","clamped","flat","spline","fixed"] as const){
+   const slope=mode==="auto"||mode==="flat"?0:mode==="fixed"?.03:(.4-.2)/(10.75-.25);
+   const middle={...keys[1],tangentMode:mode,...(mode==="fixed"?{inSlope:.03,outSlope:.03}:{})};
+   replaceLayerWeightTrack(store,id,{id:"tangent-track",keys:[keys[0],middle,keys[2]]});
+   const layer=store.getState().document.animation!.layers![0];
+   for(const t of [-1,.25,5.5,10.75,20])expect(evaluateLayerWeight(layer,t)).toBe(t<=.25?.2:t>=10.75?.4:.8);
+   for(const u of [.125,.375,.75]){
+    expect(evaluateLayerWeight(layer,.25+5.25*u)).toBeCloseTo(hermite(.2,.8,.6/5.25,slope,5.25,u),6);
+    expect(evaluateLayerWeight(layer,5.5+5.25*u)).toBeCloseTo(hermite(.8,.4,slope,-.4/5.25,5.25,u),6);
+   }
+   const frozen=withTangent(layer.weightTrack!.keys,1,"in",tangentSlope(layer.weightTrack!.keys,1,"in"));
+   expect(frozen.inSlope).toBe(slope);expect(frozen.outSlope).toBe(slope);expect(frozen.tangentMode).toBe("fixed");
+   expect(layer.weightTrack!.keys[0]).toEqual(keys[0]);expect(layer.weightTrack!.keys[2]).toEqual(keys[2]);
+  }
+  expect(original.animation!.layers![0].weightTrack!.keys).toEqual(keys);
+ });
+ it("preserves opposite broken side and independent weights, links slopes with one undo and no-op history",()=>{
+  const {store,id,keys}=tangentFixture(),before=store.getState().document;
+  const edited=withTangent(keys,1,"out",-.07,.2);
+  expect(edited).toEqual({...keys[1],tangentMode:"fixed",inSlope:0,outSlope:-.07,outWeight:.2});
+  replaceLayerWeightTrack(store,id,{id:"tangent-track",keys:[keys[0],edited,keys[2]]});
+  expect(store.temporal.getState().pastStates).toHaveLength(1);
+  replaceLayerWeightTrack(store,id,store.getState().document.animation!.layers![0].weightTrack);
+  expect(store.temporal.getState().pastStates).toHaveLength(1);
+  store.temporal.getState().undo();expect(store.getState().document).toBe(before);store.temporal.getState().redo();
+  const linkedKeys=[keys[0],{...edited,broken:false},keys[2]],linked=withTangent(linkedKeys,1,"in",.04,.6);
+  expect(linked.inSlope).toBe(.04);expect(linked.outSlope).toBe(.04);expect(linked.inWeight).toBe(.6);expect(linked.outWeight).toBe(.2);
+  const back=withTangent([keys[0],{...linked,broken:true},keys[2]],1,"in",-.02,.1);
+  expect(back.outSlope).toBe(.04);expect(back.outWeight).toBe(.2);expect(back.inSlope).toBe(-.02);
+ });
+ it("rejects invalid slopes/weights and owner lock atomically with identities intact",()=>{
+  const {store,id,keys}=tangentFixture(),doc=store.getState().document;
+  for(const [slope,weight] of [[NaN,.2],[Infinity,.2],[1e13,.2],[.1,-.01],[.1,1.01],[.1,NaN]]){
+   expect(()=>replaceLayerWeightTrack(store,id,{id:"tangent-track",keys:[keys[0],withTangent(keys,1,"out",slope,weight),keys[2]]})).toThrow();
+   expect(store.getState().document).toBe(doc);expect(store.temporal.getState().pastStates).toHaveLength(0);
+  }
+  for(const patch of [{inSlope:NaN},{outSlope:Infinity},{inWeight:-.1},{outWeight:1.1},{broken:"yes"}]){
+   expect(()=>replaceLayerWeightTrack(store,id,{id:"tangent-track",keys:[keys[0],{...keys[1],...patch} as CurveKey,keys[2]]})).toThrow();expect(store.getState().document).toBe(doc);
+  }
+  updateAnimationLayer(store,id,{locked:true});const locked=store.getState().document,count=store.temporal.getState().pastStates.length;
+  expect(()=>replaceLayerWeightTrack(store,id,{id:"tangent-track",keys:[keys[0],withTangent(keys,1,"out",.2,.4),keys[2]]})).toThrow(/Unlock/);
+  expect(store.getState().document).toBe(locked);expect(store.temporal.getState().pastStates).toHaveLength(count);
+ });
+ it("roundtrips edited tangent identities, fractional composite samples and original document",async()=>{
+  const {store,id,keys}=tangentFixture();setTracks(store,[curve("position.x",4,id)]);
+  const edited=withTangent(keys,1,"out",-.07,.2);replaceLayerWeightTrack(store,id,{id:"tangent-track",keys:[keys[0],edited,keys[2]]});
+  const doc=store.getState().document,source=JSON.stringify(doc),loaded=await decodeProject(await encodeProject(doc,new Map(),editor));
+  expect(loaded.scene).toEqual(doc);
+  for(const f of [20,.25,7.125,-1,10.75,2.875,5.5])expect(evaluateChannels(loaded.scene,"object",f)).toEqual(evaluateChannels(doc,"object",f));
+  expect(JSON.stringify(doc)).toBe(source);
  });
 });

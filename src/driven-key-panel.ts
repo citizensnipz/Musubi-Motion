@@ -203,5 +203,9 @@ export function createDrivenKeyPanel(store: SceneStore, options: Options) {
   }
   // Scene shortcuts must not interpret text editing or Delete in this dedicated editor.
   store.subscribe(refresh); refresh();
-  return { element, refresh };
+  return { element, refresh, loadDriver(id:string) {
+    refresh();
+    if(!Array.from(driver.target.options).some(option=>option.value===id))return;
+    driver.target.value=id;updateChannels(driver);sample(driver);driver.channel.focus();
+  } };
 }

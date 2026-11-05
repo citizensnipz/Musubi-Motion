@@ -1,7 +1,8 @@
 import { Color, Material, MeshStandardMaterial, NoColorSpace, SRGBColorSpace, Texture, TextureLoader, Vector2, type Side, type Wrapping } from "three";
 
 export type MeshTextureData = {
-  dataURI: string;
+  dataURI?: string;
+  assetId?: string;
   wrapS: number; wrapT: number;
   repeat: [number, number]; offset: [number, number]; center: [number, number];
   rotation: number; flipY: boolean; channel: number;
@@ -32,8 +33,8 @@ export function validateMeshMaterials(value: unknown): asserts value is MeshMate
       throw Error("Invalid mesh material.");
     for (const slot of MESH_TEXTURE_SLOTS) {
       const texture = material[slot]; if (texture === undefined) continue;
-      if (!texture || typeof texture !== "object" || typeof texture.dataURI !== "string" || texture.dataURI.length > 32 * 1024 * 1024
-        || !dataURI.test(texture.dataURI) || ![1000, 1001, 1002].includes(texture.wrapS) || ![1000, 1001, 1002].includes(texture.wrapT)
+      if (!texture || typeof texture !== "object" || !(typeof texture.dataURI === "string" && texture.dataURI.length <= 32 * 1024 * 1024 && dataURI.test(texture.dataURI) && texture.assetId === undefined
+          || typeof texture.assetId === "string" && /^tex_[a-f0-9]{64}$/.test(texture.assetId) && texture.dataURI === undefined) || ![1000, 1001, 1002].includes(texture.wrapS) || ![1000, 1001, 1002].includes(texture.wrapT)
         || !pair(texture.repeat) || !pair(texture.offset) || !pair(texture.center) || !finite(texture.rotation, -1e6, 1e6)
         || typeof texture.flipY !== "boolean" || !Number.isInteger(texture.channel) || texture.channel < 0 || texture.channel > 3)
         throw Error("Invalid mesh texture: only embedded raster images are supported.");
@@ -90,7 +91,7 @@ function opaqueTextureChannel(texture: Texture | null, channel: number): boolean
 }
 
 /** The only loadable sources are validated data URIs; never resolve file or web URLs. */
-export function createMaterials(data: MeshMaterialData[], flat: boolean, wire: boolean): MeshStandardMaterial[] {
+export function createMaterials(data: MeshMaterialData[], flat: boolean, wire: boolean, assets?: Readonly<Record<string, import("./texture-assets.ts").TextureAsset>>): MeshStandardMaterial[] {
   validateMeshMaterials(data);
   return data.map(d => {
     const material = new MeshStandardMaterial({ color: d.color, emissive: d.emissive, emissiveIntensity: d.emissiveIntensity,
@@ -111,9 +112,10 @@ export function createMaterials(data: MeshMaterialData[], flat: boolean, wire: b
     };
     for (const slot of MESH_TEXTURE_SLOTS) {
       const source = d[slot]; if (!source) continue;
+      const uri = meshTextureURI(source, assets);
       // Headless conversion/tests retain the serializable source without decoding.
-      const texture = typeof document === "undefined" ? new Texture() : new TextureLoader().load(source.dataURI, () => { if (slot === "map" || slot === "alphaMap") updateBlending(); });
-      texture.userData.musubiDataURI = source.dataURI;
+      const texture = typeof document === "undefined" ? new Texture() : new TextureLoader().load(uri, () => { if (slot === "map" || slot === "alphaMap") updateBlending(); });
+      texture.userData.musubiDataURI = uri;
       texture.wrapS = source.wrapS as Wrapping; texture.wrapT = source.wrapT as Wrapping;
       texture.repeat.fromArray(source.repeat); texture.offset.fromArray(source.offset); texture.center.fromArray(source.center);
       texture.rotation = source.rotation; texture.flipY = source.flipY; texture.channel = source.channel;
@@ -133,4 +135,11 @@ export function disposeMaterials(input: Material | Material[]) {
     material.dispose();
   }
   textures.forEach(texture => texture.dispose());
+}
+
+/** Resolve only embedded validated sources; never fetch a filesystem or network path. */
+export function meshTextureURI(source: MeshTextureData, assets?: Readonly<Record<string, import("./texture-assets.ts").TextureAsset>>): string {
+  const uri = source.assetId ? assets?.[source.assetId]?.dataURI : source.dataURI;
+  if (!uri || !dataURI.test(uri)) throw Error("Missing texture asset. Relink the material texture before continuing.");
+  return uri;
 }

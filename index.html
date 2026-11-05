@@ -52,6 +52,7 @@
             <wa-dropdown-item id="open"
               ><span slot="icon" data-icon="import"></span>Import</wa-dropdown-item
             >
+            <wa-dropdown-item id="texture-import"><span slot="icon" data-icon="import"></span>Import Texture…</wa-dropdown-item>
             <wa-dropdown-item id="scene-save"
               ><span slot="icon" data-icon="save"></span>Save<kbd slot="details"
                 >Ctrl+S</kbd
@@ -83,7 +84,16 @@
               ></wa-dropdown-item
             >
           </wa-dropdown>
-          <wa-dropdown id="view-menu" size="s" placement="bottom-start"><wa-button slot="trigger" size="s" appearance="plain" variant="neutral">View</wa-button><wa-dropdown-item id="view-properties">Properties</wa-dropdown-item><wa-dropdown-item id="view-outliner">Outliner</wa-dropdown-item><wa-dropdown-item id="view-viewport">Viewport</wa-dropdown-item><wa-dropdown-item id="view-timeline">Timeline</wa-dropdown-item><wa-dropdown-item id="view-terminal">Terminal</wa-dropdown-item></wa-dropdown><wa-dropdown id="rigging-menu" size="s" placement="bottom-start">
+          <wa-dropdown id="select-menu" size="s" placement="bottom-start">
+            <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Select</wa-button>
+            <wa-dropdown-item id="select-splat-components">Splat Components <kbd slot="details">F8</kbd></wa-dropdown-item>
+            <wa-dropdown-item id="select-object-mode">Object Mode</wa-dropdown-item>
+            <wa-dropdown-item id="select-splats-all">All Splats</wa-dropdown-item>
+            <wa-dropdown-item id="select-splats-none">Deselect Splats</wa-dropdown-item>
+            <wa-dropdown-item id="select-splats-invert">Invert Splats</wa-dropdown-item>
+            <wa-dropdown-item id="view-splat-components">Splat Components Panel</wa-dropdown-item>
+          </wa-dropdown>
+          <wa-dropdown id="view-menu" size="s" placement="bottom-start"><wa-button slot="trigger" size="s" appearance="plain" variant="neutral">View</wa-button><wa-dropdown-item id="view-properties">Properties</wa-dropdown-item><wa-dropdown-item id="view-outliner">Outliner</wa-dropdown-item><wa-dropdown-item id="view-viewport">Viewport</wa-dropdown-item><wa-dropdown-item id="view-timeline">Timeline</wa-dropdown-item><wa-dropdown-item id="view-texture-assets">Texture Assets</wa-dropdown-item><wa-dropdown-item id="view-terminal">Terminal</wa-dropdown-item></wa-dropdown><wa-dropdown id="rigging-menu" size="s" placement="bottom-start">
             <wa-button slot="trigger" size="s" appearance="plain" variant="neutral">Rigging</wa-button>
             <wa-dropdown-item id="rigging-open"><span slot="icon" data-icon="sidebar"></span>Rigging Panel</wa-dropdown-item>
             <wa-dropdown-item id="view-ik-handles">IK Handles</wa-dropdown-item>
@@ -91,6 +101,9 @@
             <wa-dropdown-item id="view-joint-mirror">Mirror Joints / Pose</wa-dropdown-item>
             <wa-dropdown-item id="view-constraints">Constraints</wa-dropdown-item>
             <wa-dropdown-item id="view-controllers">Curve Controls</wa-dropdown-item>
+            <wa-dropdown-item id="create-circle-control">Create Circle Control</wa-dropdown-item>
+            <wa-dropdown-item id="create-square-control">Create Square Control</wa-dropdown-item>
+            <wa-dropdown-item id="create-arrow-control">Create Arrow Control</wa-dropdown-item>
             <wa-dropdown-item id="view-skin-weights">Skin Weights</wa-dropdown-item>
             <wa-dropdown-item id="view-paint-skin-weights">Paint Skin Weights</wa-dropdown-item>
           </wa-dropdown>

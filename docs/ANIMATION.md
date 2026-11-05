@@ -313,6 +313,57 @@ samples and 385 scene-time samples before and after native archive readback.
 
 ## FK, IK, binding, and elasticity
 
+### Build a joint controller with Set Driven Key
+
+Open [examples/controller-sdk-rig.msb](../examples/controller-sdk-rig.msb) for an
+original three-joint arm with a rational NURBS elbow control. Its Rotation X
+drives Elbow Rotation Z; frames 0, 24 and 48 curl and return the arm. Regenerate
+with `node scripts/create-controller-sdk-example.mjs`, which checks 193 fractional
+frame samples before and after archive readback. The scene contains no external
+assets, binding or IK handle.
+
+1. Select a joint in **View > Outliner**, then use **Rigging > Create Circle
+   Control**, **Create Square Control** or **Create Arrow Control**. The new root
+   control matches the one selected object's or joint's evaluated world pose and
+   becomes selected. With no selection it is created at the origin. For explicit
+   name, plane and size settings, use **Rigging > Curve Controls**. Direct actions
+   use those panel settings and automatically enable matching for one selection.
+2. In **Curve Controls**, click **Use as Set Driven Key driver**. This opens
+   **Animation > Set Driven Key**, loads the control and focuses its Driver
+   attribute. Choose **rotation.x**. Choose the joint as Driven object and
+   **rotation.z** as its attribute.
+3. Enter Driver **0**, Driven **0**, then **Set driven key**. Enter Driver **90**,
+   Driven **100**, and key again. These draft values author the mapping; the
+   control's actual transform is edited in **View > Properties**.
+4. Edit a response value in the relationship table, or choose **Edit curve in
+   Graph Editor** for key/tangent editing. Response changes are ordinary undoable
+   document edits. Each driven attribute supports one driver; cycles and time
+   keys on the same output channel are rejected atomically.
+5. Select the control, open **View > Properties**, enter Rotation X **0** at
+   frame **0**, and click its **Key Rotation X** diamond. At frame **24**, enter
+   **90** and key that channel again. Scrub frame **12**: with the 0→100 mapping
+   the elbow rotates **50°**. **S** keys all supported selected channels; the
+   channel diamond keys just the intended driver.
+6. **File > Save scene**, then **Open scene** preserves the rational control,
+   CV edits, SDK response and driver time keys. Reopen the appropriate dock using
+   View, Rigging or Animation if a saved workspace places it behind another tab.
+
+CV coordinates and rational weights preview directly in the viewport while
+typing or middle-dragging. Enter/blur or drag release commits one undo step;
+Escape restores the authored shape. Right-click a number for Lock/Unlock.
+Preview geometry stays outside the scene/archive and history. CV selection is
+numeric in the panel; viewport CV handles remain a separate capability.
+
+This adapts Maya's [NURBS primitive creation](https://help.autodesk.com/cloudhelp/2025/ENU/Maya-Modeling/files/GUID-47BBC51D-CEBF-4233-B2DF-AF3E6A6AB8AA.htm)
+and [Set Driven Key window](https://help.autodesk.com/cloudhelp/2022/ENU/Maya-Animation/files/GUID-D2B1C7EF-F177-4B0E-9E41-B479CFF2AFD4.htm):
+named curve primitives, driver/driven object and channel loading, and explicit
+value-pair keying. Musubi groups rig controls under Rigging, keeps SDK under
+Animation, and offers direct world-pose matching as a browser-friendly shortcut.
+No shortcut is added and native field focus/text editing is preserved. The new
+commands use text labels and original application UI; no Autodesk assets are
+copied. Sampling reuses installed Three.js 0.180.0's MIT-licensed NURBSCurve;
+there are no new dependencies, services or format changes.
+
 The Rigging panel already supports joint creation, parenting, FK rotation,
 binding, unbinding, and elasticity. Select a splat and Shift-select joints before
 **Bind splats**. Automatic distance weights use up to four influences per splat.
@@ -953,3 +1004,18 @@ field. Right-click either numeric field for Lock/Unlock. A locked animation laye
 allows viewing the list and prevents all curve edits. Undo/redo and current MSB
 save/reopen preserve the complete curve. Weight keys remain independent of the
 pose Graph Editor and Dope Sheet.
+
+
+Expand **Tangents** within the selected weight key to choose Auto, Clamped, Flat,
+Spline or Fixed. These controls use Bezier interpolation. Fixed freezes the
+current effective slopes. **Broken** lets in/out slopes change independently;
+**Linked** aligns slopes to the current in slope and future slope edits move both
+sides together. Handle weights remain independent in either state.
+
+In/out slopes use weight units per frame. Handle weights range from 0 to 1 of
+the adjoining segment duration (default one-third). Editing either numeric
+handle switches the key to Fixed; other keys and the opposite broken handle
+retain their metadata. These fields support the same Enter, Escape, middle-drag
+and per-key Lock/Unlock interactions as Frame and Value. Preset changes retain
+stored handle metadata, so switching back to Fixed freezes the currently sampled
+preset slopes. No document changes occur during numeric drag drafts.

@@ -45,12 +45,12 @@ function geometryFor(shape: MeshShapeNode) {
 }
 
 /** Document topology is separate from triangulated GPU buffers and face hit mapping. */
-export function createMeshRenderable(shape: MeshShapeNode) {
+export function createMeshRenderable(shape: MeshShapeNode, assets?: Readonly<Record<string, import("./texture-assets.ts").TextureAsset>>) {
   validateMeshShape(shape);
   let data = geometryFor(shape), previous = shape, disposed = false, previewing = false;
   const material = new MeshStandardMaterial({ color: shape.color, roughness: .8, metalness: 0,
     side: DoubleSide, flatShading: shape.shading === "flat", polygonOffset: shape.wireframe, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  let importedMaterials = shape.materials ? createMaterials(shape.materials, shape.shading === "flat", shape.wireframe) : undefined;
+  let importedMaterials = shape.materials ? createMaterials(shape.materials, shape.shading === "flat", shape.wireframe, assets) : undefined;
   const mesh = new Mesh(data.geometry, material);
   if (importedMaterials) mesh.material = (importedMaterials.length === 1 ? importedMaterials[0] : importedMaterials) as unknown as MeshStandardMaterial; mesh.name = shape.name;
   const lineMaterial = new LineBasicMaterial({ color: 0x252525, transparent: true, opacity: .75 });
@@ -131,7 +131,7 @@ export function createMeshRenderable(shape: MeshShapeNode) {
       updateWirePositions(); edges.geometry.computeBoundingBox(); edges.geometry.computeBoundingSphere();
       bounds.copy(mesh.geometry.boundingBox!);
     },
-    update(next: MeshShapeNode) {
+    update(next: MeshShapeNode, nextAssets = assets) {
       if (disposed) throw Error("Cannot update a disposed mesh renderer.");
       validateMeshShape(next);
       if ((previous.skin && !next.skin) || (previous.morphTargets && !next.morphTargets)) { previewing = true; clearPreview(); }
@@ -140,14 +140,15 @@ export function createMeshRenderable(shape: MeshShapeNode) {
         mesh.geometry = replacement.geometry; edges.geometry = replacement.edges; data = replacement;
         bounds.copy(replacement.geometry.boundingBox!); previewing = false; oldGeometry.dispose(); oldEdges.dispose();
       } else clearPreview();
-      if (next.materials !== previous.materials || next.shading !== previous.shading || next.wireframe !== previous.wireframe) {
+      if (nextAssets !== assets || next.materials !== previous.materials || next.shading !== previous.shading || next.wireframe !== previous.wireframe) {
         if (importedMaterials) disposeMaterials(importedMaterials);
-        importedMaterials = next.materials ? createMaterials(next.materials, next.shading === "flat", next.wireframe) : undefined;
+        importedMaterials = next.materials ? createMaterials(next.materials, next.shading === "flat", next.wireframe, nextAssets) : undefined;
         mesh.material = importedMaterials ? (importedMaterials.length === 1 ? importedMaterials[0] : importedMaterials) as unknown as MeshStandardMaterial : material;
       }
       const flatShading = next.shading === "flat";
       if (material.flatShading !== flatShading) { material.flatShading = flatShading; material.needsUpdate = true; }
       material.color.set(next.color); material.polygonOffset = next.wireframe;
+      assets = nextAssets;
       mesh.name = next.name; edges.visible = next.wireframe; previous = next;
     },
     dispose() {
