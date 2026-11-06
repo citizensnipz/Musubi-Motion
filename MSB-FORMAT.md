@@ -63,6 +63,7 @@ atomically. Optional absent animation/rig fields retain authored fallbacks.
 | `joints` | Joint IDs/names, parent IDs, local position, optional XYZ Euler `rotation` and `preferredAngle` in degrees |
 | `SplatShape.binding` | Influence joint IDs, matching rest matrices, optional sparse `weights` |
 | `SplatShape.elasticity` | Stretch/spacing/expansion, allocation budget, optional density/distribution, selected connection scope |
+| `SplatShape.componentEdits` | Optional version 1, original `sourceCount`, and disjoint `hidden`/`deleted` arrays of start-inclusive, end-exclusive original-index ranges. Sorted, non-adjacent ranges per array; at most 16,384 combined. The decoded original count must match before the scene is installed. |
 | `CurveShape` | `type: "curveShape"`, ID/name/parent ID, `degree`, weighted `points`, `knots`, `closed`, `color` |
 | `MeshShape` | `type: "meshShape"`, ID/name/parent ID, `vertices` with stable IDs/local positions, `faces` with stable IDs/ordered vertex IDs, `color`, `shading`, `wireframe`, optional `skin`, `materials`, `uvs`, `uvSets`, `normals`, `morphTargets` |
 | Mesh `skin` | `jointIds`, matching `inverseBindMatrices` (16 finite numbers each), and `weights` keyed by vertex ID with 1–4 normalized `{ joint: index, weight }` influences. Imported rest vertices are in the FBX bind frame; joint world matrices multiplied by inverse binds deform them before the mesh object's transform. |

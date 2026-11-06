@@ -27,12 +27,17 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
  const elastic = elasticity ? createElasticRuntime(mesh,skin,rests,binding.jointIds,joints,elasticity) : undefined;
  let transforms=rests.map(()=>new THREE.Matrix4());
  let selection:ReturnType<typeof posedSelection>|undefined, signature="";
+ let active: ((index:number)=>boolean) | undefined;
  let disposed=false;
  function validateIndex(index:number) {
   if(disposed)throw Error("Skin binding has been disposed.");
   if(!Number.isInteger(index)||index<0||index>=componentCount)throw Error("Choose an original splat component index within this object's range.");
  }
  return { componentCount,
+ setComponentActive(next:typeof active) {
+  if (active === next) return;
+  active = next; selection = undefined; elastic?.setComponentActive(next);
+ },
  getWeights(index:number):SkinInfluence[] {
   validateIndex(index);
   // Elasticity changes original scales, but preserves their rest centers.
@@ -42,8 +47,9 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
   indices.forEach(validateIndex);
   const positions=new Float32Array(indices.length*3),matrix=new THREE.Matrix4();
   indices.forEach((index,output)=>{
+   if(active && !active(index)){positions.fill(NaN,output*3,output*3+3);return;}
    const splat=source.getSplat(index);
-   if(splat.opacity<mesh.minRaycastOpacity){positions.fill(NaN,output*3,output*3+3);return;}
+   if(splat.opacity*(mesh.opacity??1)<mesh.minRaycastOpacity){positions.fill(NaN,output*3,output*3+3);return;}
    matrix.elements.fill(0);
    for(let k=0;k<4;k++) {
     const packed=skin.skinData[index*4+k],weight=(packed&255)/255,bone=transforms[packed>>8];
@@ -60,7 +66,7 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
   const currentMatrices = binding.jointIds.map((id,i)=>{ const matrix=boneMatrix(id); return matrix ? (binding.meshSpace ? matrix.clone() : inverse.clone().multiply(matrix)) : rests[i].clone(); });
   elastic?.update(currentMatrices);
   transforms=currentMatrices.map((m,i)=>m.clone().multiply(inverseRests[i]));
-  const next=transforms.map(m=>m.elements.join(",")).join(";")+":"+mesh.extSplats?.numSplats;
+  const next=transforms.map(m=>m.elements.join(",")).join(";")+":"+mesh.extSplats?.numSplats+":"+mesh.opacity;
   if(next!==signature){selection=undefined;signature=next;}
   transforms.forEach((matrix,i)=>skin.setBoneMatrix(i,matrix));
   skin.updateBones();
@@ -68,7 +74,8 @@ export function createBinding(mesh: SplatMesh, binding: NonNullable<SplatShapeNo
   // A weighted point lies within the union of its positive-weight transformed
   // bounds. This avoids reading every splat just to draw a playback selection box.
   const result=new THREE.Box3();
+  if (bounds.isEmpty()) return result;
   for(const matrix of transforms)result.union(bounds.clone().applyMatrix4(matrix));
   return result;
- }, selection() { return selection??=posedSelection(mesh,skin,transforms); }, dispose() { if(disposed)return;disposed=true;elastic?.dispose(); mesh.skinning=null; mesh.updateGenerator(); skin.skinTexture.dispose();skin.boneTexture.dispose(); } };
+ }, selection() { return selection??=posedSelection(mesh,skin,transforms,active); }, dispose() { if(disposed)return;disposed=true;elastic?.dispose(); mesh.skinning=null; mesh.updateGenerator(); skin.skinTexture.dispose();skin.boneTexture.dispose(); } };
 }

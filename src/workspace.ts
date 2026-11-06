@@ -18,6 +18,7 @@ export function mountWorkspace(riggingContent: HTMLElement, terminalContent: HTM
   const animationPanels: Record<string, string> = { graph: "Graph Editor", "dope-sheet": "Dope Sheet", "driven-keys": "Set Driven Key", "ik-handles": "IK Handles", "ik-bake": "Bake IK to FK", constraints: "Constraints", controllers: "Curve Controls", "skin-weights": "Skin Weights", "paint-skin-weights": "Paint Skin Weights", modeling: "Mesh Tools", particles: "Particle Emitters" };
   animationPanels["splat-components"] = "Splat Components";
   animationPanels["texture-assets"] = "Texture Assets";
+  animationPanels["texture-graph"] = "Texture Graph";
   animationPanels["joint-settings"] = "Joint Settings";
   animationPanels["rotation-curves"] = "Rotation Curves";
   animationPanels["animation-layers"] = "Animation Layers";

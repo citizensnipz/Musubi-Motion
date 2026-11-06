@@ -1,9 +1,11 @@
+import { validateProceduralGraph } from "./procedural-graph.ts";
 import { validateTextureAssets } from "./texture-assets.ts";
 import { Matrix3 } from "three";
 import { BlobReader, BlobWriter, ZipReader, type FileEntry } from "@zip.js/zip.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { validateJoints } from "./skeleton.ts";
 import { validateElasticity } from "./elasticity";
+import { validateSplatComponentEdits } from "./splat-component-edits.ts";
 import { validateAnimation } from "./animation.ts";
 import { validateDrivenKeys } from "./driven-keys.ts";
 import { validateIKHandles } from "./ik.ts";
@@ -74,6 +76,7 @@ export function validateScene(value: unknown): SceneDocument {
   if (doc.upAxis !== "Y" || doc.units !== "unitless")
     fail("Unsupported scene units or axis.");
   if (doc.textureAssets !== undefined) validateTextureAssets(doc.textureAssets);
+  if (doc.proceduralGraph !== undefined) validateProceduralGraph(doc.proceduralGraph, doc.textureAssets as SceneDocument["textureAssets"]);
   const nodes = record(doc.nodes),
     assets = record(doc.assets);
   for (const joint of (doc.joints ?? []) as import("./skeleton.ts").Joint[]) {
@@ -144,6 +147,7 @@ export function validateScene(value: unknown): SceneDocument {
         fail("Unsupported rotation order or scale.");
       parents.set(key, parent as string | null);
     } else if (node.type === "splatShape") {
+      if (node.componentEdits !== undefined) validateSplatComponentEdits(node.componentEdits);
       if (node.elasticity !== undefined) {
         validateElasticity(node.elasticity);
         if (!node.binding) fail("Elasticity requires a binding.");

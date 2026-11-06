@@ -196,6 +196,7 @@ Capture reconstruction, model training, and recorded 4D splat playback are outsi
 The adapted two-bone solver retains [ozz-animation's MIT notice](public/licenses/ozz-animation.txt), also included in production builds.
 Polygon validation and triangulation retain [Earcut's ISC notice](public/licenses/earcut.txt), also included in production builds.
 Particle simulation retains [Nebula's MIT notice](public/licenses/three-nebula.txt) and notices for its bundled [Lodash](public/licenses/nebula-lodash.txt), [potpack](public/licenses/nebula-potpack.txt), and [uuid](public/licenses/nebula-uuid.txt) utilities in production builds.
+The Texture Graph canvas includes [React Flow, React, and their dependency notices](public/licenses/texture-graph-canvas.txt) in production builds.
 
 Object pivots are saved and undoable. Moving a pivot keeps the object and its descendants in place at the current evaluated frame; existing animation keys stay unchanged, and subsequent rotation/scale evaluates around the new pivot. Camera dolly has no scene-relative maximum distance, and F frames the selection without changing the viewing direction.
 

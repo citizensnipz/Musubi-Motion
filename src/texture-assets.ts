@@ -4,6 +4,8 @@ import type { MeshShapeNode, SceneDocument } from "./scene-document.ts";
 import type { SceneStore } from "./scene-store.ts";
 
 export const TEXTURE_LIMITS = { bytes: 16 * 1024 * 1024, pixels: 16_777_216, dimension: 8192, libraryBytes: 64 * 1024 * 1024, count: 512 } as const;
+import { graphTextureReferences, relinkGraphTexture } from "./procedural-graph.ts";
+
 export type TextureRole = "color" | "data";
 export type TextureAsset = {
   id: string; name: string; mime: string; byteLength: number; width: number; height: number;
@@ -159,11 +161,13 @@ export function relinkTexture(doc: SceneDocument, from: string, to: string): Sce
       return next;
     })};
   }
-  return refs.length ? {...doc,nodes} : doc;
+  const graph = relinkGraphTexture(doc.proceduralGraph, from, to, doc.textureAssets);
+  return refs.length || graph !== doc.proceduralGraph ? {...doc,nodes,proceduralGraph:graph} : doc;
 }
 export function removeTexture(doc: SceneDocument, id: string): SceneDocument {
   if (!doc.textureAssets?.[id]) return doc;
-  if (textureReferences(doc,id).length) throw Error("Texture is referenced by materials. Relink its references before deleting.");
+  if (textureReferences(doc,id).length || graphTextureReferences(doc.proceduralGraph,id).length)
+    throw Error("Texture is referenced by materials or the texture graph. Relink its references before deleting.");
   const assets={...doc.textureAssets}; delete assets[id]; return {...doc,textureAssets:assets};
 }
 export function replaceTexture(doc: SceneDocument, id: string, replacement: TextureAsset): SceneDocument {

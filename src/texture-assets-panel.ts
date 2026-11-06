@@ -1,3 +1,4 @@
+import { graphTextureReferences } from "./procedural-graph.ts";
 import type { SceneStore } from "./scene-store.ts";
 import { addTexture, commitTextureCommand, prepareTexture, relinkTexture, removeTexture, replaceTexture, setTextureRole, textureReferences, type TextureAsset, type TextureRole } from "./texture-assets.ts";
 import "./texture-assets.css";
@@ -26,7 +27,7 @@ export function createTextureAssetsPanel(store: SceneStore, options: {available:
   const metadata=document.createElement("p");metadata.className="texture-metadata";
   const references=document.createElement("p");
   const target=document.createElement("select");target.setAttribute("aria-label","Relink destination texture");
-  const relink=makeButton("Relink material references",()=>run(()=>{commitTextureCommand(store,"Relink texture",doc=>relinkTexture(doc,selected,target.value));report("Material references relinked. The unused source can now be deleted.");}));
+  const relink=makeButton("Relink material references",()=>run(()=>{commitTextureCommand(store,"Relink texture",doc=>relinkTexture(doc,selected,target.value));report("References relinked. The unused source can now be deleted.");}));
   details.append(metadata,label("Default role",role),references,label("Relink references to",target),relink);
   const pendingImage=document.createElement("img");pendingImage.alt="Pending texture preview";
   const pendingText=document.createElement("p");
@@ -71,14 +72,17 @@ export function createTextureAssetsPanel(store: SceneStore, options: {available:
     }
     for(const row of Array.from(list.querySelectorAll<HTMLButtonElement>("button"))){row.setAttribute("aria-pressed",String(row.dataset.textureId===selected));row.disabled=!available()||!!pending;}
     const asset=doc.textureAssets?.[selected], refs=asset?textureReferences(doc,selected):[];
-    importButton.disabled=!available()||!!pending;replaceButton.disabled=!asset||!available()||!!pending;removeButton.disabled=!asset||!available()||!!pending||!!refs.length;
-    removeButton.title=refs.length?"Referenced textures must be relinked before deletion":"Delete this unreferenced image";
+    const graphRefs=asset?graphTextureReferences(doc.proceduralGraph,selected):[];
+    const referenced=refs.length+graphRefs.length>0;
+    relink.textContent=graphRefs.length?"Relink references":"Relink material references";
+    importButton.disabled=!available()||!!pending;replaceButton.disabled=!asset||!available()||!!pending;removeButton.disabled=!asset||!available()||!!pending||referenced;
+    removeButton.title=referenced?"Referenced textures must be relinked before deletion":"Delete this unreferenced image";
     details.hidden=!asset;
     if(asset){metadata.textContent=`${asset.name}\n${asset.width} × ${asset.height} · ${asset.mime.replace("image/","").toUpperCase()} · ${(asset.byteLength/1024).toFixed(1)} KiB · ${asset.alpha?"Has alpha":"Opaque"}\n${asset.id}`;role.value=asset.role;}
     role.disabled=!available()||!!pending;
-    references.textContent=`${refs.length} material reference${refs.length===1?"":"s"}${refs.length?": "+refs.map(r=>`${doc.nodes[r.shapeId].name} / ${r.slot}`).join(", "):""}`;
+    references.textContent=`${refs.length} material reference${refs.length===1?"":"s"}${refs.length?": "+refs.map(r=>`${doc.nodes[r.shapeId].name} / ${r.slot}`).join(", "):""}${graphRefs.length?` · ${graphRefs.length} texture graph ${graphRefs.length===1?"node":"nodes"}`:""}`;
     const previous=target.value;target.replaceChildren();for(const a of assets)if(a.id!==selected)target.add(new Option(a.name,a.id));if(Array.from(target.options).some(o=>o.value===previous))target.value=previous;
-    target.disabled=!available()||!!pending||!target.options.length;relink.disabled=target.disabled||!refs.length;
+    target.disabled=!available()||!!pending||!target.options.length;relink.disabled=target.disabled||!referenced;
     apply.disabled=!available();cancelButton.disabled=working;
   }
   store.subscribe(refresh);refresh();

@@ -1,3 +1,4 @@
+import { createProceduralGraphPanel } from "./procedural-graph-panel.ts";
 import { createTextureAssetsPanel } from "./texture-assets-panel.ts";
 import { collectEmbeddedTextures, validateTextureDecoding, type TextureAsset } from "./texture-assets.ts";
 import { meshToSplatData } from "./mesh-to-splats";
@@ -91,8 +92,11 @@ import { createSkinWeightsPanel } from "./skin-weights-panel.ts";
 import { createSkinWeightPreview } from "./skin-weight-preview.ts";
 import { createSplatComponentPanel } from "./splat-component-panel.ts";
 import { createSplatComponentPreview } from "./splat-component-preview.ts";
-import { combineSplatSelection, pickSplatComponents, readOriginalSplatPositions, splatSelectionOperation, splatHighlightIndices, SPLAT_SELECTION_LIMIT, type SplatSelectionDepth, type SplatSelectionIdentity } from "./splat-component-selection.ts";
-import { pickProjectedComponents } from "./component-picking.ts";
+import { combineSplatSelection, pickSplatComponents, pickSplatRegion, readOriginalSplatPositions, splatSelectionOperation, splatHighlightIndices, SPLAT_SELECTION_LIMIT, type SplatSelectionDepth, type SplatSelectionIdentity } from "./splat-component-selection.ts";
+import { commitSplatComponentEdit, splatRunCount, SPLAT_EDIT_LABELS, validateSplatComponentEdits, type SplatComponentEdits, type SplatEditAction } from "./splat-component-edits.ts";
+import { createSplatEditMask, editedSplatBounds, pickEditedSplats } from "./splat-component-runtime.ts";
+import { createSplatBrushStroke, createSplatGestureOverlay, createSplatLasso, MAX_SPLAT_BRUSH_RADIUS, splatBrushRegion, splatLassoRegion, type SplatBrushSettings, type SplatSelectionTool } from "./splat-selection-gestures.ts";
+import { pickProjectedComponents, type ComponentProjectionOptions } from "./component-picking.ts";
 import { createSkinWeightPaintPanel, type SkinWeightBrushSettings } from "./skin-weight-paint-panel.ts";
 import { createSkinWeightPaintTool } from "./skin-weight-paint-tool.ts";
 import { createMeshRenderable } from "./mesh-renderer.ts";
@@ -178,7 +182,10 @@ type RuntimeBase = {
   box: THREE.Box3Helper;
 };
 type RuntimeObject = RuntimeBase & (
-  | { kind: "splat"; mesh: SplatMesh; assetId: string }
+  | { kind: "splat"; mesh: SplatMesh; assetId: string; edits?: {
+      value: SplatComponentEdits; mask: ReturnType<typeof createSplatEditMask>;
+      active: (index: number) => boolean; bounds: THREE.Box3; hidden: number; deleted: number;
+    } }
   | { kind: "curve"; mesh: ReturnType<typeof createControllerRenderable>["mesh"]; controller: ReturnType<typeof createControllerRenderable>; shape: CurveShapeNode }
   | { kind: "mesh"; mesh: ReturnType<typeof createMeshRenderable>["mesh"]; polygon: ReturnType<typeof createMeshRenderable>; shape: MeshShapeNode }
   | { kind: "particle"; mesh: ReturnType<typeof createParticleRuntime>["mesh"]; particles: ReturnType<typeof createParticleRuntime>; shape: ParticleShapeNode }
@@ -292,6 +299,7 @@ async function start() {
   let paintSettings: SkinWeightBrushSettings | undefined;
   let modelingPanel: ReturnType<typeof createModelingPanel> | undefined;
   let texturePanel: ReturnType<typeof createTextureAssetsPanel> | undefined;
+  let graphPanel: ReturnType<typeof createProceduralGraphPanel> | undefined;
   let particlePanel: ReturnType<typeof createParticlePanel> | undefined;
   let particlePoseDoc: SceneDocument | undefined, particlePoseSampler: ReturnType<typeof createParticlePoseSampler> | undefined;
   let meshComponentRequest: { shapeId: string; mode: MeshComponentMode } | undefined;
@@ -312,6 +320,10 @@ async function start() {
   let componentPickShape: string | undefined, componentPickEpoch = 0, pendingComponentPick: number | undefined;
   let splatComponent: SplatSelectionIdentity | undefined, splatComponentIds: Uint32Array = new Uint32Array();
   let splatSelectionDepth: SplatSelectionDepth = "through";
+  let splatSelectionTool: SplatSelectionTool = "box";
+  let splatBrush: SplatBrushSettings = { radius: 32, spacing: 8, operation: "add" };
+  let splatBrushResizeHeld = false, previewSplatRadius: number | undefined;
+  const splatGestureOverlay = createSplatGestureOverlay(viewport);
   let splatPanel: ReturnType<typeof createSplatComponentPanel> | undefined;
   const splatPreview = createSplatComponentPreview();
   let splatPreviewPose = -1, splatPreviewIds: Uint32Array | undefined;
@@ -410,25 +422,70 @@ async function start() {
     if (object.kind !== "splat") return undefined;
     return [...bindings.values()].find(b=>b.mesh===object.mesh)?.skin.selection();
   }
+  function objectBounds(object: RuntimeObject) {
+    return object.kind === "splat" ? object.edits?.bounds ?? object.bounds : object.bounds;
+  }
   function splatContext() {
     const shape = splatComponent && store.getState().document.nodes[splatComponent.shapeId];
     const object = shape?.type === "splatShape" ? runtime.get(shape.parentId) : undefined;
     if (!splatComponent || shape?.type !== "splatShape" || shape.assetId !== splatComponent.assetId || object?.kind !== "splat") return;
     const binding = bindings.get(shape.id), source = object.mesh.extSplats ?? object.mesh.packedSplats;
     if (!source || (binding?.skin.componentCount ?? source.numSplats) !== splatComponent.count) return;
-    return { shape, object, count: splatComponent.count, getPositions(indices: number[]) {
-      if (!binding) return readOriginalSplatPositions(object.mesh, indices);
-      const positions = binding.skin.getComponentPositions(indices);
+    const hidden = object.edits?.hidden ?? 0, deleted = object.edits?.deleted ?? 0;
+    const active = object.edits?.active;
+    return { shape, object, count: splatComponent.count, activeCount: splatComponent.count - hidden - deleted, hidden, deleted, active,
+      getPositions(indices: number[]) {
+      if (binding) return binding.skin.getComponentPositions(indices);
+      if (!active) return readOriginalSplatPositions(object.mesh, indices);
+      const activeIndices = indices.filter(active);
+      const positions = new Float32Array(indices.length * 3).fill(NaN);
+      const evaluated = readOriginalSplatPositions(object.mesh, activeIndices);
+      let offset = 0;
       indices.forEach((index, output) => {
-        if (source.getSplat(index).opacity * object.mesh.opacity < object.mesh.minRaycastOpacity) positions.fill(NaN, output * 3, output * 3 + 3);
+        if (index === activeIndices[offset / 3]) {
+          positions[output * 3] = evaluated[offset++]; positions[output * 3 + 1] = evaluated[offset++]; positions[output * 3 + 2] = evaluated[offset++];
+        }
       });
       return positions;
     } };
   }
+  function applySplatComponentEdit(action: SplatEditAction) {
+    if (!splatComponent || loading || playing || dragId || pendingComponentPick !== undefined) return;
+    const context = splatContext(); if (!context) return;
+    try {
+      if (!commitSplatComponentEdit(store, splatComponent, action, splatComponentIds)) {
+        notice.textContent = action === "show" ? "No hidden splats to show." : action === "restore" ? "No deleted splats to restore." : "Select visible splats first.";
+        return;
+      }
+      notice.textContent = `${SPLAT_EDIT_LABELS[action]} applied to ${context.shape.name}.`;
+    } catch (error) { notice.textContent = (error as Error).message; }
+  }
   function refreshSplatPanel() {
     const context = splatContext();
-    for (const action of ["all", "none", "invert"]) element<WaDropdownItem>(`select-splats-${action}`).disabled = !context || loading || playing || !!dragId || pendingComponentPick !== undefined;
-    splatPanel?.update(context?.shape.name, splatComponentIds.length, context?.count ?? 0, pendingComponentPick !== undefined, !loading && !playing && !dragId);
+    const available = !loading && !playing && !dragId, busy = pendingComponentPick !== undefined;
+    const activeGesture = busy && gesture?.splat;
+    const activity = activeGesture ? (gesture?.splatPath?.tool === "resize" ? "Resizing brush…" : gesture?.splatPath?.tool === "paint" ? "Painting…" : "Drawing…")
+      : busy ? "Scanning…" : undefined;
+    for (const action of ["all", "none", "invert"]) element<WaDropdownItem>(`select-splats-${action}`).disabled = !context || !available || busy;
+    for (const action of ["hide", "show", "delete", "restore"] as const) {
+      const count = action === "show" ? context?.hidden : action === "restore" ? context?.deleted : splatComponentIds.length;
+      element<WaDropdownItem>(`edit-splats-${action}`).disabled = !context || !available || busy || !count;
+    }
+    splatPanel?.update(context?.shape.name, splatComponentIds.length, context?.activeCount ?? 0, activity, available,
+      splatSelectionTool, previewSplatRadius === undefined ? splatBrush : { ...splatBrush, radius: previewSplatRadius },
+      { hidden: context?.hidden ?? 0, deleted: context?.deleted ?? 0 });
+  }
+  function changeSplatTool(tool: SplatSelectionTool) {
+    if (splatSelectionTool === tool) return;
+    cancelComponentScan(); cancelSelection();
+    splatBrushResizeHeld = false;
+    splatSelectionTool = tool;
+    refreshSplatPanel();
+  }
+  function changeSplatBrush(change: Partial<SplatBrushSettings>) {
+    const radius = change.radius ?? splatBrush.radius;
+    splatBrush = { ...splatBrush, ...change, radius, spacing: Math.min(change.spacing ?? splatBrush.spacing, radius) };
+    refreshSplatPanel();
   }
   function updateSplatPreview() {
     const context = splatContext();
@@ -443,11 +500,12 @@ async function start() {
     let visible = !playing && !loading && gizmosVisible;
     for (let parent: THREE.Object3D | null = context.object.mesh; parent; parent = parent.parent) visible &&= parent.visible;
     splatPreview.points.visible = visible && splatComponentIds.length > 0;
-    selectionLabel.textContent = `${splatComponentIds.length.toLocaleString()} / ${context.count.toLocaleString()} splats selected${splatComponentIds.length > 20_000 ? " · 20,000 sampled highlights" : ""} · ${splatSelectionDepth === "through" ? "Through" : "Front centers"}`;
+    selectionLabel.textContent = `${splatComponentIds.length.toLocaleString()} / ${context.activeCount.toLocaleString()} splats selected${splatComponentIds.length > 20_000 ? " · 20,000 sampled highlights" : ""} · ${splatSelectionDepth === "through" ? "Through" : "Front centers"}`;
     refreshSplatPanel();
   }
   function exitSplatComponents() {
     if (!splatComponent) return;
+    cancelSelection(); splatBrushResizeHeld = false;
     splatComponent = undefined; splatComponentIds = new Uint32Array(); splatPreviewIds = undefined;
     cancelComponentScan(); splatPreview.clear(); webgl.domElement.style.cursor = "";
     refreshGizmo(); refreshSelection(); refreshSplatPanel();
@@ -468,27 +526,35 @@ async function start() {
   }
   function splatScanSnapshot() {
     const context = splatContext(); if (!context || playing || loading || dragId) return;
-    for (let parent: THREE.Object3D | null = context.object.mesh; parent; parent = parent.parent) if (!parent.visible) throw Error("The splat object is hidden.");
+    const visible = () => {
+      for (let parent: THREE.Object3D | null = context.object.mesh; parent; parent = parent.parent) if (!parent.visible) return false;
+      return true;
+    };
+    if (!visible()) throw Error("The splat object is hidden.");
     world.updateMatrixWorld(true); camera.updateWorldMatrix(true, false);
     const identity = splatComponent, doc = store.getState().document, pose = skinPoseVersion, cameraRef = camera;
     const rect = webgl.domElement.getBoundingClientRect(), cameraWorld = camera.matrixWorld.clone(), projection = camera.projectionMatrix.clone(), meshWorld = context.object.mesh.matrixWorld.clone();
     const epoch = ++componentPickEpoch; pendingComponentPick = epoch; refreshSplatPanel();
     const cancelled = () => {
+      if (epoch !== componentPickEpoch || splatComponent !== identity || doc !== store.getState().document || pose !== skinPoseVersion
+        || playing || loading || !!dragId || camera !== cameraRef || !visible()) return true;
+      camera.updateWorldMatrix(true, false);
+      context.object.mesh.updateWorldMatrix(true, false);
       const current = webgl.domElement.getBoundingClientRect();
-      return epoch !== componentPickEpoch || splatComponent !== identity || doc !== store.getState().document || pose !== skinPoseVersion
-        || playing || loading || !!dragId || camera !== cameraRef || !camera.matrixWorld.equals(cameraWorld) || !camera.projectionMatrix.equals(projection)
-        || !context.object.mesh.matrixWorld.equals(meshWorld) || !context.object.root.visible
-        || ["left", "top", "width", "height"].some(key => current[key as keyof DOMRect] !== rect[key as keyof DOMRect]);
+      return !camera.matrixWorld.equals(cameraWorld) || !camera.projectionMatrix.equals(projection) || !context.object.mesh.matrixWorld.equals(meshWorld)
+        || current.left !== rect.left || current.top !== rect.top || current.width !== rect.width || current.height !== rect.height;
     };
     return { context, rect, cameraRef, cameraWorld, projection, meshWorld, epoch, cancelled };
   }
   async function selectSplatComponents(action: "all" | "none" | "invert") {
-    cancelComponentScan();
+    cancelComponentScan(); cancelSelection();
     if (action === "none") { splatComponentIds = new Uint32Array(); updateSplatPreview(); return; }
     let scan: ReturnType<typeof splatScanSnapshot>;
     try {
       scan = splatScanSnapshot(); if (!scan) return;
-      const { context, cancelled } = scan, previous = splatComponentIds, hits = new Uint32Array(Math.min(context.count, SPLAT_SELECTION_LIMIT));
+      const { context, cancelled } = scan, previous = splatComponentIds;
+      if (!context.activeCount) { splatComponentIds = new Uint32Array(); updateSplatPreview(); return; }
+      const hits = new Uint32Array(Math.min(context.activeCount, SPLAT_SELECTION_LIMIT));
       let previousOffset = 0, hitCount = 0;
       notice.textContent = "Selecting original splats… Esc cancels.";
       for (let start = 0; start < context.count; start += 4096) {
@@ -524,11 +590,29 @@ async function start() {
         entry.skin.dispose(); bindings.delete(id);
       }
     }
-    for (const shape of shapes) if (shape.binding) {
+    for (const shape of shapes) {
       const object = runtime.get(shape.parentId);
       if (!object || object.kind !== "splat") continue;
+      if (object.edits?.value !== shape.componentEdits) {
+        if (!shape.componentEdits) { object.edits?.mask.dispose(); object.edits = undefined; }
+        else {
+          const value = shape.componentEdits, mask = object.edits?.mask ?? createSplatEditMask(object.mesh, value);
+          if (object.edits) mask.update(value);
+          // Publish a new predicate identity so bindings invalidate cached CPU geometry
+          // and recompute authored elastic fill even when the pose did not change.
+          const active = (index: number) => mask.isActive(index);
+          object.edits = { value, mask, active, hidden: splatRunCount(value.hidden), deleted: splatRunCount(value.deleted),
+            bounds: editedSplatBounds(object.mesh, index => index < object.count && active(index)) };
+          if (splatComponent?.shapeId === shape.id) splatComponentIds = splatComponentIds.filter(active);
+        }
+      }
+      // Both authored masks and generated elastic IDs refer to original-index storage.
+      object.mesh.enableLod = object.edits || shape.elasticity ? false : undefined;
+      if (!shape.binding) continue;
       if (!bindings.has(shape.id)) bindings.set(shape.id, {binding:shape.binding,elasticity:shape.elasticity,structure:jointStructure,mesh:object.mesh,skin:createBinding(object.mesh,shape.binding,shape.elasticity,doc.joints)});
-      bindings.get(shape.id)!.skin.update(id => skeleton.boneMatrix(id));
+      const skin = bindings.get(shape.id)!.skin;
+      skin.setComponentActive(object.edits?.active);
+      skin.update(id => skeleton.boneMatrix(id));
     }
     updateWeightPreview();
     skinPaintTool?.refresh();
@@ -597,7 +681,7 @@ async function start() {
     (event) => {
       // TransformControls suppresses native focus changes. Commit field drafts before a drag makes their panel busy.
       const focused = document.activeElement;
-      if (focused instanceof HTMLElement && focused.closest(".ik-panel, .modeling-panel")) {
+      if (focused instanceof HTMLElement && focused.closest(".ik-panel, .modeling-panel, .splat-component-panel")) {
         focused.blur();
         transform.getHelper().updateMatrixWorld(true);
       }
@@ -754,6 +838,7 @@ async function start() {
   function choose(mode: Mode) {
     if (dragId) return;
     if ((splatComponent || componentPickShape || paintSettings) && mode !== "select") { notice.textContent = "Return to Object mode before transforming an object."; return; }
+    if (splatComponent && mode === "select") changeSplatTool("box");
     currentMode = mode;
     refreshGizmo();
     toolbar
@@ -1035,7 +1120,8 @@ async function start() {
     const count = nodes.reduce(
       (sum, node) => {
         const object = runtime.get(node.id);
-        return sum + (object?.kind === "splat" ? object.mesh.extSplats?.numSplats ?? object.count : 0);
+        return sum + (object?.kind === "splat" ? (object.mesh.extSplats?.numSplats ?? object.count)
+          - (object.edits?.hidden ?? 0) - (object.edits?.deleted ?? 0) : 0);
       },
       0,
     );
@@ -1048,7 +1134,7 @@ async function start() {
     play.disabled =
       rewind.disabled =
       timeline.disabled =
-        loading || (nodes.length === 0 && !doc.joints?.length);
+        loading || (nodes.length === 0 && !doc.joints?.length && !doc.proceduralGraph);
     refreshSelection();
     updateTime(false);
   }
@@ -1059,6 +1145,7 @@ async function start() {
     element("outliner-panel").inert = loading;
     timelinePanel?.refresh();
     texturePanel?.refresh();
+    graphPanel?.refresh();
     const history = store.temporal.getState();
     ikBakePanel?.refresh();
     jointSettingsPanel?.refresh();
@@ -1334,7 +1421,8 @@ async function start() {
   });
   workspace.registerPanel("modeling", "Mesh Tools", modelingPanel.element);
   splatPanel = createSplatComponentPanel({ enter: enterSplatComponents, exit: exitSplatComponents, select: action => void selectSplatComponents(action),
-    depth: value => { cancelComponentScan(); splatSelectionDepth = value; updateSplatPreview(); }, cancel: () => { cancelComponentScan(); cancelSelection(); } });
+    depth: value => { cancelComponentScan(); cancelSelection(); splatSelectionDepth = value; updateSplatPreview(); },
+    cancel: () => { cancelComponentScan(); cancelSelection(); }, tool: changeSplatTool, brush: changeSplatBrush, edit: applySplatComponentEdit });
   workspace.registerPanel("splat-components", "Splat Components", splatPanel.element);
   element("select-splat-components").addEventListener("click", () => { element("view-splat-components").click(); enterSplatComponents(); });
   element("select-object-mode").addEventListener("click", exitSplatComponents);
@@ -1352,6 +1440,14 @@ async function start() {
   workspace.registerPanel("particles", "Particle Emitters", particlePanel.element);
   texturePanel = createTextureAssetsPanel(store, { available: () => !loading && !dragId && !playing, onStatus: message => { notice.textContent = message; } });
   workspace.registerPanel("texture-assets", "Texture Assets", texturePanel.element);
+  graphPanel = createProceduralGraphPanel(store, {
+    available: () => !loading && !dragId && !playing,
+    time: () => ({
+      frame: timelinePanel?.turntable ? animationSettings().start : Math.round(getFrame()),
+      fps: animationSettings().fps,
+    }),
+  });
+  workspace.registerPanel("texture-graph", "Texture Graph", graphPanel.element);
   element("texture-import").addEventListener("click", () => { element("view-texture-assets").click(); texturePanel?.open(); });
   for (const control of new Set([...Array.from(document.querySelectorAll<WaButton>("[data-rig-action='Paint weights']")),
     ...Array.from(riggingPanel.querySelectorAll<WaButton>("[data-rig-action='Paint weights']"))])) {
@@ -1371,6 +1467,11 @@ async function start() {
   element("edit-menu").addEventListener("wa-select", (event) => {
     const id = (event as WaSelectEvent).detail.item.id;
     if (id === "undo" || id === "redo") historyAction(id === "redo");
+    else if (id === "edit-splats-delete" || id === "edit-splats-restore") applySplatComponentEdit(id === "edit-splats-delete" ? "delete" : "restore");
+  });
+  element("display-menu").addEventListener("wa-select", (event) => {
+    const id = (event as WaSelectEvent).detail.item.id;
+    if (id === "edit-splats-hide" || id === "edit-splats-show") applySplatComponentEdit(id === "edit-splats-hide" ? "hide" : "show");
   });
   transform.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value;
@@ -1596,7 +1697,7 @@ async function start() {
       const object = runtime.get(id);
       if (object)
         bounds.union(
-          (boundSelection(object)?.bounds??object.bounds).clone().applyMatrix4(object.mesh.matrixWorld),
+          (boundSelection(object)?.bounds ?? objectBounds(object)).clone().applyMatrix4(object.mesh.matrixWorld),
         );
     }
     if (bounds.isEmpty()) return;
@@ -1638,14 +1739,39 @@ async function start() {
   viewport.append(marquee);
   const raycaster = new THREE.Raycaster(),
     projected = new THREE.Vector3();
+  type SplatPointerPath =
+    | { tool: "lasso"; trace: ReturnType<typeof createSplatLasso> }
+    | { tool: "paint"; trace: ReturnType<typeof createSplatBrushStroke>; brush: SplatBrushSettings }
+    | { tool: "resize"; radius: number };
   let gesture:
     { x: number; y: number; id: number; additive: boolean; subtract: boolean; component?: string; splat?: NonNullable<ReturnType<typeof splatScanSnapshot>>;
+      splatPath?: SplatPointerPath;
       mesh?: { request: NonNullable<typeof meshComponentRequest>; document: SceneDocument; poseVersion: number;
         camera: THREE.Camera; world: THREE.Matrix4; projection: THREE.Matrix4; rect: DOMRect } } | undefined;
   function cancelSelection() {
+    const captured = gesture;
     gesture = undefined;
     marquee.hidden = true;
+    splatGestureOverlay.clear();
+    previewSplatRadius = undefined;
+    if (captured?.splat) refreshSplatPanel();
+    if (captured?.splat && webgl.domElement.hasPointerCapture(captured.id)) webgl.domElement.releasePointerCapture(captured.id);
     controls.enabled = !transform.dragging;
+  }
+  const splatPointer = (event: PointerEvent, rect: DOMRect) => ({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  const splatResizeRadius = (radius: number, delta: number) => THREE.MathUtils.clamp(Math.round(radius + delta), 1, MAX_SPLAT_BRUSH_RADIUS);
+  function cancelInvalidSplatGesture() {
+    const scan = gesture?.splat;
+    if (!scan?.cancelled()) return false;
+    if (pendingComponentPick === scan.epoch) cancelComponentScan("Selection canceled because the scene or view changed.");
+    cancelSelection();
+    return true;
+  }
+  function moveSplatBrushCursor(event: PointerEvent, radius = previewSplatRadius ?? splatBrush.radius) {
+    if (!splatComponent || splatSelectionTool !== "paint" || playing || loading || dragId || event.altKey || event.pointerType === "touch") {
+      splatGestureOverlay.hideCursor(); return;
+    }
+    splatGestureOverlay.showCursor(event.clientX, event.clientY, radius);
   }
   function pickPolygonComponents(start: NonNullable<typeof gesture>, event: PointerEvent) {
     const snapshot = start.mesh!;
@@ -1718,15 +1844,30 @@ async function start() {
   async function pickOriginalSplats(start: NonNullable<typeof gesture>, event: PointerEvent) {
     const scan = start.splat!;
     if (scan.cancelled()) { if (pendingComponentPick === scan.epoch) cancelComponentScan("Selection canceled because the scene or view changed."); return; }
-    notice.textContent = "Selecting original splats… Esc cancels.";
     try {
-      const hits = await pickSplatComponents({ componentCount: scan.context.count,
+      const options: ComponentProjectionOptions & { depth: SplatSelectionDepth } = { componentCount: scan.context.count,
         readPositions: (offset, count) => scan.context.getPositions(Array.from({ length: count }, (_, index) => offset + index)),
         matrixWorld: scan.meshWorld, camera: scan.cameraRef, width: scan.rect.width, height: scan.rect.height,
-        start: { x: start.x - scan.rect.left, y: start.y - scan.rect.top }, end: { x: event.clientX - scan.rect.left, y: event.clientY - scan.rect.top },
-        depth: splatSelectionDepth, cancelled: scan.cancelled });
+        depth: splatSelectionDepth, cancelled: scan.cancelled };
+      const end = splatPointer(event, scan.rect), path = start.splatPath;
+      let operation = splatSelectionOperation(start.additive, start.subtract);
+      let hits: Uint32Array;
+      notice.textContent = "Selecting original splats… Esc cancels.";
+      if (path?.tool === "lasso") {
+        path.trace.add(end);
+        const region = splatLassoRegion(path.trace.points);
+        if (!region) { notice.textContent = "Draw a closed lasso around splat centers."; return; }
+        hits = await pickSplatRegion(options, region);
+      } else if (path?.tool === "paint") {
+        path.trace.finish(end);
+        if (!start.additive && !start.subtract) operation = path.brush.operation;
+        hits = await pickSplatRegion(options, splatBrushRegion(path.trace.points, path.brush.radius));
+      } else {
+        hits = await pickSplatComponents({ ...options,
+          start: { x: start.x - scan.rect.left, y: start.y - scan.rect.top }, end });
+      }
       if (scan.cancelled()) throw new DOMException("Selection canceled because the scene or view changed.", "AbortError");
-      splatComponentIds = combineSplatSelection(splatComponentIds, hits, splatSelectionOperation(start.additive, start.subtract), scan.context.count);
+      splatComponentIds = combineSplatSelection(splatComponentIds, hits, operation, scan.context.count);
       updateSplatPreview(); notice.textContent = `${splatComponentIds.length.toLocaleString()} original splats selected.`;
     } catch (error) { if (componentPickEpoch === scan.epoch) notice.textContent = (error as Error).message; }
     finally { if (pendingComponentPick === scan.epoch) pendingComponentPick = undefined; refreshSplatPanel(); }
@@ -1746,8 +1887,11 @@ async function start() {
       event.pointerType === "touch" ||
       loading ||
       transform.dragging
-    )
+    ) {
+      if (gesture?.splat && (event.altKey || event.pointerType === "touch")) { cancelComponentScan(); cancelSelection(); }
       return;
+    }
+    if (gesture?.splat) return;
     cancelComponentScan();
     camera.updateMatrixWorld(true);
     gesture = {
@@ -1763,13 +1907,51 @@ async function start() {
         rect: webgl.domElement.getBoundingClientRect() } : undefined,
     };
     if (splatComponent && !gesture.splat) { cancelSelection(); return; }
+    if (gesture.splat && splatSelectionTool !== "box") {
+      const rect = gesture.splat.rect, start = splatPointer(event, rect);
+      try {
+        if (splatSelectionTool === "lasso") {
+          const trace = createSplatLasso(start);
+          gesture.splatPath = { tool: "lasso", trace };
+          splatGestureOverlay.begin(rect); splatGestureOverlay.lasso(trace.points);
+        } else if (splatBrushResizeHeld) {
+          if (splatPanel?.radiusLocked()) throw Error("Unlock Brush Radius before resizing.");
+          gesture.splatPath = { tool: "resize", radius: splatBrush.radius };
+          moveSplatBrushCursor(event);
+        } else {
+          const brush = splatBrush, trace = createSplatBrushStroke(start, brush.radius, brush.spacing);
+          gesture.splatPath = { tool: "paint", trace, brush };
+          splatGestureOverlay.begin(rect); splatGestureOverlay.paint(trace.points, brush.radius);
+          moveSplatBrushCursor(event, brush.radius);
+        }
+      } catch (error) { cancelComponentScan((error as Error).message); cancelSelection(); return; }
+    }
     webgl.domElement.setPointerCapture(event.pointerId);
+    if (gesture.splat) refreshSplatPanel();
   });
   webgl.domElement.addEventListener("pointermove", (event) => {
+    moveSplatBrushCursor(event);
     if (!gesture || gesture.id !== event.pointerId) return;
     if (event.altKey) {
       cancelComponentScan();
       cancelSelection();
+      return;
+    }
+    if (cancelInvalidSplatGesture()) return;
+    const path = gesture.splatPath;
+    if (path && gesture.splat) {
+      if (path.tool === "resize") {
+        previewSplatRadius = splatResizeRadius(path.radius, event.clientX - gesture.x);
+        moveSplatBrushCursor(event, previewSplatRadius);
+        refreshSplatPanel(); return;
+      }
+      try {
+        const rect = gesture.splat.rect;
+        for (const sample of event.getCoalescedEvents?.() ?? []) path.trace.add(splatPointer(sample, rect));
+        path.trace.add(splatPointer(event, rect));
+        if (path.tool === "lasso") splatGestureOverlay.lasso(path.trace.points);
+        else splatGestureOverlay.paint(path.trace.points, path.brush.radius);
+      } catch (error) { cancelComponentScan((error as Error).message); cancelSelection(); }
       return;
     }
     const rect = viewport.getBoundingClientRect();
@@ -1787,7 +1969,15 @@ async function start() {
     if (!gesture || gesture.id !== event.pointerId) return;
     const start = gesture;
     cancelSelection();
-    if (event.altKey) return;
+    if (event.altKey) { if (start.splat) cancelComponentScan(); return; }
+    if (start.splat && start.splatPath?.tool === "resize") {
+      if (start.splat.cancelled()) { cancelComponentScan("Selection canceled because the scene or view changed."); return; }
+      pendingComponentPick = undefined;
+      changeSplatBrush({ radius: splatResizeRadius(start.splatPath.radius, event.clientX - start.x) });
+      moveSplatBrushCursor(event);
+      return;
+    }
+    if (start.splatPath?.tool === "paint") moveSplatBrushCursor(event);
     if (start.splat) { void pickOriginalSplats(start, event); return; }
     if (start.mesh) { pickPolygonComponents(start, event); return; }
     if (start.component) { void pickSkinComponents(start, event); return; }
@@ -1822,7 +2012,11 @@ async function start() {
         .map(({ id, object }) => ({ id, distance: raycaster.intersectObject(object.mesh, false)[0]?.distance ?? Infinity }))
         .filter(hit => Number.isFinite(hit.distance)).sort((a, b) => a.distance - b.distance)[0] : undefined;
       if (emitterHit) { selectObjects([emitterHit.id], start.additive); return; }
-      const hits=objects.filter(({object})=>object.kind!=="particle").map(({id,object})=>({id,distance:boundSelection(object)?.pick(raycaster)??raycaster.intersectObject(object.mesh,false)[0]?.distance??Infinity})).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
+      const hits=objects.filter(({object})=>object.kind!=="particle").map(({id,object})=>({
+        id, distance: boundSelection(object)?.pick(raycaster)
+          ?? (object.kind === "splat" && object.edits ? pickEditedSplats(object.mesh, object.edits.active, raycaster)
+            : raycaster.intersectObject(object.mesh,false)[0]?.distance ?? Infinity),
+      })).filter(h=>Number.isFinite(h.distance)).sort((a,b)=>a.distance-b.distance);
       const hit=hits[0];
       selectObjects(hit ? [hit.id] : [], start.additive);
     } else {
@@ -1832,6 +2026,7 @@ async function start() {
       for (const { id, object } of objects) {
         const centers=boundSelection(object)?.centers??object.centers;
         for (let i = 0; i < centers.length; i += 3) {
+          if (object.kind === "splat" && object.edits && !object.edits.active(i / 3)) continue;
           projected
             .fromArray(centers, i)
             .applyMatrix4(object.mesh.matrixWorld)
@@ -1859,9 +2054,15 @@ async function start() {
     abortDrag();
     cancelSelection();
   });
-  webgl.domElement.addEventListener("lostpointercapture", () => { if (gesture?.component || gesture?.splat) cancelComponentScan(); cancelSelection(); });
+  webgl.domElement.addEventListener("lostpointercapture", event => {
+    if (gesture?.id !== event.pointerId) return;
+    if (gesture.component || gesture.splat) cancelComponentScan();
+    cancelSelection();
+  });
+  webgl.domElement.addEventListener("pointerleave", () => splatGestureOverlay.hideCursor());
   window.addEventListener("blur", () => {
     pivotHeld = false;
+    splatBrushResizeHeld = false;
     ikPanel?.cancelPreview();
     cancelComponentScan();
     abortDrag();
@@ -1869,6 +2070,7 @@ async function start() {
   });
   window.addEventListener("keyup", (event) => {
     if (event.key.toLowerCase() === "d") { pivotHeld = false; if (!dragId) { refreshGizmo(); updatePivotMarker(); } }
+    if (event.key.toLowerCase() === "b") splatBrushResizeHeld = false;
     if (event.key === "Alt" && !dragId) refreshGizmo();
   });
   // A long scan must remain cancellable even if focus moves into an editor field.
@@ -1892,7 +2094,8 @@ async function start() {
     }
     if (
       element<WaDropdown>("file-menu").open ||
-      element<WaDropdown>("edit-menu").open
+      element<WaDropdown>("edit-menu").open ||
+      element<WaDropdown>("display-menu").open
     )
       return;
     const key = event.key.toLowerCase();
@@ -1909,8 +2112,15 @@ async function start() {
     if (key === "f8" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat) {
       event.preventDefault(); if (splatComponent) exitSplatComponents(); else { element("view-splat-components").click(); enterSplatComponents(); } return;
     }
-    if (splatComponent && ["delete", "backspace", "s"].includes(key) && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault(); notice.textContent = "Return to Object mode before deleting or keying objects."; return;
+    if (key === "b" && splatComponent && splatSelectionTool === "paint" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault(); splatBrushResizeHeld = true; return;
+    }
+    if (splatComponent && ["delete", "backspace", "h", "s"].includes(key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      if (event.repeat) return;
+      if (key === "s") notice.textContent = "Return to Object mode before keying objects.";
+      else applySplatComponentEdit(key === "h" ? (event.shiftKey ? "show" : "hide") : "delete");
+      return;
     }
     if (meshComponentRequest && ["delete", "backspace"].includes(key)) {
       event.preventDefault();
@@ -1978,6 +2188,7 @@ async function start() {
       if (!timelinePanel?.turntable && getFrame() >= settings.end) time = settings.start / settings.fps;
     }
     playing = value;
+    graphPanel?.refresh();
     updateSplatPreview();
     buttonContent(play, value ? "pause" : "play");
     const label = value ? "Pause animation" : "Play animation";
@@ -2049,6 +2260,7 @@ async function start() {
     timelinePanel?.refresh();
     const turntable = timelinePanel?.turntable;
     timeline.value = turntable ? time : getFrame();
+    graphPanel?.refresh();
     element<HTMLOutputElement>("time").value = turntable ? `${time.toFixed(2)} / 12.00s` : `${Math.round(getFrame())} / ${animationSettings().end}`;
     updatePanel();
     animationEditors?.refresh();
@@ -2103,7 +2315,7 @@ async function start() {
     if (object.kind === "curve") object.controller.dispose();
     else if (object.kind === "mesh") object.polygon.dispose();
     else if (object.kind === "particle") object.particles.dispose();
-    else object.mesh.dispose();
+    else { object.edits?.mask.dispose(); object.mesh.dispose(); }
   }
   function replaceScene(
     doc: SceneDocument,
@@ -2240,6 +2452,7 @@ async function start() {
               });
         try {
           const data = await prepareSplat(mesh);
+          if (shape.componentEdits) validateSplatComponentEdits(shape.componentEdits, data.count);
           if (shape.binding) validateSkinWeightCount(shape.binding, mesh.numSplats);
           const root = new THREE.Group(),
             preview = new THREE.Group(),
@@ -2589,6 +2802,7 @@ async function start() {
       updateTime();
     }
     controls.update();
+    cancelInvalidSplatGesture();
     updatePivotMarker();
     const cameraDistance = camera.position.distanceTo(controls.target);
     const far = Math.max(1000, cameraDistance * 100);
@@ -2605,10 +2819,11 @@ async function start() {
       if (object) {
         object.mesh.updateWorldMatrix(true, false);
         const skin = playing ? [...bindings.values()].find(b => b.mesh === object.mesh)?.skin : undefined;
+        const bounds = objectBounds(object);
         object.box.box
-          .copy(skin ? skin.conservativeBounds(object.bounds) : boundSelection(object)?.bounds ?? object.bounds)
+          .copy(skin ? skin.conservativeBounds(bounds) : boundSelection(object)?.bounds ?? bounds)
           .applyMatrix4(object.mesh.matrixWorld);
-        object.box.visible = gizmosVisible && object.root.visible;
+        object.box.visible = gizmosVisible && object.root.visible && !object.box.box.isEmpty();
       }
     }
     updateSplatPreview();

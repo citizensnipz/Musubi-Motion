@@ -20,6 +20,7 @@ export type SkinInfluence = { jointId: string; weight: number };
 export type SkinWeights = { count: number; overrides: Record<string, SkinInfluence[]> };
 export type SkinBinding = { meshSpace?: boolean; jointIds: string[]; restMatrices: number[][]; weights?: SkinWeights };
 export type SplatShapeNode = {
+  componentEdits?: import("./splat-component-edits.ts").SplatComponentEdits;
   elasticity?: import("./elasticity").Elasticity;
   binding?: SkinBinding;
   id: string;
@@ -66,6 +67,7 @@ export type AssetRecord = { id: string } & (
 );
 export type SceneDocument = {
   textureAssets?: Record<string, import("./texture-assets.ts").TextureAsset>;
+  proceduralGraph?: import("./procedural-graph.ts").ProceduralGraph;
   animation?: import("./animation.ts").AnimationData;
   drivenKeys?: import("./driven-keys.ts").DrivenKeyRelationship[];
   ikHandles?: import("./ik.ts").IKHandle[];

@@ -1,5 +1,5 @@
 import type { SplatMesh } from "@sparkjsdev/spark";
-import { scanProjectedComponents, type ComponentPickOptions } from "./component-picking.ts";
+import { scanProjectedComponents, type ComponentPickOptions, type ComponentPickPoint, type ComponentProjectionOptions } from "./component-picking.ts";
 
 export const SPLAT_SELECTION_LIMIT = 1_000_000;
 export const SPLAT_HIGHLIGHT_LIMIT = 20_000;
@@ -7,6 +7,7 @@ export type SplatSelectionIndices = readonly number[] | Uint32Array;
 export type SplatSelectionOperation = "replace" | "add" | "subtract" | "toggle";
 export type SplatSelectionIdentity = { shapeId: string; assetId: string; count: number };
 export type SplatSelectionDepth = "through" | "front-centers";
+export type SplatSelectionRegion = (x: number, y: number) => boolean;
 
 /** Stable source indices only. Never persist renderer order, LoD or elastic fill IDs. */
 export function combineSplatSelection(current: SplatSelectionIndices, hits: SplatSelectionIndices, operation: SplatSelectionOperation, count: number): Uint32Array {
@@ -63,14 +64,20 @@ export async function pickSplatComponents(options: ComponentPickOptions & { dept
   if (![sx, sy, ex, ey].every(Number.isFinite)) throw Error("Selection coordinates must be finite.");
   const click = Math.hypot(ex - sx, ey - sy) < 4;
   const left = Math.min(sx, ex), right = Math.max(sx, ex), top = Math.min(sy, ey), bottom = Math.max(sy, ey);
+  return pickSplatRegion(options, click ? (x, y) => (x - ex) ** 2 + (y - ey) ** 2 <= 64
+    : (x, y) => x >= left && x <= right && y >= top && y <= bottom, click ? options.end : undefined);
+}
+
+/** Shared stable-ID hit scan for click, box, lasso, and brush regions. */
+export async function pickSplatRegion(options: ComponentProjectionOptions & { depth: SplatSelectionDepth }, contains: SplatSelectionRegion, click?: ComponentPickPoint): Promise<Uint32Array> {
   let nearest = -1, distance = Infinity, depth = Infinity;
   const hits = new Uint32Array(click ? 0 : Math.min(options.componentCount, SPLAT_SELECTION_LIMIT)); let hitCount = 0; const cells = new Map<number, { index: number; depth: number; distance: number }>();
   // Bound memory independently of scene size and display resolution.
   const columns = Math.ceil(options.width / 4) + 1, rows = Math.ceil(options.height / 4) + 1;
   if (options.depth === "front-centers" && columns * rows > 2_000_000) throw Error("Front-center selection supports up to 2,000,000 screen cells. Reduce the viewport size or use Through.");
   await scanProjectedComponents(options, (index, x, y, z) => {
-    const d = (x - ex) ** 2 + (y - ey) ** 2;
-    if (click ? d > 64 : x < left || x > right || y < top || y > bottom) return;
+    if (!contains(x, y)) return;
+    const d = click ? (x - click.x) ** 2 + (y - click.y) ** 2 : 0;
     if (options.depth === "front-centers") {
       const key = Math.floor(y / 4) * columns + Math.floor(x / 4), previous = cells.get(key);
       if (!previous || z < previous.depth || (z === previous.depth && index < previous.index)) cells.set(key, { index, depth: z, distance: d });

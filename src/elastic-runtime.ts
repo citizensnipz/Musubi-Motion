@@ -70,6 +70,7 @@ export function createElasticRuntime(mesh:SplatMesh,skin:SplatSkinning,rests:THR
     }
   }
   let last="";
+  let active: ((index:number)=>boolean) | undefined;
   function upload(n:number) {
     source.numSplats=n;
     source.initialize({extArrays:source.extArrays,numSplats:n,extra:source.extra,lodSplats:source.lodSplats});
@@ -77,6 +78,10 @@ export function createElasticRuntime(mesh:SplatMesh,skin:SplatSkinning,rests:THR
     mesh.updateGenerator();skin.skinTexture.needsUpdate=true;mesh.needsUpdate=true;
   }
   return {
+    setComponentActive(next:typeof active) {
+      if (active === next) return;
+      active=next;last="";
+    },
     update(current:THREE.Matrix4[]) {
       // Bending can open gaps without changing the length of a joint connection.
       const transforms=current.map((m,i)=>m.clone().multiply(inverseRests[i]));
@@ -88,6 +93,7 @@ export function createElasticRuntime(mesh:SplatMesh,skin:SplatSkinning,rests:THR
       const density=settings.density??1;
       const requests:FillRequest[]=[];
       for(const [a,b] of edges) {
+        if (active && (!active(a) || !active(b))) continue;
         const delta=originals[b].center.clone().sub(originals[a].center),restLength=delta.length();
         const ratio=deformed[a].distanceTo(deformed[b])/restLength;
         for(const i of [a,b]) {
@@ -100,6 +106,7 @@ export function createElasticRuntime(mesh:SplatMesh,skin:SplatSkinning,rests:THR
       // Edge subdivision alone leaves holes under expansion in two directions.
       for(const ids of triangles) {
         const [a,b,c]=ids;
+        if (active && (!active(a) || !active(b) || !active(c))) continue;
         const restArea=originals[b].center.clone().sub(originals[a].center).cross(originals[c].center.clone().sub(originals[a].center)).length();
         if(restArea<1e-12)continue;
         const area=deformed[b].clone().sub(deformed[a]).cross(deformed[c].clone().sub(deformed[a])).length();
